@@ -279,7 +279,7 @@ private:
 // (2b) The string for the token that was parsed.
 class ParseResult {
 public:
-  ParseResult() : ruleID_(0), astNode_(nullptr) { }
+  ParseResult() : ruleID_(0), astNode_(nullptr), tokenStr_("", 0) { }
   ParseResult(const ParseResult& r) = delete;
   ParseResult(ParseResult &&r)
       : ruleID_(r.ruleID_), astNode_(r.astNode_), tokenStr_(r.tokenStr_) {
@@ -289,7 +289,7 @@ public:
      : ruleID_(0), astNode_(nullptr), tokenStr_(tok.getString())
   { }
   ParseResult(unsigned rid, void* ptr)
-     : ruleID_(rid), astNode_(ptr)
+     : ruleID_(rid), astNode_(ptr), tokenStr_("", 0)
   { }
 
   void operator=(const ParseResult &f) = delete;

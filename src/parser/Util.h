@@ -135,6 +135,13 @@ inline StringRef copyStringRef(char* mem, StringRef s) {
 }
 
 
+std::ostream& operator<<(std::ostream& ss, const StringRef& str) {
+  ss << str.c_str();
+  return ss;
+}
+
+
+
 class PointerHash {
 public:
   unsigned operator()(void* ptr) const {
