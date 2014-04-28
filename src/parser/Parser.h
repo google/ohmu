@@ -24,14 +24,14 @@
 #ifndef OHMU_PARSER_H
 #define OHMU_PARSER_H
 
-#include <ostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <utility>
-
 #include "Lexer.h"
 
+#include <ostream>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace ohmu {
 
@@ -275,40 +275,121 @@ private:
 
 // Every parse rule returns a ParseResult, which consists of:
 // (1) The id of the named, top-level rule that created the result.
-// (2a) A pointer to the AST node created by parsing, OR
-// (2b) The string for the token that was parsed.
+// (2) One of the following:
+//   (a) A token string, for simple tokens.
+//   (b) A unique pointer to the AST Node created for this result.
+//   (c) A unique list (std::vector) of AST nodes for this result.
 class ParseResult {
 public:
-  ParseResult() : ruleID_(0), astNode_(nullptr), tokenStr_("", 0) { }
-  ParseResult(const ParseResult& r) = delete;
-  ParseResult(ParseResult &&r)
-      : ruleID_(r.ruleID_), astNode_(r.astNode_), tokenStr_(r.tokenStr_) {
-    r.astNode_ = 0;
+  typedef std::vector<void*> ListType;
+
+  enum ResultKind {
+    PRK_None = 0,
+    PRK_TokenStr = 1,
+    PRK_ASTNode = 2,
+    PRK_ASTNodeList = 3
+  };
+
+  ParseResult()
+      : ruleID_(0), resultKind_(PRK_None) {
+    result_.set();
   }
   ParseResult(const Token& tok)
-     : ruleID_(0), astNode_(nullptr), tokenStr_(tok.getString())
-  { }
-  ParseResult(unsigned rid, void* ptr)
-     : ruleID_(rid), astNode_(ptr), tokenStr_("", 0)
-  { }
+      : ruleID_(0), resultKind_(PRK_TokenStr) {
+    result_.set(tok.c_str(), tok.length());
+  }
+  ParseResult(void* p)
+      : ruleID_(0), resultKind_(PRK_ASTNode) {
+    result_.set(p);
+  }
+  ParseResult(ListType *pl)
+      : ruleID_(0), resultKind_(PRK_ASTNodeList) {
+    result_.set(pl);
+  }
+  ~ParseResult() {
+    // All ParseResults must be used.
+    assert(resultKind_ == PRK_None);
+  }
 
-  void operator=(const ParseResult &f) = delete;
+  ParseResult(ParseResult &&r)
+      : ruleID_(r.ruleID_),
+        resultKind_(r.resultKind_),
+        result_(r.result_) {
+    r.release();
+  }
 
   void operator=(ParseResult &&r) {
     ruleID_ = r.ruleID_;
-    astNode_ = r.astNode_;
-    tokenStr_ = r.tokenStr_;
-    r.astNode_ = 0;
+    resultKind_ = r.resultKind_;
+    result_ = r.result_;
+    r.release();
   }
 
-  unsigned   ruleID()   { return ruleID_;  }
-  void*      astNode()  { return astNode_; }
-  StringRef& tokenStr() { return tokenStr_; }
+  ResultKind kind() const { return resultKind_; }
+
+  unsigned ruleID() const { return ruleID_; }
+  void setRuleID(unsigned id) { ruleID_ = id; }
+
+  inline bool isUnique() const { return resultKind_ > PRK_TokenStr; }
+
+  StringRef tokenStr() {
+    assert(resultKind_ == PRK_TokenStr);
+    return result_.string();
+  }
+
+  // Return the AST node, and release ownership.
+  void* getASTNode() {
+    assert(resultKind_ = PRK_ASTNode);
+    void * p = result_.astNode_;
+    release();
+    return p;
+  }
+
+  // Return the AST node list, and release ownership.
+  std::unique_ptr<ListType> getASTNodeList() {
+    assert(resultKind_ = PRK_ASTNodeList);
+    ListType* pl = result_.astNodeList_;
+    release();
+    return std::unique_ptr<ListType>(pl);
+  }
 
 private:
-  unsigned  ruleID_;
-  void*     astNode_;
-  StringRef tokenStr_;
+  ParseResult(const ParseResult& r) = delete;
+  void operator=(const ParseResult &f) = delete;
+
+  inline void release() {  // release ownership of any data
+    if (isUnique()) {
+      resultKind_ = PRK_None;
+      result_.set();
+    }
+  }
+
+  union ResultVal {
+  public:
+    struct {
+      const char* str_;
+      unsigned length_;
+    } tokenStr_;
+    void* astNode_;
+    std::vector<void*>* astNodeList_;
+
+  public:
+    void set()             { astNode_ = nullptr; tokenStr_.length_ = 0; }
+    void set(void* p)      { astNode_ = p; }
+    void set(ListType *pl) { astNodeList_ = pl; }
+    void set(const char* s, unsigned len_) {
+      tokenStr_.str_ = s;
+      tokenStr_.length_ = 0;
+    }
+
+    StringRef string() {
+      return StringRef(tokenStr_.str_, tokenStr_.length_);
+    }
+  };
+
+  unsigned   ruleID_;
+  ResultKind resultKind_;
+  ResultVal  result_;
 };
 
 
@@ -330,8 +411,8 @@ public:
     stack_.emplace_back(ParseResult(tok));
   }
 
-  void push_back(void* astnode) {
-    stack_.emplace_back(ParseResult(0, astnode));
+  void push_back(ParseResult &&r) {
+    stack_.emplace_back(std::move(r));
   }
 
   // Drop n items from the stack, but keep the nsave top-most items.

@@ -29,14 +29,15 @@
 #ifndef OHMU_LEXER_H
 #define OHMU_LEXER_H
 
+#include "Token.h"
+
 #include <stdio.h>
+
 #include <cstring>
-#include <string>
 #include <deque>
 #include <map>
+#include <string>
 #include <vector>
-
-#include "Token.h"
 
 namespace ohmu {
 

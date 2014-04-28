@@ -124,18 +124,18 @@ bool ParseToken::init(Parser& parser) {
 
 
 bool ParseToken::accepts(const Token& tok) {
-  return (tok.getID() == tokenID_);
+  return (tok.id() == tokenID_);
 }
 
 
 ParseRule* ParseToken::parse(Parser& parser) {
   const Token& tok = parser.look();
-  if (tok.getID() == tokenID_) {
+  if (tok.id() == tokenID_) {
     if (parser.trace_) {
       std::cout << "-- Matching token ["
-                << parser.look().getID()
+                << parser.look().id()
                 << "]: \""
-                << parser.look().getString()
+                << parser.look().string()
                 << "\"\n";
     }
     if (skip_)
@@ -144,11 +144,11 @@ ParseRule* ParseToken::parse(Parser& parser) {
       parser.consume();   // Pushes token onto the stack.
   }
   else {
-    parser.parseError(tok.getLocation())
+    parser.parseError(tok.location())
       << "expecting token: "
       << parser.getTokenIDString(tokenID_)
       << " received token: "
-      << parser.getTokenIDString(parser.look().getID());
+      << parser.getTokenIDString(parser.look().id());
   }
   return 0;
 }

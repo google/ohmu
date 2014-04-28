@@ -76,10 +76,10 @@ public:
     : tokenID_(tid), tokenStr_(s), sourceLoc_(loc)
   { }
 
-  unsigned              getID()       const { return tokenID_;  }
-  unsigned              getLength()   const { return tokenStr_.length(); }
-  StringRef             getString()   const { return tokenStr_;  }
-  const SourceLocation& getLocation() const { return sourceLoc_; }
+  unsigned              id()       const { return tokenID_;  }
+  unsigned              length()   const { return tokenStr_.length(); }
+  StringRef             string()   const { return tokenStr_;  }
+  const SourceLocation& location() const { return sourceLoc_; }
 
   const char* c_str() const { return tokenStr_.c_str();  }
 
