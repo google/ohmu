@@ -202,6 +202,12 @@ public:
       : ASTNode(AST_Append), list_(l), item_(i)
   { }
 
+  ASTNode* list() { return list_; }
+  const ASTNode* list() const { return list_; }
+
+  ASTNode* item() { return item_; }
+  const ASTNode* item() const { return item_; }
+
 private:
   ASTNode* list_;
   ASTNode* item_;
