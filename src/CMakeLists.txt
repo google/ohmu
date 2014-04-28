@@ -10,4 +10,4 @@ add_definitions(-std=c++11)
 add_subdirectory (parser)
 
 # TODO(whunt): build is currently broken for x64builder on linux.
-# add_subdirectory (x64builder)
+add_subdirectory (x64builder)

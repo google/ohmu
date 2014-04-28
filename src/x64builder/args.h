@@ -1,4 +1,19 @@
-// Warren Hunt : 2014-03-14
+//===- ASTNode.h -----------------------------------------------*- C++ --*-===//
+// Copyright 2014  Google
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//===----------------------------------------------------------------------===//
 #pragma once
 
 // The first 4 must be in this order because they are used as imm_size
@@ -65,45 +80,3 @@ enum ConditionCode {
 enum AddressSizeOverride{
 	ADDRESS_SIZE_OVERRIDE = 1,
 };
-
-template<int>
-struct Mem {
-	enum Segment {DEFAULT_SEGMENT, FS, GS};
-	enum AddrSize {DEFAULT_SIZE, SIZE_OVERRIDE};
-	__forceinline Mem(
-		BaseReg base,
-		int disp = 0,
-		IndexReg index = INDEX_NONE,
-		int scale = 0,
-		Segment segment = DEFAULT_SEGMENT,
-		AddrSize addr_size = DEFAULT_SIZE)
-		: instr(SET_BASEINDEX[index][base] | SET_SCALE[scale] | SET_SEGMENT[segment] | SET_ADDRESSOVERRIDE[addr_size])
-		, disp(disp) {}
-	__forceinline Mem(RipReg, int disp)
-		: instr(SET_RIP), disp(disp) {}
-	unsigned long long instr;
-	int disp;
-};
-
-template<int>
-struct Disp64 {
-	__forceinline Disp64(long long disp)
-		: disp(disp) {}
-	long long disp;
-};
-
-typedef Mem<8> Mem8;
-typedef Mem<16> Mem16;
-typedef Mem<32> Mem32;
-typedef Mem<64> Mem64;
-typedef Mem<128> Mem128;
-typedef Mem<256> Mem256;
-typedef Mem<512> Mem512;
-
-typedef Disp64<8> Disp64_8;
-typedef Disp64<16> Disp64_16;
-typedef Disp64<32> Disp64_32;
-typedef Disp64<64> Disp64_64;
-typedef Disp64<128> Disp64_128;
-typedef Disp64<256> Disp64_256;
-typedef Disp64<512> Disp64_512;
