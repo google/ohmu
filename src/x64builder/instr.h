@@ -22,7 +22,7 @@
 #define __forceinline __attribute__((always_inline))
 #endif
 
-struct __declspec(align(16)) Instr {
+struct /*__declspec(align(16))*/ Instr {
   typedef unsigned char byte;
 
   enum SegmentEncoding { FS_ENCODING = 2, GS_ENCODING };
@@ -42,7 +42,7 @@ struct __declspec(align(16)) Instr {
 
       byte align_pad : 4;
       byte imm_payload : 1;
-    byte: 3;
+      byte : 3;
 
       byte imm_size : 2;
       byte has_imm : 1;
@@ -52,6 +52,7 @@ struct __declspec(align(16)) Instr {
       byte fixed_base : 1;
       byte force_disp : 1;
 
+      // Opcode prefixes
       byte lock_rep : 2;
       byte size_prefix : 1;
       byte addr_prefix : 1;
@@ -63,9 +64,9 @@ struct __declspec(align(16)) Instr {
       byte x : 1;
       byte r : 1;
       byte w : 1;
-    byte: 2;
+      byte : 2;
       byte rex_1 : 1;
-    byte: 1;
+      byte : 1;
 
       byte simd_prefix : 2;
       byte l : 1;
