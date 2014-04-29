@@ -21,7 +21,7 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 const char* DefaultLexer::getTokenIDString(unsigned tid) {
   switch (tid) {
@@ -386,6 +386,6 @@ Token DefaultLexer::readToken() {
   return Token(TK_Error, "", sloc);
 }
 
-} // end namespace lexer
+} // end namespace parsing
 
 } // end namespace ohmu

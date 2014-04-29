@@ -25,7 +25,7 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 unsigned FileStream::fillBuffer(char* buf, unsigned size) {
   size_t n = fread(buf, 1, size, file_);
@@ -184,6 +184,6 @@ void Lexer::fillBuffer(unsigned numChars) {
   }
 }
 
-} // end namespace lexer
+} // end namespace parsing
 
 } // end namespace ohmu

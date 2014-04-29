@@ -41,7 +41,7 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 // A stream of characters.
 // Derived classes must override fillBuffer to read from the stream.
@@ -304,7 +304,7 @@ class Lexer {
   std::string emptyString_;
 };
 
-} // end namespace lexer
+} // end namespace parsing
 
 } // end namespace ohmu
 

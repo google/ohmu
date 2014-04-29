@@ -36,10 +36,7 @@
 
 namespace ohmu {
 
-namespace parser {
-
-using namespace lexer;
-
+namespace parsing {
 
 enum ParseRuleKind {
   PR_None,
@@ -50,7 +47,7 @@ enum ParseRuleKind {
   PR_RecurseLeft,
   PR_Reference,
   PR_NamedDefinition,
-  PR_MakeExpr
+  PR_Action
 };
 
 
@@ -273,6 +270,26 @@ private:
 };
 
 
+// Constructs an expression in the target language.
+// The ASTNode is interpreted to create the expression.
+// Variables in the ASTNode refer to named results on the parser stack.
+class ParseAction : public ParseRule {
+public:
+  ParseAction(ast::ASTNode *n)
+    : ParseRule(PR_Action), node_(n), drop_(0)
+  { }
+
+  bool       init(Parser& parser) override;
+  bool       accepts(const Token& tok) override;
+  ParseRule* parse(Parser& parser) override;
+  void       prettyPrint(Parser& parser, std::ostream& out) override;
+
+private:
+  ast::ASTNode* node_;    // ASTNode to interpret
+  unsigned frameSize_;    // size of the stack frame
+  unsigned drop_;         // num items to drop from the stack.
+};
+
 
 // Every parse rule returns a ParseResult, which consists of:
 // (1) The id of the named, top-level rule that created the result.
@@ -285,31 +302,27 @@ public:
   typedef std::vector<void*> ListType;
 
   enum ResultKind {
-    PRK_None = 0,
-    PRK_TokenStr = 1,
-    PRK_ASTNode = 2,
-    PRK_ASTNodeList = 3
+    PR_None = 0,
+    PR_TokenStr = 1,
+    PR_ASTNode = 2,
+    PR_ASTNodeList = 3
   };
 
-  ParseResult()
-      : ruleID_(0), resultKind_(PRK_None) {
-    result_.set();
+  ParseResult() : ruleID_(0), resultKind_(PR_None) {
+    result_.set(nullptr);
   }
-  ParseResult(const Token& tok)
-      : ruleID_(0), resultKind_(PRK_TokenStr) {
+  ParseResult(const Token& tok) : ruleID_(0), resultKind_(PR_TokenStr) {
     result_.set(tok.c_str(), tok.length());
   }
-  ParseResult(void* p)
-      : ruleID_(0), resultKind_(PRK_ASTNode) {
+  ParseResult(void* p) : ruleID_(0), resultKind_(PR_ASTNode) {
     result_.set(p);
   }
-  ParseResult(ListType *pl)
-      : ruleID_(0), resultKind_(PRK_ASTNodeList) {
+  ParseResult(ListType *pl) : ruleID_(0), resultKind_(PR_ASTNodeList) {
     result_.set(pl);
   }
   ~ParseResult() {
     // All ParseResults must be used.
-    assert(resultKind_ == PRK_None);
+    assert(resultKind_ == PR_None && "Unused ParseResult.");
   }
 
   ParseResult(ParseResult &&r)
@@ -331,27 +344,29 @@ public:
   unsigned ruleID() const { return ruleID_; }
   void setRuleID(unsigned id) { ruleID_ = id; }
 
-  inline bool isUnique() const { return resultKind_ > PRK_TokenStr; }
+  inline bool isUnique() const { return resultKind_ > PR_TokenStr; }
 
   StringRef tokenStr() {
-    assert(resultKind_ == PRK_TokenStr);
+    assert(resultKind_ == PR_TokenStr);
     return result_.string();
   }
 
   // Return the AST node, and release ownership.
   void* getASTNode() {
-    assert(resultKind_ = PRK_ASTNode);
+    assert(resultKind_ = PR_ASTNode);
     void * p = result_.astNode_;
     release();
     return p;
   }
 
   // Return the AST node list, and release ownership.
-  std::unique_ptr<ListType> getASTNodeList() {
-    assert(resultKind_ = PRK_ASTNodeList);
+  ListType* getASTNodeList() {
+    assert(resultKind_ = PR_ASTNodeList);
     ListType* pl = result_.astNodeList_;
+    if (!pl)
+      pl = new ListType();  // create empty list on demand
     release();
-    return std::unique_ptr<ListType>(pl);
+    return pl;
   }
 
 private:
@@ -360,8 +375,8 @@ private:
 
   inline void release() {  // release ownership of any data
     if (isUnique()) {
-      resultKind_ = PRK_None;
-      result_.set();
+      resultKind_ = PR_None;
+      result_.set(nullptr);
     }
   }
 
@@ -375,9 +390,9 @@ private:
     std::vector<void*>* astNodeList_;
 
   public:
-    void set()             { astNode_ = nullptr; tokenStr_.length_ = 0; }
-    void set(void* p)      { astNode_ = p; }
-    void set(ListType *pl) { astNodeList_ = pl; }
+    void set(std::nullptr_t) { astNode_ = nullptr; }
+    void set(void* p)        { astNode_ = p; }
+    void set(ListType *pl)   { astNodeList_ = pl; }
     void set(const char* s, unsigned len_) {
       tokenStr_.str_ = s;
       tokenStr_.length_ = 0;
@@ -455,7 +470,7 @@ public:
 
   // Find the stack index for name s on the abstract stack.
   // Indices are computed with respect to the current frame.
-  unsigned getIndex(const std::string& s) {
+  unsigned getIndex(const std::string &s) {
     for (unsigned i=0, n=stack_.size(); i<n; ++i) {
       if (*stack_[i] == s) return i;
     }
@@ -489,10 +504,10 @@ public:
   }
 
   // get the ith value on the stack, starting from the current frame.
-  const std::string*& operator[](unsigned i) { return stack_[i]; }
+  std::string*& operator[](unsigned i) { return stack_[i]; }
 
   // push a new name onto the stack.
-  void push_back(const std::string* s) { stack_.push_back(s); }
+  void push_back(std::string *s) { stack_.push_back(s); }
 
   // pop a name off of the stack.
   void pop_back() {
@@ -508,7 +523,7 @@ public:
 
 private:
   unsigned blockStart_;
-  std::vector<const std::string*> stack_;
+  std::vector<std::string*> stack_;
 };
 
 
@@ -519,6 +534,12 @@ public:
   Parser(Lexer* lexer)
     : lexer_(lexer), parseError_(false), trace_(false), traceValidate_(false)
   { }
+
+  // Override this to construct an expression in the target language.
+  virtual void* makeExpr(unsigned op, unsigned arity, ParseResult *prs) = 0;
+
+  // Override this to look up the opcode for a string.
+  virtual unsigned getLanguageOpcode(const std::string &s) = 0;
 
   // Initialize the parser, with rule as the starting point.
   bool init();
@@ -572,6 +593,9 @@ protected:
   friend class ParseRecurseLeft;
   friend class ParseReference;
   friend class ParseNamedDefinition;
+  friend class ParseAction;
+  friend class ASTIndexVisitor;
+  friend class ASTInterpretReducer;
 
   // Initialize rule p.  This is used internally to make recursive calls.
   inline bool initRule(ParseRule* p);
@@ -613,95 +637,6 @@ private:
   bool trace_;
   bool traceValidate_;
 };
-
-
-/*
-
-
-// A parser for a language Lang.
-// The parser builds results of type Lang::SExpr*.
-template<class Lang>
-class ParseLanguage : public Parser {
-public:
-  typedef typename Lang:SExpr SExpr;
-
-protected:
-  std::vector<SExpr*> exprStack_;
-};
-
-
-
-// Builds a result of type Lang::SExpr*.
-// Should only be used with a parser of type ParseT<Lang::SExpr*>
-template <class Lang>
-class ParseMakeExpr : public ParseRule {
-public:
-  typedef typename Lang::SExpr SExpr;
-
-  ParseMakeExpr(const SExpr* e)
-    : ParseRule(PR_MakeExpr), mkExpr_(e), drop_(0)
-  { }
-  ~ParseMakeExpr() { }
-
-  virtual bool       init(Parser& parser, unsigned ss, bool* retVal);
-  virtual bool       accepts(const Token& tok);
-  virtual ParseRule* parse(Parser& parser);
-  virtual void       prettyPrint(Parser& parser, std::ostream& out);
-
-private:
-  ParseLanguage<Lang>& getParser(Parser& p) {
-    return *reinterpret_cast<ParseLanguage<Lang> >(&p);
-  }
-
-  static const Lang& getLanguage(Parser& p) {
-    return reinterpret_cast<const Lang*>(p.getLanguage());
-  }
-
-  SExpr*  mkExpr_;
-  unsigned  drop_;
-};
-
-
-template <class T>
-bool ParseMakeExpr<T>::init(Parser& parser, unsigned ss, bool* retVal) {
-  *retVal = true;
-  drop_   = ss;
-  bool success = getParser(parser).lookupSExprVariables(mkExpr_);
-  return success;
-}
-
-
-template <class T>
-bool ParseMakeExpr<T>::accepts(const Token& tok) {
-  return false;
-}
-
-
-template <class T>
-ParseRule* ParseMakeExpr<T>::parse(Parser& parser) {
-  SExpr* ne =
-    getLanguage(parser).instantiateExpr(mkExpr_, parser.exprStack_);
-
-  if (parser.trace_) {
-    std::cout << "-- { ";
-    getLanguage(parser).prettyPrint(std::cout, ne.get());
-    std::cout << " }\n";
-  }
-
-  parser.exprStack_.pop(drop_, 0);
-  parser.exprStack_.push(ne.get());
-  return 0;
-}
-
-
-template <class T>
-void ParseMakeExpr::prettyPrint(Parser& parser, std::ostream& out) {
-  out << "{ ";
-  parser.language_->prettyPrint(out, mkExpr_.get());
-  out << " }";
-}
-
-*/
 
 
 } // end namespace parser

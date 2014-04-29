@@ -30,7 +30,7 @@
 
 namespace ohmu {
 
-namespace parser {
+namespace parsing {
 
 
 bool Parser::init() {
@@ -384,8 +384,7 @@ bool ParseReference::init(Parser& parser) {
   for (auto &name : argNames_) {
     unsigned idx = parser.abstractStack_.getIndex(name);
     if (idx == AbstractStack::InvalidIndex) {
-      parser.validationError() <<
-        "Identifier " << argNames_[idx] << " not found.";
+      parser.validationError() << "Identifier " << name << " not found.";
       return false;
     }
     arguments_.push_back(idx);
@@ -445,7 +444,6 @@ void ParseReference::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseNamedDefinition ***/
 
 bool ParseNamedDefinition::init(Parser& parser) {
-
   if (!rule_) {
     parser.validationError() <<
       "Syntax rule " << name_  << " has not been defined.\n";
@@ -474,7 +472,6 @@ bool ParseNamedDefinition::init(Parser& parser) {
     parser.validationError()
       << "A top-level named definition must return a result.";
   }
-
   return success;
 }
 
@@ -509,8 +506,144 @@ void ParseNamedDefinition::prettyPrint(Parser& parser,
 }
 
 
-}  // end namespace parser
 
-}  // end namespace extensibleScripting
+/*** ParseAction ***/
+
+class ASTIndexVisitor : public ast::Visitor<ASTIndexVisitor> {
+public:
+  ASTIndexVisitor(Parser *p) : parser_(p) { }
+
+  bool reduceVariable(ast::Variable &node) {
+    unsigned idx = parser_->abstractStack_.getIndex(node.name());
+    if (idx == AbstractStack::InvalidIndex) {
+      parser_->validationError() <<
+        "Identifier " << node.name() << " not found.";
+      return false;
+    }
+    node.setIndex(idx);
+    return true;
+  }
+
+  bool reduceConstruct(ast::Construct &node, ResultArray& results) {
+    unsigned op = parser_->getLanguageOpcode(node.opcodeName());
+    assert(op < 0xFFFF && "Invalid opcode");
+    node.setLangOpcode(op);
+    return true;
+  }
+
+private:
+  Parser* parser_;
+};
+
+
+class ASTInterpretReducer {
+public:
+  typedef ParseResult ResultType;
+
+  struct ResultArray {
+    ResultArray(ASTInterpretReducer& r, unsigned n) { }
+
+    void add(ParseResult &&pr) { array[i++] = std::move(pr); }
+
+    unsigned i = 0;
+    ParseResult array[ast::Construct::Max_Arity];
+  };
+
+  ParseResult reduceNone() {
+    return ParseResult();
+  }
+
+  ParseResult reduceVariable(ast::Variable &node) {
+    unsigned idx = frameStart_ + node.index();
+    return std::move(parser_->resultStack_[idx]);
+  }
+
+  ParseResult reduceTokenStr(ast::TokenStr &node) {
+    const char* s = node.string().c_str();
+    return ParseResult(Token(TK_None, s, SourceLocation()));
+  }
+
+  ParseResult reduceConstruct(ast::Construct &node, ResultArray& results) {
+    return parser_->makeExpr(node.langOpcode(), node.arity(), results.array);
+  }
+
+  ParseResult reduceEmptyList(ast::EmptyList &node) {
+    // null can be used as an empty list.
+    return ParseResult(static_cast<ParseResult::ListType*>(nullptr));
+  }
+
+  ParseResult reduceAppend(ast::Append &node,
+                           ParseResult &&l, ParseResult &&e) {
+    ParseResult::ListType *lst = l.getASTNodeList();   // consumes l
+    lst->push_back(e.getASTNode());                    // consumes e
+    return ParseResult(lst);
+  }
+
+  ASTInterpretReducer() : parser_(nullptr), frameStart_(0) { }
+
+protected:
+  Parser*  parser_;
+  unsigned frameStart_;
+};
+
+
+class ASTInterpreter : public ast::Traversal<ASTInterpreter,
+                                             ASTInterpretReducer> {
+public:
+  ASTInterpreter(Parser *p, unsigned fs) {
+    parser_ = p;
+    frameStart_ = fs;
+  }
+};
+
+
+bool ParseAction::init(Parser& parser) {
+  if (!node_) {
+    parser.validationError() << "Invalid action.";
+    return false;
+  }
+
+  // Argument indices are computed relative to the current stack frame.
+  frameSize_ = parser.abstractStack_.size();
+
+  // Actions which occur in a tail position are responsible for dropping
+  // items off the stack.
+  drop_ = parser.abstractStack_.localSize();
+
+  ASTIndexVisitor visitor(&parser);
+  visitor.traverse(node_);
+
+  // Drop everything in the local block off of the abstract stack.
+  parser.abstractStack_.rewind(0);
+
+  // Actions will return a single value.
+  parser.abstractStack_.push_back(nullptr);
+  return true;
+}
+
+bool ParseAction::accepts(const Token& tok) {
+  return true;
+}
+
+
+ParseRule* ParseAction::parse(Parser& parser) {
+  unsigned frameStart = parser.resultStack_.size() - frameSize_;
+
+  ASTInterpreter interpreter(&parser, frameStart);
+  parser.resultStack_.push_back(interpreter.traverse(node_));
+  if (drop_ > 0)
+    parser.resultStack_.drop(drop_, 1);
+  return nullptr;
+}
+
+void ParseAction::prettyPrint(Parser& parser, std::ostream& out) {
+  // TODO
+  out << "{ ... }";
+}
+
+
+}  // end namespace parsing
+
+}  // end namespace ohmu
 
 

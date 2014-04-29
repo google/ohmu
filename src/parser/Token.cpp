@@ -24,11 +24,11 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 const Token globalEOFToken;
 
-}
+}  // end namespace parsing
 
-} // end namespace extensibleScripting
+}  // end namespace ohmu
 

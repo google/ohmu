@@ -40,7 +40,7 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 class DefaultLexer : public Lexer {
 public:
@@ -106,8 +106,8 @@ private:
   bool interactive_;
 };
 
-} // end namespace lexer
+}  // end namespace parsing
 
-} // end namespace ohmu
+}  // end namespace ohmu
 
 #endif

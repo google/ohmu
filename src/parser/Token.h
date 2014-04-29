@@ -31,10 +31,11 @@
 
 namespace ohmu {
 
-namespace lexer {
+namespace parsing {
 
 enum BasicTokenID {
-  TK_EOF = 0,
+  TK_None = 0,
+  TK_EOF,
   TK_Error,
   TK_Newline,
   TK_Whitespace,
@@ -125,7 +126,7 @@ private:
 extern const Token globalEOFToken;
 
 
-}  // end namespace lexer
+}  // end namespace lexing
 
 }  // end namespace ohmu
 

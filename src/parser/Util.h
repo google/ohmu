@@ -79,11 +79,15 @@ inline const T* dyn_cast_or_null(const U* p) {
 
 class StringRef {
 public:
+  StringRef(const char* s, unsigned len)
+    : str_(s), len_(len)
+  { }
   explicit StringRef(const char* s)
     : str_(s), len_((unsigned) strlen(s))
   { }
-  StringRef(const char* s, unsigned len)
-    : str_(s), len_(len)
+  // Warning -- lifetime of s must be longer than this stringref.
+  explicit StringRef(const std::string& s)
+    : str_(s.c_str()), len_(s.length())
   { }
 
   unsigned    length() const { return len_; }

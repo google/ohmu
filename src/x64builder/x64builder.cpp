@@ -55,7 +55,7 @@ struct CallBuilder {
 		return *this;
 	}
 
-	CallBuilder& M(int size = 0) { rml_mask = rml_mask & ~USE_R | USE_M; return PushArg(&CallBuilder::rm_size, size); }
+	CallBuilder& M(int size = 0) { rml_mask = (rml_mask & ~USE_R) | USE_M; return PushArg(&CallBuilder::rm_size, size); }
 	CallBuilder& R(int size = 0) { assert(!(rml_mask & USE_L)); return PushArg(&CallBuilder::rm_size, size); }
 	CallBuilder& RM(int size = 0) { rml_mask |= USE_M; return PushArg(&CallBuilder::rm_size, size); }
 	CallBuilder& Reg(int size = 0) { return PushArg(&CallBuilder::reg_size, size); }
@@ -85,7 +85,7 @@ struct CallBuilder {
 		if (d64_size) b.SetImmSize(3);
 		if (rm_size && rml & USE_L) b.lock_rep = b.LOCK_ENCODING;
 		char buffer[22];
-		sprintf_s(buffer, "0x%016llxull", b.instr);
+		sprintf(buffer, "0x%016llxull", b.instr);
 		string out = buffer;
 		if (rm_size && rml & USE_M) out += " | rm.instr";
 		if (rm_size && rml & USE_R) out += " | SET_R[rm]";
@@ -266,7 +266,7 @@ void FilePrinter::Build() {
 		{"AND", 0x20, ALLOW_LOCK}, {"SUB", 0x28, ALLOW_LOCK}, {"XOR", 0x30, ALLOW_LOCK}, {"CMP", 0x38, 0}
 	};
 	static const struct { const char* name; RegCode reg; } SHIFT_TABLE[] = {
-		{"ROL", 0}, {"ROR", 1}, {"RCL", 2}, {"RCR", 3}, {"SHL", 4}, {"SAL", 4}, {"SHR", 5}, {"SAR", 7}
+		{"ROL", {0}}, {"ROR", {1}}, {"RCL", {2}}, {"RCR", {3}}, {"SHL", {4}}, {"SAL", {4}}, {"SHR", {5}}, {"SAR", {7}}
 	};
 
 	Call("JMP", 0x4ff, 64).RM();
