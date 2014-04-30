@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 2.8)
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   add_definitions(-std=c++11)
-  add_definitions(-fnoexceptions)
+  add_definitions(-fno-exceptions)
 endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")

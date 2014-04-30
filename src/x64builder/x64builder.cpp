@@ -150,7 +150,7 @@ struct Call {
     if (d64_size) b.SetImmSize(3);
     if (rm_size && rml & USE_L) b.lock_rep = LOCK_PREFIX;
     char buffer[22];
-    snprintf(buffer, "0x%016llxull", b.instr);
+    snprintf(buffer, 22, "0x%016llxull", b.instr);
     string out = buffer;
     if (rm_size && rml & USE_M) out += " | rm.instr";
     if (rm_size && rml & USE_R) out += " | SET_R[rm]";
@@ -295,8 +295,6 @@ struct Call {
 
 vector<string> Call::list;
 
-struct PrefixCode { int code; } const Ox0f = { 0x0f }, Ox38 = { 0x38 }, Ox3a = { 0x3a };
-int operator |(int a, PrefixCode b) { assert((unsigned)b.code <= 0xff); return a << 8 | b.code; }
 struct RegCode { int code; };
 int operator |(RegCode a, int b) { assert((unsigned)b <= 0xff); return a.code << 8 | b; };
 } // namespace {
@@ -368,7 +366,7 @@ int main() {
     { "AND", 0x20, ALLOW_LOCK }, { "SUB", 0x28, ALLOW_LOCK }, { "XOR", 0x30, ALLOW_LOCK }, { "CMP", 0x38, 0 }
   };
   static const struct { const char* name; RegCode reg; } SHIFT_TABLE[] = {
-    { "ROL", 0 }, { "ROR", 1 }, { "RCL", 2 }, { "RCR", 3 }, { "SHL", 4 }, { "SAL", 4 }, { "SHR", 5 }, { "SAR", 7 }
+    { "ROL", {0} }, { "ROR", {1} }, { "RCL", {2} }, { "RCR", {3} }, { "SHL", {4} }, { "SAL", {4} }, { "SHR", {5} }, { "SAR", {7} }
   };
 
   Call("JMP", 0x4ff, 64).RM();
@@ -381,10 +379,10 @@ int main() {
 
   for (int i = 0; i < 30; i++) {
     auto p = &CC_TABLE[i];
-    Call(string("J") + p->name, 0x80 | p->code | Ox0f, 32, USE_RIP).I();
+    Call(string("J") + p->name, (0x80 | p->code) << 8 | 0x0f, 32, USE_RIP).I();
     //.Except("(char)imm == imm", Call("", 0x70 | p->code, 8).I());
-    Call(string("CMOV") + p->name, 0x40 | p->code | Ox0f, 16 | 32 | 64).Reg().RM();
-    Call(string("SET") + p->name, 0x90 | p->code | Ox0f, 8).RM();
+    Call(string("CMOV") + p->name, (0x40 | p->code) << 8 | 0x0f, 16 | 32 | 64).Reg().RM();
+    Call(string("SET") + p->name, (0x90 | p->code) << 8 | 0x0f, 8).RM();
   }
 
   Call("NOP", 0x90);
