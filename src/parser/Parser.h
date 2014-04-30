@@ -159,8 +159,8 @@ public:
 
  private:
   std::string letName_;
-  ParseRule   *first_;
-  ParseRule   *second_;
+  ParseRule*  first_;
+  ParseRule*  second_;
 };
 
 
@@ -181,8 +181,8 @@ public:
   void       prettyPrint(Parser& parser, std::ostream& out) override;
 
  private:
-  ParseRule *left_;
-  ParseRule *right_;
+  ParseRule* left_;
+  ParseRule* right_;
 };
 
 
@@ -213,36 +213,6 @@ private:
 };
 
 
-// Refers to another named top-level parse rule.
-// Can "call" the named rule by passing arguments.
-class ParseReference : public ParseRule {
-public:
-  ParseReference(const std::string& name)
-    : ParseRule(PR_Reference), name_(name), definition_(nullptr), drop_(0)
-  { }
-
-  bool       init(Parser& parser) override;
-  bool       accepts(const Token& tok) override;
-  ParseRule* parse(Parser& parser) override;
-  void       prettyPrint(Parser& parser, std::ostream& out) override;
-
-  inline void addArgument(const std::string& arg) {
-    argNames_.push_back(arg);
-  }
-  void addArgumentIdx(unsigned i) {
-    arguments_.push_back(i);
-  }
-
- private:
-  std::string              name_;
-  ParseNamedDefinition*    definition_;
-  std::vector<std::string> argNames_;   // argument names
-  std::vector<unsigned>    arguments_;  // stack indices of arguments
-  unsigned                 frameSize_;  // size of the stack frame
-  unsigned                 drop_;       // num items to drop from the stack
-};
-
-
 // A top-level named definition.
 // Named definitions allow mutually recursive rules to be defined.
 class ParseNamedDefinition : public ParseRule {
@@ -270,6 +240,41 @@ private:
 };
 
 
+// Refers to another named top-level parse rule.
+// Can "call" the named rule by passing arguments.
+class ParseReference : public ParseRule {
+public:
+  ParseReference(ParseNamedDefinition* def)
+    : ParseRule(PR_Reference), name_(def->name()), definition_(def),
+      frameSize_(0), drop_(0)
+  { }
+  ParseReference(const std::string& name)
+    : ParseRule(PR_Reference), name_(name), definition_(nullptr),
+      frameSize_(0), drop_(0)
+  { }
+
+  bool       init(Parser& parser) override;
+  bool       accepts(const Token& tok) override;
+  ParseRule* parse(Parser& parser) override;
+  void       prettyPrint(Parser& parser, std::ostream& out) override;
+
+  inline void addArgument(const std::string& arg) {
+    argNames_.push_back(arg);
+  }
+  void addArgumentIdx(unsigned i) {
+    arguments_.push_back(i);
+  }
+
+ private:
+  std::string              name_;
+  ParseNamedDefinition*    definition_;
+  std::vector<std::string> argNames_;   // argument names
+  std::vector<unsigned>    arguments_;  // stack indices of arguments
+  unsigned                 frameSize_;  // size of the stack frame
+  unsigned                 drop_;       // num items to drop from the stack
+};
+
+
 // Constructs an expression in the target language.
 // The ASTNode is interpreted to create the expression.
 // Variables in the ASTNode refer to named results on the parser stack.
@@ -291,43 +296,47 @@ private:
 };
 
 
-// Every parse rule returns a ParseResult, which consists of:
-// (1) The id of the named, top-level rule that created the result.
+// The result of parsing a rule is a ParseResult, which consists of:
+// (1) The id of the rule that created the result (if any).
 // (2) One of the following:
 //   (a) A token string, for simple tokens.
-//   (b) A unique pointer to the AST Node created for this result.
-//   (c) A unique list (std::vector) of AST nodes for this result.
+//   (b) A unique pointer to a user-defined AST Node type.
+//   (c) A unique list (std::vector) of (b)
 class ParseResult {
 public:
   typedef std::vector<void*> ListType;
 
   enum ResultKind {
-    PR_None = 0,
-    PR_TokenStr = 1,
-    PR_ASTNode = 2,
-    PR_ASTNodeList = 3
+    PRS_None = 0,
+    PRS_TokenStr = 1,
+    PRS_UserDefined = 2    // user-defined AST node type
   };
 
-  ParseResult() : ruleID_(0), resultKind_(PR_None) {
-    result_.set(nullptr);
+  ParseResult()
+      : ruleID_(0), resultKind_(PRS_None), isList_(false), result_(nullptr)
+  { }
+  explicit ParseResult(const Token& tok)
+      : ruleID_(0), resultKind_(PRS_TokenStr), isList_(false),
+        result_(tok.c_str(), tok.length())
+  { }
+  // A particular parser may have several different kinds of AST node;
+  // kind distingushes between them.
+  ParseResult(unsigned short kind, void* node)
+      : ruleID_(0), resultKind_(kind), isList_(false), result_(node) {
+    assert(kind >= PRS_UserDefined && "Invalid kind");
   }
-  ParseResult(const Token& tok) : ruleID_(0), resultKind_(PR_TokenStr) {
-    result_.set(tok.c_str(), tok.length());
-  }
-  ParseResult(void* p) : ruleID_(0), resultKind_(PR_ASTNode) {
-    result_.set(p);
-  }
-  ParseResult(ListType *pl) : ruleID_(0), resultKind_(PR_ASTNodeList) {
-    result_.set(pl);
+  // Create a list of AST Nodes; kind specifies the kind of nodes in the list.
+  ParseResult(unsigned short kind, ListType *pl)
+      : ruleID_(0), resultKind_(kind), isList_(true), result_(pl) {
+    assert(kind >= PRS_UserDefined && "Invalid kind");
   }
   ~ParseResult() {
     // All ParseResults must be used.
-    assert(resultKind_ == PR_None && "Unused ParseResult.");
+    assert(resultKind_ == PRS_None && "Unused ParseResult.");
   }
 
   ParseResult(ParseResult &&r)
-      : ruleID_(r.ruleID_),
-        resultKind_(r.resultKind_),
+      : ruleID_(r.ruleID_), resultKind_(r.resultKind_), isList_(r.isList_),
         result_(r.result_) {
     r.release();
   }
@@ -335,36 +344,37 @@ public:
   void operator=(ParseResult &&r) {
     ruleID_ = r.ruleID_;
     resultKind_ = r.resultKind_;
+    isList_ = r.isList_;
     result_ = r.result_;
     r.release();
   }
 
-  ResultKind kind() const { return resultKind_; }
+  unsigned short kind() const { return resultKind_; }
+
+  bool empty() const { return resultKind_ == PRS_None; }
 
   unsigned ruleID() const { return ruleID_; }
   void setRuleID(unsigned id) { ruleID_ = id; }
 
-  inline bool isUnique() const { return resultKind_ > PR_TokenStr; }
+  inline bool isUnique() const { return resultKind_ >= PRS_UserDefined; }
 
   StringRef tokenStr() {
-    assert(resultKind_ == PR_TokenStr);
+    assert(resultKind_ == PRS_TokenStr);
     return result_.string();
   }
 
-  // Return the AST node, and release ownership.
-  void* getASTNode() {
-    assert(resultKind_ = PR_ASTNode);
-    void * p = result_.astNode_;
+  // Return the node, and release ownership.
+  void* getNode() {
+    assert(resultKind_ >= PRS_UserDefined && isList_ == false);
+    void *p = result_.ptr_;
     release();
     return p;
   }
 
-  // Return the AST node list, and release ownership.
-  ListType* getASTNodeList() {
-    assert(resultKind_ = PR_ASTNodeList);
-    ListType* pl = result_.astNodeList_;
-    if (!pl)
-      pl = new ListType();  // create empty list on demand
+  // Return the node list, and release ownership.
+  ListType* getNodeList() {
+    assert(resultKind_ >= PRS_UserDefined && isList_ == false);
+    ListType* pl = result_.list();
     release();
     return pl;
   }
@@ -374,38 +384,34 @@ private:
   void operator=(const ParseResult &f) = delete;
 
   inline void release() {  // release ownership of any data
-    if (isUnique()) {
-      resultKind_ = PR_None;
-      result_.set(nullptr);
-    }
+    resultKind_ = PRS_None;
+    isList_ = false;
+    result_.ptr_ = nullptr;
   }
 
-  union ResultVal {
+  struct ResultVal {
   public:
-    struct {
-      const char* str_;
-      unsigned length_;
-    } tokenStr_;
-    void* astNode_;
-    std::vector<void*>* astNodeList_;
+    void* ptr_;
+    unsigned len_;
+
+    explicit ResultVal(void* p) : ptr_(p), len_(0) { }
+    ResultVal(const char *s, unsigned l)
+        : ptr_(const_cast<char*>(s)), len_(l)
+    { }
 
   public:
-    void set(std::nullptr_t) { astNode_ = nullptr; }
-    void set(void* p)        { astNode_ = p; }
-    void set(ListType *pl)   { astNodeList_ = pl; }
-    void set(const char* s, unsigned len_) {
-      tokenStr_.str_ = s;
-      tokenStr_.length_ = 0;
-    }
-
     StringRef string() {
-      return StringRef(tokenStr_.str_, tokenStr_.length_);
+      return StringRef(reinterpret_cast<const char*>(ptr_), len_);
+    }
+    ListType* list() {
+      return reinterpret_cast<ListType*>(ptr_);
     }
   };
 
-  unsigned   ruleID_;
-  ResultKind resultKind_;
-  ResultVal  result_;
+  unsigned       ruleID_;
+  unsigned short resultKind_;
+  bool           isList_;
+  ResultVal      result_;
 };
 
 
@@ -536,7 +542,7 @@ public:
   { }
 
   // Override this to construct an expression in the target language.
-  virtual void* makeExpr(unsigned op, unsigned arity, ParseResult *prs) = 0;
+  virtual ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) = 0;
 
   // Override this to look up the opcode for a string.
   virtual unsigned getLanguageOpcode(const std::string &s) = 0;

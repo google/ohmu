@@ -369,78 +369,6 @@ void ParseRecurseLeft::prettyPrint(Parser& parser, std::ostream& out) {
 }
 
 
-/*** ParseReference ***/
-
-bool ParseReference::init(Parser& parser) {
-  assert(!definition_ && "Already initialized.");
-
-  definition_ = parser.findDefinition(name_);
-  if (!definition_) {
-    parser.validationError() << "No syntax definition for " << name_;
-    return false;
-  }
-
-  // Calculate indices for named arguments.
-  for (auto &name : argNames_) {
-    unsigned idx = parser.abstractStack_.getIndex(name);
-    if (idx == AbstractStack::InvalidIndex) {
-      parser.validationError() << "Identifier " << name << " not found.";
-      return false;
-    }
-    arguments_.push_back(idx);
-  }
-
-  if (arguments_.size() != definition_->numArguments()) {
-    parser.validationError() <<
-      "Reference to " << name_ << " has the wrong number of arguments.";
-    return false;
-  }
-
-  // Argument indices are computed relative to the current stack frame.
-  frameSize_ = parser.abstractStack_.size();
-
-  // Calls which occur in a tail position are responsible for dropping items
-  // off of the stack.
-  drop_ = parser.abstractStack_.localSize();
-
-  // Drop everything in the local block off of the abstract stack.
-  parser.abstractStack_.rewind(0);
-
-  // Top-level rules must return a single value.
-  parser.abstractStack_.push_back(nullptr);
-
-  return true;
-}
-
-
-bool ParseReference::accepts(const Token& tok) {
-  return definition_->accepts(tok);
-}
-
-
-ParseRule* ParseReference::parse(Parser& parser) {
-  unsigned frameStart = parser.resultStack_.size() - frameSize_;
-  for (unsigned i=0, n=arguments_.size(); i<n; ++i)
-    parser.resultStack_.moveAndPush(frameStart + i);
-  if (drop_ > 0)
-    parser.resultStack_.drop(drop_, arguments_.size());
-  return definition_;
-}
-
-
-void ParseReference::prettyPrint(Parser& parser, std::ostream& out) {
-  out << name_;
-  if (argNames_.size() > 0) {
-    out << "(";
-    for (unsigned i=0,n=argNames_.size(); i<n; ++i) {
-      if (i > 0) out << ",";
-      out << argNames_[i];
-    }
-    out << ")";
-  }
-}
-
-
 /*** ParseNamedDefinition ***/
 
 bool ParseNamedDefinition::init(Parser& parser) {
@@ -506,6 +434,78 @@ void ParseNamedDefinition::prettyPrint(Parser& parser,
 }
 
 
+/*** ParseReference ***/
+
+bool ParseReference::init(Parser& parser) {
+  if (!definition_) {
+    definition_ = parser.findDefinition(name_);
+    if (!definition_) {
+      parser.validationError() << "No syntax definition for " << name_;
+      return false;
+    }
+  }
+
+  // Calculate indices for named arguments.
+  for (auto &name : argNames_) {
+    unsigned idx = parser.abstractStack_.getIndex(name);
+    if (idx == AbstractStack::InvalidIndex) {
+      parser.validationError() << "Identifier " << name << " not found.";
+      return false;
+    }
+    arguments_.push_back(idx);
+  }
+
+  if (arguments_.size() != definition_->numArguments()) {
+    parser.validationError() <<
+      "Reference to " << name_ << " has the wrong number of arguments.";
+    return false;
+  }
+
+  // Argument indices are computed relative to the current stack frame.
+  frameSize_ = parser.abstractStack_.size();
+
+  // Calls which occur in a tail position are responsible for dropping items
+  // off of the stack.
+  drop_ = parser.abstractStack_.localSize();
+
+  // Drop everything in the local block off of the abstract stack.
+  parser.abstractStack_.rewind(0);
+
+  // Top-level rules must return a single value.
+  parser.abstractStack_.push_back(nullptr);
+
+  return true;
+}
+
+
+bool ParseReference::accepts(const Token& tok) {
+  return definition_->accepts(tok);
+}
+
+
+ParseRule* ParseReference::parse(Parser& parser) {
+  unsigned frameStart = parser.resultStack_.size() - frameSize_;
+  for (unsigned i=0, n=arguments_.size(); i<n; ++i)
+    parser.resultStack_.moveAndPush(frameStart + i);
+  if (drop_ > 0)
+    parser.resultStack_.drop(drop_, arguments_.size());
+  return definition_;
+}
+
+
+void ParseReference::prettyPrint(Parser& parser, std::ostream& out) {
+  out << name_;
+  if (argNames_.size() > 0) {
+    out << "(";
+    for (unsigned i=0,n=argNames_.size(); i<n; ++i) {
+      if (i > 0) out << ",";
+      out << argNames_[i];
+    }
+    out << ")";
+  }
+}
+
+
 
 /*** ParseAction ***/
 
@@ -568,15 +568,25 @@ public:
   }
 
   ParseResult reduceEmptyList(ast::EmptyList &node) {
-    // null can be used as an empty list.
-    return ParseResult(static_cast<ParseResult::ListType*>(nullptr));
+    return ParseResult();   // Use null as an empty list.
   }
 
   ParseResult reduceAppend(ast::Append &node,
                            ParseResult &&l, ParseResult &&e) {
-    ParseResult::ListType *lst = l.getASTNodeList();   // consumes l
-    lst->push_back(e.getASTNode());                    // consumes e
-    return ParseResult(lst);
+    unsigned short k = e.kind();
+    void* enode = e.getNode();   // consumes e
+    ParseResult::ListType* lst;
+    if (l.empty()) {
+      lst = new ParseResult::ListType();
+    }
+    else {
+      if (l.kind() != k)
+        parser_->parseError(SourceLocation()) <<
+          "Lists must contain the same kind of node.";
+      lst = l.getNodeList();     // consumes l
+    }
+    lst->push_back(enode);
+    return ParseResult(k, lst);
   }
 
   ASTInterpretReducer() : parser_(nullptr), frameStart_(0) { }

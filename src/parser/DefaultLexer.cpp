@@ -34,7 +34,6 @@ const char* DefaultLexer::getTokenIDString(unsigned tid) {
     case TK_Identifier:   return "TK_Identifier";
     case TK_Operator:     return "TK_Operator";
 
-    case TK_LitBoolean:   return "TK_LitBoolean";
     case TK_LitCharacter: return "TK_LitCharacter";
     case TK_LitInteger:   return "TK_LitInteger";
     case TK_LitFloat:     return "TK_LitFloat";

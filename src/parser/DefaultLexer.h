@@ -48,7 +48,6 @@ public:
     TK_Identifier = TK_BasicTokenEnd,
     TK_Operator,
 
-    TK_LitBoolean,
     TK_LitCharacter,
     TK_LitInteger,
     TK_LitFloat,
