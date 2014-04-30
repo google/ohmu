@@ -14,36 +14,55 @@
 // limitations under the License.
 //
 //===----------------------------------------------------------------------===//
+// Fixed width x64 instruction.
+// This file defines a 128 bit instruction that can encode all of the
+// information for any x64 instruction in a fixed format.  The first 8 bytes
+// store all of the prefixes, the opcode, the register references and the
+// addressing mode.  The second 8 bytes contain displacement and or immediate
+// information.
+//
+// This file also defines an encode function that encodes the fixed width format
+// into the variable width format that can be executed.
+//
+// This format and encoding are designed to be both compact and efficient and
+// sacrifice some amount of readability to do so.  We do not expect any of this
+// to be readable by someone without understanding of x64 encoding.
+//
+// OSDev reference:
+// http://wiki.osdev.org/X86-64_Instruction_Encoding
+//
+// Intel reference manual:
+// http://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-
+// architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//===----------------------------------------------------------------------===//
 #pragma once
 
-#ifdef _MSC_VER
-#pragma warning(disable : 4201) // nonstandard extension used : nameless struct/union
-#else
-#define __forceinline __attribute__((always_inline))
-#endif
+enum SegmentEncoding { DEFAULT_SEGMENT, INVALD_SEGMENT, FS, GS };
+enum LockRepEncoding { NO_LOCKREP, LOCK_PREFIX, REPZ_PREFIX, REPNZ_PREFIX };
+enum AddressEncoding { DEFAULT_ADDRESS_SIZE, ADDRESS_SIZE_OVERRIDE };
 
 struct /*__declspec(align(16))*/ Instr {
   typedef unsigned char byte;
 
-  enum SegmentEncoding { FS_ENCODING = 2, GS_ENCODING };
-  enum LockRepEncoding { LOCK_ENCODING = 1, REPZ_ENCODING, REPNZ_ENCODING };
-
-  __forceinline Instr() {}
-  __forceinline Instr(unsigned long long instr, int imm32, int disp32)
+  Instr() {}
+  Instr(unsigned long long instr, int imm32, int disp32)
     : instr(instr), imm32(imm32), disp32(disp32) {}
 
-  byte* Encode(byte* p) const;
+  byte* encode(byte* p) const;
 
   union {
     struct {
+      // Vex byte 3.
       byte code_map : 4;
       byte invalid : 1;
       byte long_vex : 3;
 
+      // The opcode/raw data info.
       byte align_pad : 4;
       byte imm_payload : 1;
       byte : 3;
 
+      // Postfixes flags.
       byte imm_size : 2;
       byte has_imm : 1;
       byte rip_addr : 1;
@@ -52,7 +71,7 @@ struct /*__declspec(align(16))*/ Instr {
       byte fixed_base : 1;
       byte force_disp : 1;
 
-      // Opcode prefixes
+      // Prefixes flags.
       byte lock_rep : 2;
       byte size_prefix : 1;
       byte addr_prefix : 1;
@@ -60,6 +79,7 @@ struct /*__declspec(align(16))*/ Instr {
       byte use_rex : 1;
       byte segment : 2;
 
+      // Rex byte.
       byte b : 1;
       byte x : 1;
       byte r : 1;
@@ -68,15 +88,18 @@ struct /*__declspec(align(16))*/ Instr {
       byte rex_1 : 1;
       byte : 1;
 
+      // Vex byte 2.
       byte simd_prefix : 2;
       byte l : 1;
       byte vvvv : 4;
       byte e : 1;
 
+      // Modrm.
       byte rm : 3;
       byte reg : 3;
       byte mod : 2;
 
+      // Sib.
       byte base : 3;
       byte index : 3;
       byte scale : 2;
@@ -99,48 +122,60 @@ struct /*__declspec(align(16))*/ Instr {
   };
 };
 
-inline Instr::byte* Instr::Encode(byte* p) const {
+inline Instr::byte* Instr::encode(byte* p) const {
   if (invalid) {
     if (imm_payload) goto ENCODE_NO_DISP;
     return p;
   }
+  // Handle all prefixes, including rex and vex.
   if (prefix) {
+    // Handle legacy prefixes.
     if (prefix & 0xcf) {
       if (segment) *p++ = segment ^ 0x66;
       if (lock_rep) *p++ = lock_rep ^ 0xf1;
       if (size_prefix) *p++ = 0x66;
       if (addr_prefix) *p++ = 0x67;
     }
+    // Handle vex prefix.
     if (use_vex) {
       byte rxb = rex << 5;
       if (!long_vex) {
+        // Encode 2-byte vex prefix.
         *p++ = 0xc5;
         *p++ = rxb ^ vex2 ^ 0x80;
         goto ENCODE_OPCODE;
       }
+      // Encode 3-byte vex prefix.
       *p++ = 0xc4;
       *p++ = rxb ^ vex1;
       *p++ = vex2;
       goto ENCODE_OPCODE;
     }
+    // Encode rex prefix.
     if (use_rex) *p++ = rex;
   }
+  // Handle opcode-prefixes.
   if (code_map) {
     *p++ = 0x0f;
     if (code_map & 0x02)
       *p++ = (vex1 ^ 0xfe) << 1; // high bits of vex1 are 0
   }
 ENCODE_OPCODE:
+  //Encode the opcode.
   *p++ = opcode;
   if (!has_modrm) goto ENCODE_NO_DISP;
   {
+    // Save the location of the modrm byte.
     byte* pmod = p;
+    // Encode the modrm byte.
     *p++ = modrm;
     if (mod) goto ENCODE_NO_DISP;
+    // Handle the sib byte.
     if (has_sib) *p++ = sib;
     if (fixed_base) goto ENCODE_DISP32;
     if (disp32 == 0 && !force_disp) goto ENCODE_NO_DISP;
     if ((char)disp32 == disp32) {
+      // Encode an 8-bit displacement.
       *pmod |= 0x40;
       *p++ = (byte)disp32;
       goto ENCODE_NO_DISP;
@@ -148,13 +183,15 @@ ENCODE_OPCODE:
     *pmod |= 0x80;
   }
 ENCODE_DISP32:
+  // Encode a 32-bit displacement.
   *(int*)p = disp32;
   p += 4;
 ENCODE_NO_DISP:
+  // Encode an immediate.
   if (has_imm) {
     if (imm_size == 0) { *p++ = (byte)imm32; }
     else if (imm_size == 2) { *(int*)p = imm32; p += 4; }
-    else if (imm_size < 2) { *(short*)p = (short)imm32; p += 2; }
+    else if (imm_size <  2) { *(short*)p = (short)imm32; p += 2; }
     else                    { *(long long*)p = *(long long*)&imm32; p += 8; }
   }
   return p;
