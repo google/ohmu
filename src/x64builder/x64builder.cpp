@@ -110,8 +110,6 @@ int Log2(int a) {
   return i;
 }
 
-vector<string> call_list;
-
 struct Call {
   enum { USE_R = 1, USE_M = 2, USE_L = 4 };
   Call& PushArg(int Call::*x, int size) {
@@ -268,9 +266,9 @@ struct Call {
     for (int size = NO_ARGS; size <= AVX; size *= 2) {
       if (!(size_mask & size)) continue;
       SetSize(size);
-      if (rml_mask & USE_R) call_list.push_back(BuildCall(rml_mask & USE_R, size));
-      if (rml_mask & USE_M) call_list.push_back(BuildCall(rml_mask & USE_M, size));
-      if (rml_mask & USE_L) call_list.push_back(BuildCall(rml_mask & (USE_M | USE_L), size));
+      if (rml_mask & USE_R) list.push_back(BuildCall(rml_mask & USE_R, size));
+      if (rml_mask & USE_M) list.push_back(BuildCall(rml_mask & USE_M, size));
+      if (rml_mask & USE_L) list.push_back(BuildCall(rml_mask & (USE_M | USE_L), size));
     }
   }
 
@@ -292,7 +290,10 @@ struct Call {
   int ax_size;
   int cx_size;
   int d64_size;
+  static vector<string> list;
 };
+
+vector<string> Call::list;
 
 struct PrefixCode { int code; } const Ox0f = { 0x0f }, Ox38 = { 0x38 }, Ox3a = { 0x3a };
 int operator |(int a, PrefixCode b) { assert((unsigned)b.code <= 0xff); return a << 8 | b.code; }
@@ -469,8 +470,8 @@ int main() {
 
   // MOV to COND/SEG, MOVS, CMPS, XLAT, LOOP(N)E, J(E/R)CXZ, IN, OUT, INS, OUTS, STOS, LODS, far RET, IRET, ST/CL C/I/D, RC(L/R)
 
-  std::sort(call_list.begin(), call_list.end());
-  for (auto i = call_list.begin(); i != call_list.end(); ++i)
+  std::sort(Call::list.begin(), Call::list.end());
+  for (auto i = Call::list.begin(); i != Call::list.end(); ++i)
     fprintf(f, "%s", i->c_str());  fprintf(f, "};\n\n");
   fclose(instr_h);
   fclose(args_h);
