@@ -24,7 +24,10 @@ int main(int argc, const char** argv) {
   ohmu::parsing::DefaultLexer lexer;
   ohmu::parsing::BNFParser    bnfParser(&lexer);
   bnfParser.defineSyntax();
+  std::cout << "Syntax definitions: \n";
   bnfParser.printSyntax(std::cout);
+  std::cout << "Validating parser: \n";
+  bnfParser.setTraceValidate(true);
   if (!bnfParser.init())
     return -1;
 }

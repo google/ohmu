@@ -92,9 +92,47 @@ std::ostream& Parser::parseError(const SourceLocation& sloc) {
 }
 
 
+
+void AbstractStack::dump() {
+  std::cerr << "[";
+  for (unsigned i=0,n=stack_.size(); i<n; ++i) {
+	if (i==blockStart_) std::cerr << "| ";
+	if (stack_[i]) std::cerr << *stack_[i] << " ";
+	else std::cerr << "0 ";
+  }
+  if (blockStart_ == stack_.size())
+    std::cerr << "|";
+  std::cerr << "]";
+}
+
+
+// Small utility class to handle trace indentation.
+class TraceIndenter {
+public:
+  TraceIndenter(Parser& p, const char* msg, const std::string* name = 0)
+      : parser_(&p)
+  {
+	if (p.traceValidate_) {
+	  p.indent(std::cerr, p.traceIndent_);
+	  std::cerr << "--" << msg;
+	  if (name) std::cerr << " " << *name << " ";
+	  p.abstractStack_.dump();
+	  std::cerr << "\n";
+	}
+	++p.traceIndent_;
+  }
+  ~TraceIndenter() { --parser_->traceIndent_; }
+
+private:
+  Parser* parser_;
+};
+
+
+
 /*** ParseNone ***/
 
 bool ParseNone::init(Parser& parser) {
+  TraceIndenter indenter(parser, "none");
   return true;
 }
 
@@ -117,6 +155,7 @@ void ParseNone::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseToken ***/
 
 bool ParseToken::init(Parser& parser) {
+  TraceIndenter indenter(parser, "token");
   if (skip_)
     return true;
   parser.abstractStack_.push_back(nullptr);
@@ -135,9 +174,9 @@ ParseRule* ParseToken::parse(Parser& parser) {
     if (parser.trace_) {
       std::cout << "-- Matching token ["
                 << parser.look().id()
-                << "]: \""
+                << "]: %"
                 << parser.look().string()
-                << "\"\n";
+                << "\n";
     }
     if (skip_)
       parser.skip();
@@ -156,20 +195,23 @@ ParseRule* ParseToken::parse(Parser& parser) {
 
 
 void ParseToken::prettyPrint(Parser& parser, std::ostream& out) {
-  out << "[" << parser.getTokenIDString(tokenID_) << "]";
+  out << "%" << parser.getTokenIDString(tokenID_);
 }
 
 
 /*** ParseKeyword ***/
 
 bool ParseKeyword::init(Parser& parser) {
+  TraceIndenter indenter(parser, "keyword");
+
   if (keywordStr_.length() == 0) {
     parser.validationError() << "Invalid keyword.";
     return false;
   }
   tokenID_ = parser.registerKeyword(keywordStr_);
   if (parser.traceValidate_) {
-    std::cout << "Registered keyword " << keywordStr_ << " as "
+	parser.indent(std::cerr, parser.traceIndent_);
+    std::cout << "-- registered keyword " << keywordStr_ << " as "
       << tokenID_ << "\n";
   }
   return true;
@@ -184,6 +226,8 @@ void ParseKeyword::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseSequence ***/
 
 bool ParseSequence::init(Parser& parser) {
+  TraceIndenter indenter(parser, "sequence");
+
   if (!first_ || !second_) {
     parser.validationError() << "Invalid sequence.";
     return false;
@@ -244,6 +288,8 @@ void ParseSequence::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseOption ***/
 
 bool ParseOption::init(Parser& parser) {
+  TraceIndenter indenter(parser, "option");
+
   if (!left_ || !right_) {
     parser.validationError() << "Invalid option.";
     return false;
@@ -298,6 +344,8 @@ void ParseOption::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseRecurseLeft ***/
 
 bool ParseRecurseLeft::init(Parser& parser) {
+  TraceIndenter indenter(parser, "recurseLeft");
+
   if (!base_ || !rest_) {
     parser.validationError() << "Invalid recursive rule.";
   }
@@ -363,7 +411,7 @@ void ParseRecurseLeft::prettyPrint(Parser& parser, std::ostream& out) {
 
   out << "( ";
   base_->prettyPrint(parser, out);
-  out << "\n|* ";
+  out << "\n|*(" << letName_ << ")";
   rest_->prettyPrint(parser, out);
   out << "\n)";
 }
@@ -372,6 +420,8 @@ void ParseRecurseLeft::prettyPrint(Parser& parser, std::ostream& out) {
 /*** ParseNamedDefinition ***/
 
 bool ParseNamedDefinition::init(Parser& parser) {
+  TraceIndenter indenter(parser, "definition:", &name_);
+
   if (!rule_) {
     parser.validationError() <<
       "Syntax rule " << name_  << " has not been defined.\n";
@@ -380,7 +430,7 @@ bool ParseNamedDefinition::init(Parser& parser) {
 
   ParseNamedDefinition* existingName = parser.findDefinition(name_);
   if (!existingName) {
-	parser.validationError() << 
+	parser.validationError() <<
 	  "Syntax rule " << name_ << " is not defined in the parser.";
 	return false;
   }
@@ -388,10 +438,6 @@ bool ParseNamedDefinition::init(Parser& parser) {
     parser.validationError() <<
       "Syntax rule " << name_ << " is already defined.";
     return false;
-  }
-
-  if (parser.traceValidate_) {
-    std::cout << "-- Validating rule: " << name_ << "\n";
   }
 
   // Push arguments onto stack.
@@ -442,6 +488,8 @@ void ParseNamedDefinition::prettyPrint(Parser& parser,
 /*** ParseReference ***/
 
 bool ParseReference::init(Parser& parser) {
+  TraceIndenter indenter(parser, "reference:", &name_);
+
   ParseNamedDefinition* def = parser.findDefinition(name_);
   if (!def) {
 	parser.validationError() << "No syntax definition for " << name_;
@@ -456,6 +504,8 @@ bool ParseReference::init(Parser& parser) {
 
   // Calculate indices for named arguments.
   for (auto &name : argNames_) {
+	// const char* cn = name.c_str();
+	// unsigned len = name.length();
     unsigned idx = parser.abstractStack_.getIndex(name);
     if (idx == AbstractStack::InvalidIndex) {
       parser.validationError() << "Identifier " << name << " not found.";
@@ -584,10 +634,10 @@ public:
                            ParseResult &&l, ParseResult &&e) {
     unsigned short k = e.kind();
     void* enode;
-    if (k == ParseResult::PRS_TokenStr) 
+    if (k == ParseResult::PRS_TokenStr)
       // FIXME -- source location and token id?
       enode = new Token(0, e.tokenStr(), SourceLocation());
-    else 
+    else
       enode = e.getNode();   // consumes e
     ParseResult::ListType* lst;
     if (l.empty()) {
@@ -622,6 +672,8 @@ public:
 
 
 bool ParseAction::init(Parser& parser) {
+  TraceIndenter indenter(parser, "action");
+
   if (!node_) {
     parser.validationError() << "Invalid action.";
     return false;

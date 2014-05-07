@@ -261,9 +261,6 @@ public:
   inline void addArgument(const std::string& arg) {
     argNames_.push_back(arg);
   }
-  void addArgumentIdx(unsigned i) {
-    arguments_.push_back(i);
-  }
 
  private:
   std::string              name_;
@@ -478,7 +475,7 @@ public:
   // Indices are computed with respect to the current frame.
   unsigned getIndex(const std::string &s) {
     for (unsigned i=0, n=stack_.size(); i<n; ++i) {
-      if (*stack_[i] == s) return i;
+      if (stack_[i] && *stack_[i] == s) return i;
     }
     return InvalidIndex;  // failure.
   }
@@ -527,6 +524,8 @@ public:
     stack_.clear();
   }
 
+  void dump();
+
 private:
   unsigned blockStart_;
   std::vector<std::string*> stack_;
@@ -537,9 +536,7 @@ private:
 class Parser {
 public:
   // Create a new parser.
-  Parser(Lexer* lexer)
-    : lexer_(lexer), parseError_(false), trace_(false), traceValidate_(false)
-  { }
+  Parser(Lexer* lexer) : lexer_(lexer) { }
 
   // Override this to construct an expression in the target language.
   virtual ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) = 0;
@@ -584,7 +581,7 @@ public:
   void printSyntax(std::ostream& out);
 
   void setTrace(bool b)         { trace_ = b; }
-  void setTraceValidate(bool b) { trace_ = b; }
+  void setTraceValidate(bool b) { traceValidate_ = b; }
 
 protected:
   typedef std::vector<ParseNamedDefinition*>           DefinitionVect;
@@ -602,6 +599,7 @@ protected:
   friend class ParseAction;
   friend class ASTIndexVisitor;
   friend class ASTInterpretReducer;
+  friend class TraceIndenter;
 
   // Initialize rule p.  This is used internally to make recursive calls.
   inline bool initRule(ParseRule* p);
@@ -631,17 +629,22 @@ protected:
   // output a parser syntax error.
   std::ostream& parseError(const SourceLocation& sloc);
 
+  void indent(std::ostream& out, unsigned n) {
+	for (unsigned i=0; i<n; ++i) out << " ";
+  }
+
 private:
-  Lexer*          lexer_;
+  Lexer*          lexer_ = nullptr;
   DefinitionVect  definitions_;
   DefinitionDict  definitionDict_;
 
   ResultStack     resultStack_;
   AbstractStack   abstractStack_;
-  bool            parseError_;
+  bool            parseError_ = false;
 
-  bool trace_;
-  bool traceValidate_;
+  bool trace_ = false;
+  bool traceValidate_ = false;
+  unsigned traceIndent_ = 0;
 };
 
 
