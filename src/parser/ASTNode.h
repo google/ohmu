@@ -37,8 +37,7 @@
 #ifndef OHMU_SURFACE_AST_H
 #define OHMU_SURFACE_AST_H
 
-#include "Token.h"
-
+#include "Util.h"
 
 namespace ohmu {
 namespace parsing {

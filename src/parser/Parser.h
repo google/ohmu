@@ -218,7 +218,7 @@ private:
 class ParseNamedDefinition : public ParseRule {
 public:
   ParseNamedDefinition(const std::string& name)
-    : ParseRule(PR_NamedDefinition), name_(name), rule_(0)
+    : ParseRule(PR_NamedDefinition), name_(name), rule_(nullptr)
   { }
 
   bool       init(Parser& parser) override;

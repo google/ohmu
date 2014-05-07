@@ -1,0 +1,173 @@
+
+// First rule for files
+Definitions ::= SlotList;
+
+// First rule for read-eval-print loop
+Command ::= 
+    %TK_Newline          { (LitNull) } 
+  | e=Expr %TK_Newline   { e }
+  ;
+
+Literal ::=
+    "null"               { (LitNull)         }
+  | "true"               { (LitBool "true")  }
+  | "false"              { (LitBool "false") }
+  | s= %TK_LitCharacter  { (LitChar    s)    }
+  | s= %TK_LitInteger    { (LitInt     s)    }
+  | s= %TK_LitFloat      { (LitFloat   s)    }
+  | s= %TK_LitString     { (LitString  s)    }
+  ;
+
+Value ::= 
+    Literal
+  | "\\" "(" Function  
+  | "@" x= %TK_Identifier v=Value   { (SFunction x v) }
+  | "{" ss=SlotList "}"             { (Record ss)     }
+  | "[" es=ExprList "]"             { (Array es)      }
+  ;
+
+Function ::= 
+    ")" FunBody 
+  | x= %TK_Identifier ":" t=Expr v=FunRest      { (Function x t v) }
+  ;
+
+FunRest ::=
+    ")" FunBody
+  | "," x= %TK_Identifier ":" t=Expr v=FunRest  { (Function x t v) }
+  ;
+
+FunBody ::= 
+    "=" Value
+  | ":" t=Expr "->" ( e=Expr   { (Code t e)         }
+                    | "_"      { (Code t (LitNull)) }
+                    )
+  ;
+
+Field ::= 
+  ":" t=Expr "=" ( e=Expr      { (Field t e)         }
+                 | "_"         { (Field t (LitNull)) }
+                 )
+  ;
+
+Slot ::= 
+    m= %TK_Identifier 
+      ( "(" f=Function ";"   { (Slot m f) }
+      | "=" v=Value    ";"   { (Slot m v) }
+      | f=Field        ";"   { (Slot m f) }
+      )
+  ;
+
+SlotList ::= 
+  s=Slot               { (LeafSeq s) }
+  |*(ss) s=Slot        { (TreeSeq ss (LeafSeq s)) }
+  ;
+  
+ExprList ::= 
+  e=Expr               { (LeafSeq e) }
+  |*(es) "," e=Expr    { (TreeSeq es (LeafSeq e)) }
+  ;
+
+Simple ::=
+    Value 
+  | s= %TK_Identifier  { (Identifier s) }
+  | "(" e=Expr ")"     { e } 
+  ;
+
+MkApply[f,a] ::=
+    ")"      { (Apply f a) }
+  | ","  app={ (Apply f a) }  b=Expr  MkApply[app, b]
+  ;
+
+MkIndex[a,i] ::=
+    "]"      { (Deref (ArrAdd a i)) }
+  | ","  idx={ (Deref (ArrAdd a i)) }  b=Expr  MkIndex[idx, b]
+  ;
+
+Postfix ::= 
+  Simple
+  |*(f) ( "(" ( ")"                     { (Call f)      }
+              | a=Expr  e=MkApply[f,a]  { (Call e)      }
+              )
+        | "@" "(" ( ")"                 { (SApply f)    }
+                  | a=Expr ")"          { (SApply f a)  }
+                  )
+        | "." m= %TK_Identifier         { (Project f m) }
+        | "[" i=Expr    MkIndex[f,i]  
+        )
+  ;
+
+Unary ::= 
+  Postfix
+  | "!" e=Unary             { (Not e)    }
+  | "~" e=Unary             { (BitNot e) }
+  ;
+
+Expr10 ::= 
+  Unary
+  |*(a) ( "*" b=Unary       { (Mult a b) }
+        | "/" b=Unary       { (Div  a b) }
+        )
+  ;
+
+Expr20 ::= 
+  Expr10
+  |*(a) ( "+" b=Expr10      { (Add a b) }
+        | "-" b=Expr10      { (Sub a b) }
+        )
+  ;  
+
+Expr30 ::= 
+  Expr20
+  |*(a) ( "<<" b=Expr20     { (Shl a b) }
+        | ">>" b=Expr20     { (Shr a b) }
+        )
+  ;
+
+Expr40 ::= 
+  a=Expr30 ( "==" b=Expr30  { (Eq  a b) }
+           | "!=" b=Expr30  { (Neq a b) }
+           | "<"  b=Expr30  { (Le  a b) }
+           | "<=" b=Expr30  { (Leq a b) }
+           | ">"  b=Expr30  { (Ge  a b) }
+           | ">=" b=Expr30  { (Geq a b) }
+           | nil            { a }
+           )
+  ;
+
+Expr50 ::= 
+  Expr40
+  |*(a) "&" b=Expr40 { (BitAnd a b) }
+  ;
+
+Expr51 ::= 
+  Expr50
+  |*(a) "^" b=Expr50 { (BitXor a b) }
+  ;
+
+Expr52 ::= 
+  Expr51
+  |*(a) "|" b=Expr51 { (BitOr a b) }
+  ;
+  
+Expr60 ::= 
+  Expr52
+  |*(a) "&&" b=Expr52 { (And a b) }
+  ;  
+ 
+Expr61 ::= 
+  Expr60
+  |*(a) "||" b=Expr60 { (Or a b) }
+  ;
+
+Expr90 ::=
+  a=Expr61 (":=" b=Expr { (Assign a b) }
+           | nil        { a }
+           )  
+  ;
+
+Expr ::= 
+    Expr90
+  | "let" s= %TK_Identifier "=" e1=Expr ";" e2=Expr   { (Let s e1 e2) }
+  | "if" "(" c=Expr ")" "then" e1=Expr "else" e2=Expr { (If c e1 e2)  }
+  ;
+

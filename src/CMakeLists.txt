@@ -18,3 +18,5 @@ endif()
 
 add_subdirectory (parser)
 add_subdirectory (x64builder)
+add_subdirectory (test)
+

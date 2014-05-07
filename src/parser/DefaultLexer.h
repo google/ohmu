@@ -39,34 +39,34 @@
 
 
 namespace ohmu {
-
 namespace parsing {
 
+
+enum DefaultTokenIDs {
+  TK_Identifier = TK_BasicTokenEnd,
+  TK_Operator,
+
+  TK_LitCharacter,
+  TK_LitInteger,
+  TK_LitFloat,
+  TK_LitString,
+
+  TK_LParen,
+  TK_RParen,
+  TK_LCurlyBrace,
+  TK_RCurlyBrace,
+  TK_LSquareBrace,
+  TK_RSquareBrace,
+  TK_Comma,
+  TK_Semicolon,
+  TK_Colon,
+  TK_Period,
+
+  TK_BeginKeywordIDs
+};
+
+
 class DefaultLexer : public Lexer {
-public:
-  enum DefaultTokenIDs {
-    TK_Identifier = TK_BasicTokenEnd,
-    TK_Operator,
-
-    TK_LitCharacter,
-    TK_LitInteger,
-    TK_LitFloat,
-    TK_LitString,
-
-    TK_LParen,
-    TK_RParen,
-    TK_LCurlyBrace,
-    TK_RCurlyBrace,
-    TK_LSquareBrace,
-    TK_RSquareBrace,
-    TK_Comma,
-    TK_Semicolon,
-    TK_Colon,
-    TK_Period,
-
-    TK_BeginKeywordIDs
-  };
-
 public:
   DefaultLexer() : interactive_(false) {
     setKeywordStartID(TK_BeginKeywordIDs);

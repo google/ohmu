@@ -302,7 +302,7 @@ bool ParseRecurseLeft::init(Parser& parser) {
     parser.validationError() << "Invalid recursive rule.";
   }
 
-   unsigned lsz = parser.abstractStack_.localSize();
+  unsigned lsz = parser.abstractStack_.localSize();
 
   // First is parsed in its own local block, so any actions at the end which
   // rewind the stack will only rewind to this point.
@@ -379,6 +379,11 @@ bool ParseNamedDefinition::init(Parser& parser) {
   }
 
   ParseNamedDefinition* existingName = parser.findDefinition(name_);
+  if (!existingName) {
+	parser.validationError() << 
+	  "Syntax rule " << name_ << " is not defined in the parser.";
+	return false;
+  }
   if (existingName != this) {
     parser.validationError() <<
       "Syntax rule " << name_ << " is already defined.";
@@ -437,12 +442,16 @@ void ParseNamedDefinition::prettyPrint(Parser& parser,
 /*** ParseReference ***/
 
 bool ParseReference::init(Parser& parser) {
+  ParseNamedDefinition* def = parser.findDefinition(name_);
+  if (!def) {
+	parser.validationError() << "No syntax definition for " << name_;
+    return false;
+  }
   if (!definition_) {
-    definition_ = parser.findDefinition(name_);
-    if (!definition_) {
-      parser.validationError() << "No syntax definition for " << name_;
-      return false;
-    }
+    definition_ = def;
+  } else if (definition_ != def) {
+	parser.validationError() << "Inconsistent definitions for " << name_;
+	return false;
   }
 
   // Calculate indices for named arguments.
@@ -574,7 +583,12 @@ public:
   ParseResult reduceAppend(ast::Append &node,
                            ParseResult &&l, ParseResult &&e) {
     unsigned short k = e.kind();
-    void* enode = e.getNode();   // consumes e
+    void* enode;
+    if (k == ParseResult::PRS_TokenStr) 
+      // FIXME -- source location and token id?
+      enode = new Token(0, e.tokenStr(), SourceLocation());
+    else 
+      enode = e.getNode();   // consumes e
     ParseResult::ListType* lst;
     if (l.empty()) {
       lst = new ParseResult::ListType();
