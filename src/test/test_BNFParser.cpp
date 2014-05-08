@@ -27,7 +27,7 @@ int main(int argc, const char** argv) {
   std::cout << "Syntax definitions: \n";
   bnfParser.printSyntax(std::cout);
   std::cout << "Validating parser: \n";
-  bnfParser.setTraceValidate(true);
+  // bnfParser.setTraceValidate(true);
   if (!bnfParser.init())
     return -1;
 }

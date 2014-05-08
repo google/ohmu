@@ -23,6 +23,7 @@
 
 #include <iostream>
 
+#include "Util.h"
 #include "Token.h"
 #include "Lexer.h"
 #include "Parser.h"
@@ -96,12 +97,13 @@ std::ostream& Parser::parseError(const SourceLocation& sloc) {
 void AbstractStack::dump() {
   std::cerr << "[";
   for (unsigned i=0,n=stack_.size(); i<n; ++i) {
-	if (i==blockStart_) std::cerr << "| ";
-	if (stack_[i]) std::cerr << *stack_[i] << " ";
-	else std::cerr << "0 ";
+    if (i==blockStart_) std::cerr << "| ";
+    else if (i==lexicalStart_) std::cerr << ". ";
+    if (stack_[i]) std::cerr << *stack_[i] << " ";
+    else std::cerr << "0 ";
   }
-  if (blockStart_ == stack_.size())
-    std::cerr << "|";
+  if (blockStart_ == stack_.size()) std::cerr << "|";
+  else if (lexicalStart_ == stack_.size()) std::cerr << ". ";
   std::cerr << "]";
 }
 
@@ -112,16 +114,26 @@ public:
   TraceIndenter(Parser& p, const char* msg, const std::string* name = 0)
       : parser_(&p)
   {
-	if (p.traceValidate_) {
-	  p.indent(std::cerr, p.traceIndent_);
-	  std::cerr << "--" << msg;
-	  if (name) std::cerr << " " << *name << " ";
-	  p.abstractStack_.dump();
-	  std::cerr << "\n";
-	}
-	++p.traceIndent_;
+    if (p.traceValidate_) {
+      p.indent(std::cerr, p.traceIndent_);
+      std::cerr << "--" << msg;
+      if (name) std::cerr << " " << *name << " ";
+      p.abstractStack_.dump();
+      std::cerr << "\n";
+    }
+    ++p.traceIndent_;
   }
   ~TraceIndenter() { --parser_->traceIndent_; }
+
+private:
+  Parser* parser_;
+};
+
+
+class PrintIndenter {
+public:
+  PrintIndenter(Parser& p) : parser_(&p) { ++p.printIndent_; }
+  ~PrintIndenter() { --parser_->printIndent_; }
 
 private:
   Parser* parser_;
@@ -133,6 +145,12 @@ private:
 
 bool ParseNone::init(Parser& parser) {
   TraceIndenter indenter(parser, "none");
+
+  // None doesn't know how to unwind the stack.
+  if (parser.abstractStack_.lexicalSize() > 0) {
+    parser.validationError() << "Sequence cannot end with none.";
+    return false;
+  }
   return true;
 }
 
@@ -156,8 +174,16 @@ void ParseNone::prettyPrint(Parser& parser, std::ostream& out) {
 
 bool ParseToken::init(Parser& parser) {
   TraceIndenter indenter(parser, "token");
+
+  // Tokens don't know how to unwind the stack.
+  if (parser.abstractStack_.lexicalSize() > 0) {
+    parser.validationError() << "Sequence cannot end with a token.";
+    return false;
+  }
+
   if (skip_)
     return true;
+
   parser.abstractStack_.push_back(nullptr);
   return true;
 }
@@ -210,9 +236,15 @@ bool ParseKeyword::init(Parser& parser) {
   }
   tokenID_ = parser.registerKeyword(keywordStr_);
   if (parser.traceValidate_) {
-	parser.indent(std::cerr, parser.traceIndent_);
+    parser.indent(std::cerr, parser.traceIndent_);
     std::cout << "-- registered keyword " << keywordStr_ << " as "
       << tokenID_ << "\n";
+  }
+
+  // Keywords don't know how to unwind the stack.
+  if (parser.abstractStack_.lexicalSize() > 0) {
+    parser.validationError() << "Sequence cannot end with keyword.";
+    return false;
   }
   return true;
 }
@@ -233,33 +265,31 @@ bool ParseSequence::init(Parser& parser) {
     return false;
   }
 
-  unsigned lsz = parser.abstractStack_.localSize();
-
-  // First is parsed in its own local block, so any actions at the end which
+  // first_ is parsed in its own local block, so any actions at the end which
   // rewind the stack will only rewind to this point.
   unsigned localblock = parser.abstractStack_.enterLocalBlock();
   bool success = parser.initRule(first_);
-  parser.abstractStack_.exitLocalBlock(localblock);
   if (!success)
     return false;
 
-  unsigned nvals = parser.abstractStack_.localSize() - lsz;
+  unsigned nvals = parser.abstractStack_.localSize();
   if (nvals > 1) {
     parser.validationError() << "Rule cannot return more than one value.";
     return false;
   }
+  parser.abstractStack_.exitLocalBlock(localblock);
 
   if (hasLetName()) {
     if (nvals == 1) {
-      parser.abstractStack_[lsz] = &letName_;
+      unsigned back = parser.abstractStack_.size()-1;
+      parser.abstractStack_[back] = &letName_;
     }
     else {
       parser.validationError() << "Named subrule '" << letName_
         << "does not return a value.";
-      // we can recover from this.
+      return false;
     }
   }
-
   success = parser.initRule(second_);
   return success;
 }
@@ -295,26 +325,34 @@ bool ParseOption::init(Parser& parser) {
     return false;
   }
 
-  unsigned initialSz = parser.abstractStack_.localSize();
+  // Enter a new lexical scope.  Stack rewinds will only rewind back to
+  // this point.
+  unsigned scope = parser.abstractStack_.enterLexicalScope();
+
   bool success = parser.initRule(left_);
   if (!success)
     return false;
-  unsigned leftSz = parser.abstractStack_.localSize();
+  unsigned leftSz = parser.abstractStack_.lexicalSize();
 
-  parser.abstractStack_.rewind(initialSz);
+  parser.abstractStack_.rewind();
   success = parser.initRule(right_);
   if (!success)
     return false;
+  unsigned rightSz = parser.abstractStack_.lexicalSize();
 
-  if (parser.abstractStack_.localSize() != leftSz) {
+  parser.abstractStack_.exitLexicalScope(scope);
+
+  if (leftSz != rightSz) {
     parser.validationError() <<
-      "Different options must return the same number of results.";
+      "Different options must return the same number of results: " <<
+      leftSz << "," << rightSz;
     return false;
   }
 
-  // Erase any names introduced by the option.
-  for (unsigned i = initialSz; i < leftSz; ++i)
-    parser.abstractStack_[i] = nullptr;
+  // left and right have both rewound to here; we need to rewind to our caller.
+  parser.abstractStack_.rewind();
+  for (unsigned i=0; i < rightSz; ++i)
+    parser.abstractStack_.push_back(0);
   return success;
 }
 
@@ -333,11 +371,29 @@ ParseRule* ParseOption::parse(Parser& parser) {
 
 
 void ParseOption::prettyPrint(Parser& parser, std::ostream& out) {
+  PrintIndenter indent(parser);
+  out << "\n";
+  parser.indent(out, parser.printIndent_*2);
   out << "( ";
-  left_->prettyPrint(parser, out);
-  out << "\n| ";
-  right_->prettyPrint(parser, out);
-  out << "\n)";
+
+  ParseOption* opt = this;
+  ParseOption* last = this;
+  while (opt) {
+    opt->left_->prettyPrint(parser, out);
+
+    out << "\n";
+    parser.indent(out, parser.printIndent_*2);
+    out << "| ";
+
+    last = opt;
+    opt = dyn_cast<ParseOption>(opt->right_);
+  }
+
+  last->right_->prettyPrint(parser, out);
+
+  out << "\n";
+  parser.indent(out, parser.printIndent_*2);
+  out << ")";
 }
 
 
@@ -350,17 +406,14 @@ bool ParseRecurseLeft::init(Parser& parser) {
     parser.validationError() << "Invalid recursive rule.";
   }
 
-  unsigned lsz = parser.abstractStack_.localSize();
-
-  // First is parsed in its own local block, so any actions at the end which
+  // base_ is parsed in its own local block, so any actions at the end which
   // rewind the stack will only rewind to this point.
   unsigned localblock = parser.abstractStack_.enterLocalBlock();
   bool success = parser.initRule(base_);
-  parser.abstractStack_.exitLocalBlock(localblock);
   if (!success)
     return false;
 
-  unsigned nvals = parser.abstractStack_.localSize() - lsz;
+  unsigned nvals = parser.abstractStack_.localSize();
   if (nvals > 1) {
     parser.validationError() << "Rule cannot return more than one value.";
     return false;
@@ -368,22 +421,26 @@ bool ParseRecurseLeft::init(Parser& parser) {
 
   if (hasLetName()) {
     if (nvals == 1) {
-      parser.abstractStack_[lsz] = &letName_;
+      unsigned back = parser.abstractStack_.size()-1;
+      parser.abstractStack_[back] = &letName_;
     }
     else {
       parser.validationError() << "Named subrule '" << letName_
         << "does not return a value.";
-      // we can recover from this.
+      return false;
     }
   }
 
-  unsigned bsz = parser.abstractStack_.localSize();
   success = parser.initRule(rest_);
+  if (!success)
+    return false;
 
-  if (parser.abstractStack_.localSize() != bsz) {
+  if (parser.abstractStack_.localSize() != nvals) {
     parser.validationError() << "Recursion returns wrong number of values.";
     return false;
   }
+  parser.abstractStack_.exitLocalBlock(localblock);
+
   return success;
 }
 
@@ -409,11 +466,21 @@ void ParseRecurseLeft::prettyPrint(Parser& parser, std::ostream& out) {
   if (!rest_)
     return base_->prettyPrint(parser, out);
 
+  PrintIndenter indent(parser);
+  out << "\n";
+  parser.indent(out, parser.printIndent_*2);
   out << "( ";
+
   base_->prettyPrint(parser, out);
-  out << "\n|*(" << letName_ << ")";
+  out << "\n";
+  parser.indent(out, parser.printIndent_*2);
+  out << "|*(" << letName_ << ") ";
   rest_->prettyPrint(parser, out);
-  out << "\n)";
+
+
+  out << "\n";
+  parser.indent(out, parser.printIndent_*2);
+  out << ") ";
 }
 
 
@@ -430,9 +497,9 @@ bool ParseNamedDefinition::init(Parser& parser) {
 
   ParseNamedDefinition* existingName = parser.findDefinition(name_);
   if (!existingName) {
-	parser.validationError() <<
-	  "Syntax rule " << name_ << " is not defined in the parser.";
-	return false;
+    parser.validationError() <<
+      "Syntax rule " << name_ << " is not defined in the parser.";
+    return false;
   }
   if (existingName != this) {
     parser.validationError() <<
@@ -470,16 +537,16 @@ ParseRule* ParseNamedDefinition::parse(Parser& parser) {
 
 void ParseNamedDefinition::prettyPrint(Parser& parser,
                                        std::ostream& out) {
-  out << name_;
+  out << "\n" << name_;
   if (argNames_.size() > 0) {
-    out << "(";
+    out << "[";
     for (unsigned i=0,n=argNames_.size(); i<n; ++i) {
       if (i > 0) out << ",";
       out << argNames_[i];
     }
-    out << ")";
+    out << "]";
   }
-  out << " ::= \n";
+  out << " ::= ";
   rule_->prettyPrint(parser, out);
   out << ";\n";
 }
@@ -492,20 +559,18 @@ bool ParseReference::init(Parser& parser) {
 
   ParseNamedDefinition* def = parser.findDefinition(name_);
   if (!def) {
-	parser.validationError() << "No syntax definition for " << name_;
+    parser.validationError() << "No syntax definition for " << name_;
     return false;
   }
   if (!definition_) {
     definition_ = def;
   } else if (definition_ != def) {
-	parser.validationError() << "Inconsistent definitions for " << name_;
-	return false;
+    parser.validationError() << "Inconsistent definitions for " << name_;
+    return false;
   }
 
   // Calculate indices for named arguments.
   for (auto &name : argNames_) {
-	// const char* cn = name.c_str();
-	// unsigned len = name.length();
     unsigned idx = parser.abstractStack_.getIndex(name);
     if (idx == AbstractStack::InvalidIndex) {
       parser.validationError() << "Identifier " << name << " not found.";
@@ -527,8 +592,8 @@ bool ParseReference::init(Parser& parser) {
   // off of the stack.
   drop_ = parser.abstractStack_.localSize();
 
-  // Drop everything in the local block off of the abstract stack.
-  parser.abstractStack_.rewind(0);
+  // Drop everything in the lexical scope off of the abstract stack.
+  parser.abstractStack_.rewind();
 
   // Top-level rules must return a single value.
   parser.abstractStack_.push_back(nullptr);
@@ -555,12 +620,12 @@ ParseRule* ParseReference::parse(Parser& parser) {
 void ParseReference::prettyPrint(Parser& parser, std::ostream& out) {
   out << name_;
   if (argNames_.size() > 0) {
-    out << "(";
+    out << "[";
     for (unsigned i=0,n=argNames_.size(); i<n; ++i) {
       if (i > 0) out << ",";
       out << argNames_[i];
     }
-    out << ")";
+    out << "]";
   }
 }
 
@@ -689,8 +754,8 @@ bool ParseAction::init(Parser& parser) {
   ASTIndexVisitor visitor(&parser);
   visitor.traverse(node_);
 
-  // Drop everything in the local block off of the abstract stack.
-  parser.abstractStack_.rewind(0);
+  // Drop everything in the current lexical scope off of the abstract stack.
+  parser.abstractStack_.rewind();
 
   // Actions will return a single value.
   parser.abstractStack_.push_back(nullptr);
@@ -713,8 +778,10 @@ ParseRule* ParseAction::parse(Parser& parser) {
 }
 
 void ParseAction::prettyPrint(Parser& parser, std::ostream& out) {
-  // TODO
-  out << "{ ... }";
+  out << "{ ";
+  ast::PrettyPrinter printer;
+  printer.print(node_, out);
+  out << " }";
 }
 
 

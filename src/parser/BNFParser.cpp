@@ -28,7 +28,7 @@ void BNFParser::defineSyntax() {
   PNamedRule option(this, "option");
   PNamedRule astNode(this, "astNode");
 
-  // astNodeList ::= 
+  // astNodeList ::=
   //   { [] }
   //   |*(es)  e=astNode { (append es e) };
   PNamedRule astNodeList(this, "astNodeList");
@@ -36,7 +36,7 @@ void BNFParser::defineSyntax() {
     PLet("es", PReturn(new ast::EmptyList()))
     ^= (PLet("e", astNode.ref()) >>= PReturn("append", "es", "e"));
 
-  // astNode ::= 
+  // astNode ::=
   //    s=%TK_LitString   { (tokenStr s)  }
   //    id=%TK_Identifier { (variable id) }
   //    "(" f=%TK_Identifier args=astNodeList ")" { (construct f args) };
@@ -49,7 +49,7 @@ void BNFParser::defineSyntax() {
         PKeyword(")") >>=
         PReturn("construct", "f", "args"));
 
-  // simple ::= 
+  // simple ::=
   //     s=%TK_LitString      { (keyword s) }
   //   | "%" s=%TK_Identifier { (token s)   }
   //   | "(" e=option ")"     { e }
@@ -57,39 +57,39 @@ void BNFParser::defineSyntax() {
   PNamedRule simple(this, "simple");
   simple %=
        (PLet("s", PToken(TK_LitString)) >>= PReturn("keyword", "s"))
-    |= (PKeyword("%") >>= 
+    |= (PKeyword("%") >>=
         PLet("s", PToken(TK_Identifier)) >>=
         PReturn("token", "s"))
-    |= (PKeyword("(") >>= 
+    |= (PKeyword("(") >>=
         PLet("e", option.ref()) >>=
-        PKeyword(")") >>= 
+        PKeyword(")") >>=
         PReturnVar("e"))
-    |= (PKeyword("{") >>= 
-        astNode.ref() >>=
-        PKeyword("}") >>= 
+    |= (PKeyword("{") >>=
+        PLet("e", astNode.ref()) >>=
+        PKeyword("}") >>=
         PReturn("action", "e"));
-  
 
-  // arguments ::= 
+
+  // arguments ::=
   //   id=%TK_Identifier { (append [] id) }
   //   |*(as) "," id=%TK_Identifier { (append as id) };
   PNamedRule arguments(this, "arguments");
-  arguments %= 
-    PLet("as", 
-       (PLet("id", PToken(TK_Identifier)) >>= 
+  arguments %=
+    PLet("as",
+       (PLet("id", PToken(TK_Identifier)) >>=
         PReturn("append", nullptr, "id")))
-    ^= (PKeyword(",") >>= PLet("id", PToken(TK_Identifier)) >>= 
+    ^= (PKeyword(",") >>= PLet("id", PToken(TK_Identifier)) >>=
         PReturn("append", "as", "id"));
 
   // // Parse arguments, if any, and construct a reference from id
-  // reference[id] ::= 
+  // reference[id] ::=
   //     "[" as=arguments "]" { (reference id as) }
   //   | { (reference id []) };
   PNamedRule reference(this, "reference");
-  reference["id"] %= 
+  reference["id"] %=
        (PKeyword("[") >>=
-        PLet("as", arguments.ref()) >>= 
-        PKeyword("]") >>= 
+        PLet("as", arguments.ref()) >>=
+        PKeyword("]") >>=
         PReturn("reference", "id", "as"))
     |= PReturn("reference", "id", nullptr);
 
@@ -97,7 +97,7 @@ void BNFParser::defineSyntax() {
   //     simple
   //   | id=%TK_Identifier reference[id]
   PNamedRule simpleCall(this, "simpleCall");
-  simpleCall %= 
+  simpleCall %=
        simple.ref()
     |= (PLet("id", PToken(TK_Identifier)) >>= reference.ref("id"));
 
@@ -106,21 +106,21 @@ void BNFParser::defineSyntax() {
   //     sq=sequence { (sequence e sq) }
   //   | { e };
   PNamedRule maybeSequence(this, "maybeSequence");
-  maybeSequence["e"] %= 
+  maybeSequence["e"] %=
         (PLet("sq", sequence.ref()) >>= PReturn("sequence", "e", "sq"))
      |= PReturnVar("e");
 
-  // sequence ::= 
+  // sequence ::=
   //     e=simple  maybeSequence(e)
   //   | id=%TK_Identifier ( "=" e=simpleCall sq=sequence { (sequence id e sq) }
   //                       | e=reference[id]  maybeSequence(e)
   //                       );
-  sequence %= 
+  sequence %=
        (PLet("e", simple.ref()) >>= maybeSequence.ref("e"))
-    |= (PLet("id", PToken(TK_Identifier)) >>= 
-          (  (PKeyword("=") >>= 
-              PLet("e", simpleCall.ref()) >>= 
-              PLet("sq", sequence.ref()) >>= 
+    |= (PLet("id", PToken(TK_Identifier)) >>=
+          (  (PKeyword("=") >>=
+              PLet("e", simpleCall.ref()) >>=
+              PLet("sq", sequence.ref()) >>=
               PReturn("sequence", "id", "e", "sq"))
           |= (PLet("e", reference.ref("id")) >>= maybeSequence.ref("e"))
           )
@@ -132,40 +132,41 @@ void BNFParser::defineSyntax() {
   //               );
   option %=
     PLet("e1", sequence.ref()) >>=
-      (  (PKeyword("|") >>= 
-          PLet("e2", option.ref()) >>= 
+      (  (PKeyword("|") >>=
+          PLet("e2", option.ref()) >>=
           PReturn("option", "e1", "e2"))
       |= PReturnVar("e1")
       );
 
-  // recurseLeft ::= 
-  //   e1=option ( "|*" "(" id=%TK_Identifier ")" { (recurseLeft e1 e2 ) }
+  // recurseLeft ::=
+  //   e1=option ( "|*" "(" id=%TK_Identifier ")" e2=sequence
+  //               { (recurseLeft e1 e2 ) }
   //             | {e1}
   //             );
   PNamedRule recurseLeft(this, "recurseLeft");
   recurseLeft %=
     PLet("e1", option.ref()) >>=
-      (  (PKeyword("|*") >>= 
+      (  (PKeyword("|*") >>=
           PKeyword("(") >>=
-          PLet("id", PToken(TK_Identifier)) >>= 
+          PLet("id", PToken(TK_Identifier)) >>=
           PKeyword(")") >>=
-          PLet("e", sequence.ref()) >>=
+          PLet("e2", sequence.ref()) >>=
           PReturn("recurseLeft", "id", "e1", "e2"))
       |= PReturnVar("e1")
       );
 
-  // maybeArguments ::= 
+  // maybeArguments ::=
   //     "[" as=arguments "]" {as}
   //   | { [] };
   PNamedRule maybeArguments(this, "maybeArguments");
-  maybeArguments %= 
-       (PKeyword("[") >>= 
-        PLet("as", arguments.ref()) >>= 
+  maybeArguments %=
+       (PKeyword("[") >>=
+        PLet("as", arguments.ref()) >>=
         PKeyword("]") >>=
         PReturnVar("as"))
     |= PReturn(new ast::EmptyList());
 
-  // definition ::= 
+  // definition ::=
   //      id=%TK_Identifier as=maybeArguments "::=" e=recurseLeft ";"
   //        { (definition id as e) };
   PNamedRule definition(this, "definition");

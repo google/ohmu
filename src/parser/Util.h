@@ -44,7 +44,7 @@ inline T* cast(U* p) {
 template <class T, class U>
 inline const T* cast(const U* p) {
   assert(T::classof(p));
-  return reinterpret_cast<T*>(p);
+  return reinterpret_cast<const T*>(p);
 }
 
 template <class T, class U>
@@ -58,7 +58,7 @@ template <class T, class U>
 inline const T* dyn_cast(const U* p) {
   if (!T::classof(p))
     return 0;
-  return reinterpret_cast<T*>(p);
+  return reinterpret_cast<const T*>(p);
 }
 
 template <class T, class U>
@@ -72,7 +72,7 @@ template <class T, class U>
 inline const T* dyn_cast_or_null(const U* p) {
   if (!p || !T::classof(p))
     return 0;
-  return reinterpret_cast<T*>(p);
+  return reinterpret_cast<const T*>(p);
 }
 
 

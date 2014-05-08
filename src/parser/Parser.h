@@ -74,7 +74,7 @@ public:
 
   virtual void prettyPrint(Parser& parser, std::ostream& out) = 0;
 
-  inline ParseRuleKind getKind() const { return kind_; }
+  inline ParseRuleKind kind() const { return kind_; }
 
 private:
   ParseRuleKind kind_;
@@ -85,6 +85,8 @@ private:
 // This can be used in an option, but it should only appear as the last option.
 class ParseNone : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_None; }
+
   ParseNone() : ParseRule(PR_None) { }
   ~ParseNone() { }
 
@@ -99,6 +101,8 @@ public:
 // by the lexer.  Does not alter parsing state.
 class ParseToken : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_Token; }
+
   ParseToken(unsigned tid, bool skip=false)
     : ParseRule(PR_Token), tokenID_(tid), skip_(skip)
   { }
@@ -123,6 +127,8 @@ protected:
 // as a new token at the start of parsing.
 class ParseKeyword : public ParseToken {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_Keyword; }
+
   ParseKeyword(const std::string& s)
     : ParseToken(PR_Keyword, 0, true), keywordStr_(s)
   { }
@@ -139,6 +145,8 @@ private:
 // Matches a sequence of input.
 class ParseSequence : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_Sequence; }
+
   ParseSequence(const std::string& letName,
                 ParseRule *first, ParseRule *second)
     : ParseRule(PR_Sequence), letName_(letName),
@@ -167,6 +175,8 @@ public:
 // Distinguishes between two options.
 class ParseOption : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_Option; }
+
   ParseOption(ParseRule *left, ParseRule *right)
     : ParseRule(PR_Option), left_(left), right_(right)
   { }
@@ -189,6 +199,10 @@ public:
 // Builds a left-recursive parse rule
 class ParseRecurseLeft : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) {
+    return pr->kind() == PR_RecurseLeft;
+  }
+
   ParseRecurseLeft(const std::string& letName,
                    ParseRule *base, ParseRule *rest)
     : ParseRule(PR_RecurseLeft), letName_(letName),
@@ -217,6 +231,10 @@ private:
 // Named definitions allow mutually recursive rules to be defined.
 class ParseNamedDefinition : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) {
+    return pr->kind() == PR_NamedDefinition;
+  }
+
   ParseNamedDefinition(const std::string& name)
     : ParseRule(PR_NamedDefinition), name_(name), rule_(nullptr)
   { }
@@ -244,6 +262,10 @@ private:
 // Can "call" the named rule by passing arguments.
 class ParseReference : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) {
+    return pr->kind() == PR_Reference;
+  }
+
   ParseReference(ParseNamedDefinition* def)
     : ParseRule(PR_Reference), name_(def->name()), definition_(def),
       frameSize_(0), drop_(0)
@@ -277,6 +299,8 @@ public:
 // Variables in the ASTNode refer to named results on the parser stack.
 class ParseAction : public ParseRule {
 public:
+  static bool classof(const ParseRule *pr) { return pr->kind() == PR_Action; }
+
   ParseAction(ast::ASTNode *n)
     : ParseRule(PR_Action), node_(n), drop_(0)
   { }
@@ -469,8 +493,6 @@ public:
   static const int InvalidIndex = 0xFFFF;
   typedef std::pair<unsigned, unsigned> FrameState;
 
-  AbstractStack() : blockStart_(0) { }
-
   // Find the stack index for name s on the abstract stack.
   // Indices are computed with respect to the current frame.
   unsigned getIndex(const std::string &s) {
@@ -485,25 +507,47 @@ public:
   unsigned size() {  return stack_.size(); }
 
   // Return the size of the stack for the local block.
+  // Tail calls unwind the stack by this amount during parsing.
   unsigned localSize() { return stack_.size() - blockStart_; }
 
-  // Rewind the stack to the given local size.
-  void rewind(unsigned lsize) {
-    for (unsigned n = localSize(); n > lsize; --n)
+  // Return the size of the stack for the current lexical scope.
+  // Tail calls unwind the stack by this amount during validation.
+  unsigned lexicalSize() {
+    unsigned lst = (lexicalStart_ > blockStart_) ? lexicalStart_ : blockStart_;
+    return size() - lst;
+  }
+
+  // Rewind the stack to the start of the current lexical scope.
+  void rewind() {
+    for (unsigned n = lexicalSize(); n > 0; --n)
       stack_.pop_back();
   }
 
-  // Enter a new local block (i.e. new subrule)
+  // Enter a new local block (i.e. new subrule).
+  // This will also enter a new leixcal scope.  (See lexicalSize())
   unsigned enterLocalBlock() {
     unsigned bs = blockStart_;
     blockStart_ = stack_.size();
     return bs;
   }
 
+  // Enter a new lexical scope.  Returns the old value to restore later.
+  unsigned enterLexicalScope() {
+    unsigned ls = lexicalStart_;
+    lexicalStart_ = stack_.size();
+    return ls;
+  }
+
   // Exit the current local block.
   void exitLocalBlock(unsigned bs) {
     assert(bs <= stack_.size());
     blockStart_ = bs;
+  }
+
+  // Exit the current lexical scope, using the old value.
+  void exitLexicalScope(unsigned ls) {
+    assert(ls <= stack_.size() && ls >= blockStart_);
+    lexicalStart_ = ls;
   }
 
   // get the ith value on the stack, starting from the current frame.
@@ -514,20 +558,22 @@ public:
 
   // pop a name off of the stack.
   void pop_back() {
-    assert(localSize() > 0);
+    assert(lexicalSize() > 0);
     stack_.pop_back();
   }
 
   // clear the stack
   void clear() {
     blockStart_ = 0;
+    lexicalStart_ = 0;
     stack_.clear();
   }
 
   void dump();
 
 private:
-  unsigned blockStart_;
+  unsigned blockStart_ = 0;
+  unsigned lexicalStart_ = 0;
   std::vector<std::string*> stack_;
 };
 
@@ -597,9 +643,11 @@ protected:
   friend class ParseReference;
   friend class ParseNamedDefinition;
   friend class ParseAction;
+
   friend class ASTIndexVisitor;
   friend class ASTInterpretReducer;
   friend class TraceIndenter;
+  friend class PrintIndenter;
 
   // Initialize rule p.  This is used internally to make recursive calls.
   inline bool initRule(ParseRule* p);
@@ -630,7 +678,7 @@ protected:
   std::ostream& parseError(const SourceLocation& sloc);
 
   void indent(std::ostream& out, unsigned n) {
-	for (unsigned i=0; i<n; ++i) out << " ";
+    for (unsigned i=0; i<n; ++i) out << " ";
   }
 
 private:
@@ -642,9 +690,11 @@ private:
   AbstractStack   abstractStack_;
   bool            parseError_ = false;
 
+  // Used for debugging and pretty printing
   bool trace_ = false;
   bool traceValidate_ = false;
   unsigned traceIndent_ = 0;
+  unsigned printIndent_ = 0;
 };
 
 

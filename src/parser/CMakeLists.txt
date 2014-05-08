@@ -7,6 +7,7 @@ add_library(parser STATIC
   Lexer.cpp
   DefaultLexer.cpp
   Parser.cpp
+  ASTNode.cpp
   BNFParser.cpp
 )
 

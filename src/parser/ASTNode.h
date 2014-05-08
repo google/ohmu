@@ -34,8 +34,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef OHMU_SURFACE_AST_H
-#define OHMU_SURFACE_AST_H
+#ifndef OHMU_AST_NODE_H
+#define OHMU_AST_NODE_H
+
+#include <iostream>
 
 #include "Util.h"
 
@@ -55,15 +57,15 @@ public:
     AST_Append,      // Append to sequence.
   };
 
-  inline Opcode opcode() const {
+  Opcode opcode() const {
     return static_cast<Opcode>(opcode_);
   }
 
   // The arity of this expression.  (Should be 0 except for Construct)
-  inline unsigned char arity() const { return arity_; }
+  unsigned char arity() const { return arity_; }
 
   // The target language opcode for this expression.  (0 except for Construct)
-  inline unsigned short langOpcode() const { return langop_; }
+  unsigned short langOpcode() const { return langop_; }
 
   // Set the target language opcode.
   void setLangOpcode(unsigned short lop) { langop_ = lop; }
@@ -89,8 +91,8 @@ private:
 // Variable refers to a named variable in the current lexical scope.
 class Variable : public ASTNode {
 public:
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_Variable;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_Variable;
   }
 
   Variable() = delete;
@@ -122,8 +124,8 @@ private:
 // embeds tokens directly in a ParseResult.
 class TokenStr : public ASTNode {
 public:
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_TokenStr;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_TokenStr;
   }
 
   TokenStr() = delete;
@@ -149,8 +151,8 @@ class Construct : public ASTNode {
 public:
   static unsigned const int Max_Arity = 5;
 
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_Construct;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_Construct;
   }
 
   Construct(const std::string &s, unsigned char arity)
@@ -158,9 +160,9 @@ public:
   { }
 
   inline ASTNode* subExpr(unsigned i);
-  inline const ASTNode* subExprs(unsigned i) const;
+  inline const ASTNode* subExpr(unsigned i) const;
 
-  const std::string& opcodeName() { return opName_; }
+  const std::string& opcodeName() const { return opName_; }
 
   template <class V>
   typename V::ResultType traverse(V& visitor) {
@@ -181,8 +183,8 @@ private:
 template <unsigned NElems>
 class ConstructN : public Construct {
 public:
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_Construct;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_Construct;
   }
 
   ConstructN(const std::string& s)
@@ -235,7 +237,7 @@ inline ASTNode* Construct::subExpr(unsigned i) {
   return reinterpret_cast<ConstructN<1>*>(this)->subExprs_[i];
 }
 
-inline const ASTNode* Construct::subExprs(unsigned i) const {
+inline const ASTNode* Construct::subExpr(unsigned i) const {
   return reinterpret_cast<const ConstructN<1>*>(this)->subExprs_[i];
 }
 
@@ -244,8 +246,8 @@ inline const ASTNode* Construct::subExprs(unsigned i) const {
 // EmptySeq will create an empty list.
 class EmptyList : public ASTNode {
 public:
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_EmptyList;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_EmptyList;
   }
 
   template <class V>
@@ -260,8 +262,8 @@ public:
 // Append will append an item to a list.
 class Append : public ASTNode {
 public:
-  static bool classof(const ASTNode *E) {
-    return E->opcode() == AST_Append;
+  static bool classof(const ASTNode *e) {
+    return e->opcode() == AST_Append;
   }
 
   Append() = delete;
@@ -402,6 +404,21 @@ public:
 
   bool success = true;
 };
+
+
+class PrettyPrinter {
+public:
+  void print(const ASTNode* node, std::ostream &ss) ;
+
+protected:
+  void printNone(std::ostream& ss);
+  void printVariable(const Variable* e, std::ostream& ss);
+  void printTokenStr(const TokenStr* e, std::ostream& ss);
+  void printConstruct(const Construct* e, std::ostream& ss);
+  void printEmptyList(const EmptyList* e, std::ostream& ss);
+  void printAppend(const Append* e, std::ostream& ss);
+};
+
 
 
 }  // end namespace parsing
