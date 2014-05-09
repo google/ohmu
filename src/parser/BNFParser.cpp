@@ -30,14 +30,15 @@ const char* BNFParser::getOpcodeName(BNF_Opcode op) {
     case BNF_Option:           return "option";
     case BNF_RecurseLeft:      return "recurseLeft";
     case BNF_Reference:        return "reference";
-    case BNF_NamedDefinition:  return "namedDefinition";
     case BNF_Action:           return "action";
+    case BNF_NamedDefinition:  return "definition";
+    case BNF_DefinitionList:   return "definitionList";
 
     case BNF_Variable:         return "variable";
     case BNF_TokenStr:         return "tokenStr";
     case BNF_Construct:        return "construct";
     case BNF_EmptyList:        return "emptyList";
-    case BNF_Append:           return "append";
+    case BNF_Append:           return "astAppend";
   }
   return nullptr;
 }
@@ -54,7 +55,7 @@ unsigned BNFParser::lookupOpcode(const std::string &s) {
   auto it = opcodeNameMap_.find(s);
   if (it != opcodeNameMap_.end())
     return it->second;
-  return BNF_None;
+  return 0;
 }
 
 
@@ -143,6 +144,10 @@ ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       }
       return ParseResult(BPR_ParseRule, r);
     }
+    case BNF_Action: {
+      auto r = new ParseAction(astn(0));
+      return ParseResult(BPR_ParseRule, r);
+    }
     case BNF_NamedDefinition: {
       assert(arity == 3);
       Token *t = tok(0);
@@ -157,26 +162,35 @@ ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
         }
         delete v;
       }
-      return ParseResult(BPR_ParseRule, r);
+
+      // Add definition to target parser now.  No need to return it.
+      if (targetParser_)
+        targetParser_->addDefinition(r);
+      else
+        delete r;
+      return ParseResult();
     }
-    case BNF_Action: {
-      auto r = new ParseAction(astn(0));
-      return ParseResult(BPR_ParseRule, r);
+    case BNF_DefinitionList: {
+      // Does nothing.  Definitions are added above.
+      return ParseResult();
     }
 
     case BNF_Variable: {
+      assert(arity == 1);
       Token *t = tok(0);
       auto e = new ast::Variable(t->cppString());
       delete t;
       return ParseResult(BPR_ASTNode, e);
     }
     case BNF_TokenStr: {
+      assert(arity == 1);
       Token *t = tok(0);
       auto e = new ast::TokenStr(t->cppString());
       delete t;
       return ParseResult(BPR_ASTNode, e);
     }
     case BNF_Construct: {
+      assert(arity == 2);
       Token *t = tok(0);
       auto v = astList(1);
       ast::Construct* c = nullptr;
@@ -211,9 +225,11 @@ ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(BPR_ASTNode, c);
     }
     case BNF_EmptyList: {
+      assert(arity == 0);
       return ParseResult(BPR_ASTNode, new ast::EmptyList());
     }
     case BNF_Append: {
+      assert(arity == 2);
       auto e = new ast::Append(astn(0), astn(1));
       return ParseResult(BPR_ASTNode, e);
     }
@@ -229,25 +245,37 @@ void BNFParser::defineSyntax() {
   PNamedRule astNodeList(this, "astNodeList");
 
   // astNode ::=
-  //    s=%TK_LitString   { (tokenStr s)  }
-  //    id=%TK_Identifier { (variable id) }
-  //    "(" f=%TK_Identifier args=astNodeList ")" { (construct f args) };
+  //   s=%TK_LitString                              { (tokenStr s)       }
+  // | id=%TK_Identifier                            { (variable id)      }
+  // | "[" "]"                                      { (emptyList)        }
+  // | "(" ( "append" e1=astNode e2=astNode    ")"  { (astAppend e1 e2)  }
+  //       | f=%TK_Identifier args=astNodeList ")"  { (construct f args) }
+  //       )
+  // ;
   PNamedRule astNode(this, "astNode");
   astNode %=
        (PLet("s", PToken(TK_LitString))   >>= PReturn("tokenStr", "s"))
     |= (PLet("id", PToken(TK_Identifier)) >>= PReturn("variable", "id"))
+    |= (PKeyword("[") >>= PKeyword("]")   >>= PReturn("emptyList"))
     |= (PKeyword("(") >>=
-        PLet("f", PToken(TK_Identifier)) >>=
-        PLet("args", astNodeList.ref()) >>=
-        PKeyword(")") >>=
-        PReturn("construct", "f", "args"));
+        (
+           (PKeyword("append") >>=
+            PLet("e0", astNode.ref()) >>=
+            PLet("e1", astNode.ref()) >>=
+            PKeyword(")") >>=
+            PReturn("astAppend", "e0", "e1"))
+        |= (PLet("f", PToken(TK_Identifier)) >>=
+            PLet("args", astNodeList.ref()) >>=
+            PKeyword(")") >>=
+            PReturn("construct", "f", "args"))
+        ));
 
   // astNodeList ::=
   //   { [] }
   //   |*(es)  e=astNode { (append es e) };
   astNodeList %=
     PLet("es", PReturn(new ast::EmptyList()))
-    ^= (PLet("e", astNode.ref()) >>= PReturn("append", "es", "e"));
+    ^= (PLet("e", astNode.ref()) >>= PReturnAppend("es", "e"));
 
   // simple ::=
   //     s=%TK_LitString      { (keyword s) }
@@ -277,9 +305,9 @@ void BNFParser::defineSyntax() {
   arguments %=
     PLet("as",
        (PLet("id", PToken(TK_Identifier)) >>=
-        PReturn("append", nullptr, "id")))
+        PReturnAppend(nullptr, "id")))
     ^= (PKeyword(",") >>= PLet("id", PToken(TK_Identifier)) >>=
-        PReturn("append", "as", "id"));
+        PReturnAppend("as", "id"));
 
   // // Parse arguments, if any, and construct a reference from id
   // reference[id] ::=
@@ -339,7 +367,7 @@ void BNFParser::defineSyntax() {
       );
 
   // recurseLeft ::=
-  //   e1=option ( "|*" "(" id=%TK_Identifier ")" e2=sequence
+  //   e1=option ( "|*" "[" id=%TK_Identifier "]" e2=sequence
   //               { (recurseLeft e1 e2 ) }
   //             | {e1}
   //             );
@@ -347,9 +375,9 @@ void BNFParser::defineSyntax() {
   recurseLeft %=
     PLet("e1", option.ref()) >>=
       (  (PKeyword("|*") >>=
-          PKeyword("(") >>=
+          PKeyword("[") >>=
           PLet("id", PToken(TK_Identifier)) >>=
-          PKeyword(")") >>=
+          PKeyword("]") >>=
           PLet("e2", sequence.ref()) >>=
           PReturn("recurseLeft", "id", "e1", "e2"))
       |= PReturnVar("e1")
@@ -384,7 +412,7 @@ void BNFParser::defineSyntax() {
   PNamedRule definitionList(this, "definitionList");
   definitionList %=
     PLet("ds", PReturn(new ast::EmptyList()))
-    ^= ( PLet("d", definition.ref()) >>= PReturn("append", "ds", "d") );
+    ^= ( PLet("d", definition.ref()) >>= PReturn("definitionList", "ds", "d") );
 };
 
 

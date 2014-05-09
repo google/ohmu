@@ -46,8 +46,9 @@ public:
     BNF_Option,
     BNF_RecurseLeft,
     BNF_Reference,
-    BNF_NamedDefinition,
     BNF_Action,
+    BNF_NamedDefinition,
+    BNF_DefinitionList,
 
     // ASTNodes
     BNF_Variable,
@@ -77,8 +78,13 @@ public:
 
   void defineSyntax();
 
+  // The BNF parser parses a grammar definition in BNF form,
+  // and it will add all of the definitions to the target parser.
+  void setTarget(Parser* p) { targetParser_ = p; }
+
 public:
   std::unordered_map<std::string, unsigned> opcodeNameMap_;
+  Parser* targetParser_ = nullptr;
 };
 
 

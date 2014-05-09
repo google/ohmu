@@ -46,8 +46,8 @@ enum ParseRuleKind {
   PR_Option,
   PR_RecurseLeft,
   PR_Reference,
+  PR_Action,
   PR_NamedDefinition,
-  PR_Action
 };
 
 
@@ -369,7 +369,8 @@ public:
   bool isToken()            const { return kind() == PRS_TokenStr && !isList_; }
   bool isTokenList()        const { return kind() == PRS_TokenStr && isList_;  }
   bool isSingle(KindType k) const { return kind() == k && !isList_; }
-  bool isList  (KindType k) const { return kind() == k && !isList_; }
+  bool isList  (KindType k) const { return kind() == k && isList_; }
+  bool isList  ()           const { return isList_; }
 
   // Return a token, and release ownership.
   Token* getToken() {
@@ -436,35 +437,50 @@ public:
 
   // move the argument at index i onto the top of the stack.
   void moveAndPush(unsigned i) {
-    stack_.emplace_back(std::move((*this)[i]));
+    assert(i < stack_.size() && "Array index out of bounds.");
+    std::cerr << "\n   movpush " << i << " -> " << stack_.size();
+    stack_.emplace_back(std::move(stack_[i]));
+    dump();
   }
 
   void push_back(const Token& tok) {
+    std::cerr << "\n   push token " << stack_.size();
     stack_.emplace_back(ParseResult(new Token(tok)));
+    dump();
   }
 
   void push_back(ParseResult &&r) {
+    std::cerr << "\n   push result " << stack_.size();
     stack_.emplace_back(std::move(r));
+    dump();
   }
 
   // Drop n items from the stack, but keep the nsave top-most items.
   void drop(unsigned n, unsigned nsave) {
+    std::cerr << "\n   drop " << n << " " << nsave;
     if (n == 0)
       return;
     assert(stack_.size() >= n + nsave && "Stack too small");
+    dump();
     stack_.erase(stack_.end()-nsave-n, stack_.end()-nsave);
+    dump();
   }
 
-  ParseResult& operator[](unsigned i) {
+  ParseResult getElem(unsigned i) {
     assert(i < stack_.size() && "Array index out of bounds.");
-    return stack_[i];
+    std::cerr << "\n   read var " << i;
+    ParseResult r = std::move(stack_[i]);
+    dump();
+    return std::move(r);
   }
 
-  ParseResult& back() { return stack_.back(); }
+  ParseResult getBack() { return std::move(stack_.back()); }
 
   void clear() {
     stack_.clear();
   }
+
+  void dump();
 
 private:
   std::vector<ParseResult> stack_;

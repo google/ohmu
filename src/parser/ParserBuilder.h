@@ -76,10 +76,10 @@ public:
     return ParseBuilder(
       new ParseSequence(letName_, builder_.getRule(), p.getRule()));
   }
-  
+
   ParseBuilder operator^=(const ParseBuilder& p) {
-	return ParseBuilder(
-	   new ParseRecurseLeft(letName_, builder_.getRule(), p.getRule()));
+    return ParseBuilder(
+       new ParseRecurseLeft(letName_, builder_.getRule(), p.getRule()));
   }
 
 private:
@@ -92,8 +92,8 @@ private:
 class PNamedRule : public ParseBuilder {
 public:
   PNamedRule(Parser* parser, const char* s)
-      : ParseBuilder(new ParseNamedDefinition(s)) { 
-    parser->addDefinition(definition()); 
+      : ParseBuilder(new ParseNamedDefinition(s)) {
+    parser->addDefinition(definition());
   }
 
   // Set argument.  Use in conjunction with %=
@@ -111,28 +111,28 @@ public:
   ParseBuilder ref() {
     return ParseBuilder(new ParseReference(definition()));
   }
-  
+
   ParseBuilder ref(const std::string& a0) {
-	auto *r = new ParseReference(definition());
-	r->addArgument(a0);
-	return ParseBuilder(r);
+    auto *r = new ParseReference(definition());
+    r->addArgument(a0);
+    return ParseBuilder(r);
   }
 
   ParseBuilder ref(const std::string& a0, const std::string& a1) {
-	auto *r = new ParseReference(definition());
-	r->addArgument(a0);
-	r->addArgument(a1);
-	return ParseBuilder(r);
+    auto *r = new ParseReference(definition());
+    r->addArgument(a0);
+    r->addArgument(a1);
+    return ParseBuilder(r);
   }
-  
-  ParseBuilder ref(const std::string& a0, const std::string& a1, 
-                   const std::string& a2) 
+
+  ParseBuilder ref(const std::string& a0, const std::string& a1,
+                   const std::string& a2)
   {
-	auto *r = new ParseReference(definition());
-	r->addArgument(a0);
-	r->addArgument(a1);
-	r->addArgument(a2);
-	return ParseBuilder(r);
+    auto *r = new ParseReference(definition());
+    r->addArgument(a0);
+    r->addArgument(a1);
+    r->addArgument(a2);
+    return ParseBuilder(r);
   }
 
   ParseNamedDefinition* definition() {
@@ -171,28 +171,28 @@ public:
   PReturn(ast::ASTNode* e)
     : ParseBuilder(new ParseAction(e))
   { }
-  PReturn(const char* f) 
+  PReturn(const char* f)
     : ParseBuilder(new ParseAction(new ast::ConstructN<0>(f)))
   { }
-  PReturn(const char* f, const char* a0) 
+  PReturn(const char* f, const char* a0)
     : ParseBuilder(new ParseAction(new ast::ConstructN<1>(f, arg(a0))))
   { }
-  PReturn(const char* f, const char* a0, const char* a1) 
-    : ParseBuilder(new ParseAction(new ast::ConstructN<2>(f, arg(a0), 
+  PReturn(const char* f, const char* a0, const char* a1)
+    : ParseBuilder(new ParseAction(new ast::ConstructN<2>(f, arg(a0),
                                                              arg(a1))))
   { }
-  PReturn(const char* f, const char* a0, const char* a1, const char* a2) 
-    : ParseBuilder(new ParseAction(new ast::ConstructN<3>(f, arg(a0), 
+  PReturn(const char* f, const char* a0, const char* a1, const char* a2)
+    : ParseBuilder(new ParseAction(new ast::ConstructN<3>(f, arg(a0),
                                                              arg(a1),
                                                              arg(a2))))
   { }
-  
-private:
+
+protected:
   static ast::ASTNode* arg(const char* s) {
-	if (s) 
-	  return new ast::Variable(s);
-	else 
-	  return new ast::EmptyList();
+    if (s)
+      return new ast::Variable(s);
+    else
+      return new ast::EmptyList();
   }
 };
 
@@ -201,6 +201,14 @@ private:
 class PReturnVar : public PReturn {
 public:
   PReturnVar(const char* s) : PReturn(new ast::Variable(s)) { }
+};
+
+
+class PReturnAppend : public PReturn {
+public:
+  PReturnAppend(const char* as, const char* a)
+    : PReturn(new ast::Append(arg(as), arg(a)))
+  { }
 };
 
 

@@ -1,9 +1,12 @@
 
 // An AST node, using Lisp-like syntax
 astNode ::=
-    s=%TK_LitString                           { (tokenStr s)  }
-  | id=%TK_Identifier                         { (variable id) }
-  | "(" f=%TK_Identifier args=astNodeList ")" { (construct f args) }
+    s=%TK_LitString                              { (tokenStr s)       }
+  | id=%TK_Identifier                            { (variable id)      }
+  | "[" "]"                                      { (emptyList)        }
+  | "(" ( "append" e1=astNode e2=astNode    ")"  { (astAppend e1 e2)  }
+        | f=%TK_Identifier args=astNodeList ")"  { (construct f args) }
+        )
   ;
 
 astNodeList ::=
@@ -33,7 +36,7 @@ referenceArgs[id] ::=
 // Simple expression or reference
 simpleCall ::=
     simple
-  | id=%TK_Identifier reference[id]
+  | id=%TK_Identifier referenceArgs[id]
   ;
 
 // Continue the sequence if possible, otherwise stop and return e.
@@ -68,4 +71,4 @@ definition ::=
 
 definitionList ::=
                                { [] }
-  |*[ds] d=definition          { (append ds d) }
+  |*[ds] d=definition          { (definitionList ds d) }

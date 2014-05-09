@@ -21,16 +21,21 @@
 // * Terminals are either variables, which refer to results on the parse
 //   stack, or strings, which refer to a token in the input file.
 // * Non-terminals are commands which construct expressions in the target
-//   language.  (A concrete parser must provide a method for interpreting
-//   such commands.)
-// * The language also has rudimentary support for creating lists of
-//   expressions, since that is a frequent parsing task.
+//   language.
+// * The AST format also has rudimentary support for lists.
 //   A list is either [], the empty list, or (append list item)
 //
-// x                                            // parser variable x
-// (integer "1234")                             // create integer literal
-// (apply (identifier "foo") (identifier "y"))  // create expr  'foo(y)'
-// (record (append [] (slot "bar" (...))))      // create record from slot list
+// Syntax:
+//   x                -- variable  (defined in the grammar file)
+//   "foo"            -- string literal
+//   []               -- empty list
+//   (append as a)    -- append element a to list as
+//   (f arg1.. argn)  -- construct ast node named f in target language.
+//
+// Examples:  (assuming ohmu is the target language.)
+//   (integer "1234")                            // create integer literal
+//   (apply (identifier "foo") (identifier "y")) // create expr  'foo(y)'
+//   (record (append [] (slot "bar" (...))))     // create record { bar: ... }
 //
 //===----------------------------------------------------------------------===//
 

@@ -1,0 +1,15 @@
+
+// An AST node, using Lisp-like syntax
+astNode ::=
+    s = %TK_LitString                              { (tokenStr s)       }
+  | id = %TK_Identifier                            { (variable id)      }
+  | "[" "]"                                        { (emptyList)        }
+  | "(" ( "append" e1=astNode e2=astNode    ")"    { (astAppend e1 e2)  }
+        | f = %TK_Identifier args=astNodeList ")"  { (construct f args) }
+        )
+  ;
+
+astNodeList ::=
+                               { [] }
+  |*[es]  e=astNode            { (append es e) }
+  ;

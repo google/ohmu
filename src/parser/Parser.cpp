@@ -53,7 +53,7 @@ ParseResult Parser::parse(ParseNamedDefinition* start) {
   parseError_ = false;
   resultStack_.clear();
   parseRule(start);
-  return std::move(resultStack_.back());
+  return resultStack_.getBack();
 }
 
 
@@ -125,6 +125,18 @@ void AbstractStack::dump() {
   }
   if (blockStart_ == stack_.size()) std::cerr << "|";
   else if (lexicalStart_ == stack_.size()) std::cerr << ". ";
+  std::cerr << "]";
+}
+
+
+void ResultStack::dump() {
+  std::cerr << " [";
+  for (unsigned i=0,n=stack_.size(); i<n; ++i) {
+    if (stack_[i].isEmpty())      std::cerr << ".";
+    else if (stack_[i].isToken()) std::cerr << "T";
+    else if (stack_[i].isList())  std::cerr << "A";
+    else std::cerr << "*";
+  }
   std::cerr << "]";
 }
 
@@ -219,11 +231,11 @@ ParseRule* ParseToken::parse(Parser& parser) {
   const Token& tok = parser.look();
   if (tok.id() == tokenID_) {
     if (parser.trace_) {
-      std::cout << "-- Matching token ["
+      std::cout << "\n-- Matching token ["
                 << parser.look().id()
-                << "]: %"
+                << "]: \""
                 << parser.look().string()
-                << "\n";
+                << "\"";
     }
     if (skip_)
       parser.skip();
@@ -550,7 +562,7 @@ bool ParseNamedDefinition::accepts(const Token& tok) {
 
 ParseRule* ParseNamedDefinition::parse(Parser& parser) {
   if (parser.trace_) {
-    std::cout << "-- Parsing using rule " << name_ << "\n";
+    std::cout << "\n-- Parsing using rule " << name_;
   }
   return rule_;
 }
@@ -671,7 +683,11 @@ public:
 
   bool reduceConstruct(ast::Construct &node, ResultArray& results) {
     unsigned op = parser_->lookupOpcode(node.opcodeName());
-    assert(op < 0xFFFF && "Invalid opcode");
+    if (op == 0 || op >= 0xFFFF) {
+      parser_->validationError()
+        << "Cannot find opcode for " << node.opcodeName();
+      return false;
+    }
     node.setLangOpcode(op);
     return true;
   }
@@ -700,7 +716,7 @@ public:
 
   ParseResult reduceVariable(ast::Variable &node) {
     unsigned idx = frameStart_ + node.index();
-    return std::move(parser_->resultStack_[idx]);
+    return parser_->resultStack_.getElem(idx);
   }
 
   ParseResult reduceTokenStr(ast::TokenStr &node) {
@@ -760,7 +776,9 @@ bool ParseAction::init(Parser& parser) {
   drop_ = parser.abstractStack_.localSize();
 
   ASTIndexVisitor visitor(&parser);
-  visitor.traverse(node_);
+  bool success = visitor.traverse(node_);
+  if (!success)
+    return false;
 
   // Drop everything in the current lexical scope off of the abstract stack.
   parser.abstractStack_.rewind();
