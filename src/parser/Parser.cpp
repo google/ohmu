@@ -93,6 +93,27 @@ std::ostream& Parser::parseError(const SourceLocation& sloc) {
 }
 
 
+bool ParseResult::append(ParseResult &&p) {
+  ListType* vect;
+  if (isEmpty()) {
+    assert(result_ == nullptr);
+    resultKind_ = p.resultKind_;
+    isList_ = true;
+    vect = new ListType();
+    result_ = vect;
+  }
+  else {
+    assert(isList_);
+    vect = reinterpret_cast<ListType*>(result_);
+  }
+  if (p.isList_ || p.resultKind_ != resultKind_)
+    return false;
+
+  vect->push_back(p.result_);
+  p.release();
+  return true;
+}
+
 
 void AbstractStack::dump() {
   std::cerr << "[";
@@ -474,7 +495,7 @@ void ParseRecurseLeft::prettyPrint(Parser& parser, std::ostream& out) {
   base_->prettyPrint(parser, out);
   out << "\n";
   parser.indent(out, parser.printIndent_*2);
-  out << "|*(" << letName_ << ") ";
+  out << "|*[" << letName_ << "] ";
   rest_->prettyPrint(parser, out);
 
 
@@ -649,7 +670,7 @@ public:
   }
 
   bool reduceConstruct(ast::Construct &node, ResultArray& results) {
-    unsigned op = parser_->getLanguageOpcode(node.opcodeName());
+    unsigned op = parser_->lookupOpcode(node.opcodeName());
     assert(op < 0xFFFF && "Invalid opcode");
     node.setLangOpcode(op);
     return true;
@@ -684,7 +705,7 @@ public:
 
   ParseResult reduceTokenStr(ast::TokenStr &node) {
     const char* s = node.string().c_str();
-    return ParseResult(Token(TK_None, s, SourceLocation()));
+    return ParseResult(new Token(TK_None, s, SourceLocation()));
   }
 
   ParseResult reduceConstruct(ast::Construct &node, ResultArray& results) {
@@ -697,25 +718,12 @@ public:
 
   ParseResult reduceAppend(ast::Append &node,
                            ParseResult &&l, ParseResult &&e) {
-    unsigned short k = e.kind();
-    void* enode;
-    if (k == ParseResult::PRS_TokenStr)
-      // FIXME -- source location and token id?
-      enode = new Token(0, e.tokenStr(), SourceLocation());
-    else
-      enode = e.getNode();   // consumes e
-    ParseResult::ListType* lst;
-    if (l.empty()) {
-      lst = new ParseResult::ListType();
+    bool success = l.append(std::move(e));
+    if (!success) {
+      parser_->parseError(SourceLocation()) <<
+        "Lists must contain the same kind of node.";
     }
-    else {
-      if (l.kind() != k)
-        parser_->parseError(SourceLocation()) <<
-          "Lists must contain the same kind of node.";
-      lst = l.getNodeList();     // consumes l
-    }
-    lst->push_back(enode);
-    return ParseResult(k, lst);
+    return std::move(l);
   }
 
   ASTInterpretReducer() : parser_(nullptr), frameStart_(0) { }

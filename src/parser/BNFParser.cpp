@@ -15,31 +15,224 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "BNFParser.h"
-
 
 namespace ohmu {
 namespace parsing {
 
 
+const char* BNFParser::getOpcodeName(BNF_Opcode op) {
+  switch (op) {
+    case BNF_None:             return "none";
+    case BNF_Token:            return "token";
+    case BNF_Keyword:          return "keyword";
+    case BNF_Sequence:         return "sequence";
+    case BNF_Option:           return "option";
+    case BNF_RecurseLeft:      return "recurseLeft";
+    case BNF_Reference:        return "reference";
+    case BNF_NamedDefinition:  return "namedDefinition";
+    case BNF_Action:           return "action";
+
+    case BNF_Variable:         return "variable";
+    case BNF_TokenStr:         return "tokenStr";
+    case BNF_Construct:        return "construct";
+    case BNF_EmptyList:        return "emptyList";
+    case BNF_Append:           return "append";
+  }
+  return nullptr;
+}
+
+
+void BNFParser::initMap() {
+  for (unsigned op = BNF_None; op <= BNF_Append; ++op) {
+    opcodeNameMap_.emplace(getOpcodeName(static_cast<BNF_Opcode>(op)), op);
+  }
+}
+
+
+unsigned BNFParser::lookupOpcode(const std::string &s) {
+  auto it = opcodeNameMap_.find(s);
+  if (it != opcodeNameMap_.end())
+    return it->second;
+  return BNF_None;
+}
+
+
+ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
+  auto tok = [=](unsigned i) -> Token* {
+    if (!prs[i].isToken() || i >= arity)
+      return nullptr;
+    return prs[i].getToken();
+  };
+  auto tokList = [=](unsigned i) -> std::vector< Token* >* {
+    if (!prs[i].isToken() || i >= arity)
+      return nullptr;
+    return prs[i].getTokenList();
+  };
+  auto pr = [=](unsigned i) -> ParseRule* {
+    if (!prs[i].isSingle(BPR_ParseRule) || i >= arity)
+      return nullptr;
+    return prs[i].getNode<ParseRule>(BPR_ParseRule);
+  };
+  auto astn = [=](unsigned i) -> ast::ASTNode* {
+    if (!prs[i].isSingle(BPR_ASTNode) || i >= arity)
+      return nullptr;
+    return prs[i].getNode<ast::ASTNode>(BPR_ASTNode);
+  };
+  auto astList = [=](unsigned i) -> std::vector< ast::ASTNode* >* {
+    if (!prs[i].isList(BPR_ASTNode) || i >= arity)
+      return nullptr;
+    return prs[i].getList<ast::ASTNode>(BPR_ASTNode);
+  };
+
+  switch (op) {
+    case BNF_None: {
+      return ParseResult(BPR_ParseRule, new ParseNone());
+    }
+    case BNF_Token: {
+      Token *t = tok(0);
+      unsigned tid = lookupTokenID(t->cppString());
+      delete t;
+      return ParseResult(BPR_ParseRule, new ParseToken(tid));
+    }
+    case BNF_Keyword: {
+      Token *t = tok(0);
+      auto r = new ParseKeyword(t->cppString());
+      delete t;
+      return ParseResult(BPR_ParseRule, r);
+    }
+    case BNF_Sequence: {
+      assert(arity == 2 || arity == 3);
+      if (arity == 2) {
+        auto r = new ParseSequence("", pr(0), pr(1));
+        return ParseResult(BPR_ParseRule, r);
+      }
+      if (arity == 3) {
+        Token *t = tok(0);
+        auto r = new ParseSequence(t->cppString(), pr(1), pr(2));
+        delete t;
+        return ParseResult(BPR_ParseRule, r);
+      }
+      return ParseResult();
+    }
+    case BNF_Option: {
+      assert(arity == 2);
+      auto r = new ParseOption(pr(0), pr(1));
+      return ParseResult(BPR_ParseRule, r);
+    }
+    case BNF_RecurseLeft: {
+      assert(arity == 3);
+      Token *t = tok(0);
+      auto r = new ParseRecurseLeft(t->cppString(), pr(1), pr(2));
+      delete t;
+      return ParseResult(BPR_ParseRule, r);
+    }
+    case BNF_Reference: {
+      assert(arity == 2);
+      Token *t = tok(0);
+      auto r = new ParseReference(t->cppString());
+      delete t;
+      // get argument list
+      auto *v = tokList(1);
+      if (v) {
+        for (Token *at : *v) {
+          r->addArgument(at->cppString());
+          delete at;
+        }
+        delete v;
+      }
+      return ParseResult(BPR_ParseRule, r);
+    }
+    case BNF_NamedDefinition: {
+      assert(arity == 3);
+      Token *t = tok(0);
+      auto r = new ParseNamedDefinition(t->cppString(), pr(2));
+      delete t;
+      // get argument list
+      auto *v = tokList(1);
+      if (v) {
+        for (Token *at : *v) {
+          r->addArgument(at->cppString());
+          delete at;
+        }
+        delete v;
+      }
+      return ParseResult(BPR_ParseRule, r);
+    }
+    case BNF_Action: {
+      auto r = new ParseAction(astn(0));
+      return ParseResult(BPR_ParseRule, r);
+    }
+
+    case BNF_Variable: {
+      Token *t = tok(0);
+      auto e = new ast::Variable(t->cppString());
+      delete t;
+      return ParseResult(BPR_ASTNode, e);
+    }
+    case BNF_TokenStr: {
+      Token *t = tok(0);
+      auto e = new ast::TokenStr(t->cppString());
+      delete t;
+      return ParseResult(BPR_ASTNode, e);
+    }
+    case BNF_Construct: {
+      Token *t = tok(0);
+      auto v = astList(1);
+      ast::Construct* c = nullptr;
+
+      if (!v) {
+        c = new ast::ConstructN<0>(t->cppString());
+      }
+      else {
+        switch (v->size()) {
+          case 1:
+            c = new ast::ConstructN<1>(t->cppString(), (*v)[0]);
+            break;
+          case 2:
+            c = new ast::ConstructN<2>(t->cppString(), (*v)[0], (*v)[1]);
+            break;
+          case 3:
+            c = new ast::ConstructN<3>(t->cppString(), (*v)[0], (*v)[1],
+                                       (*v)[2]);
+            break;
+          case 4:
+            c = new ast::ConstructN<4>(t->cppString(), (*v)[0], (*v)[1],
+                                       (*v)[2], (*v)[3]);
+            break;
+          case 5:
+            c = new ast::ConstructN<5>(t->cppString(), (*v)[0], (*v)[1],
+                                       (*v)[2], (*v)[3], (*v)[4]);
+            break;
+        }
+      }
+      delete t;
+      delete v;
+      return ParseResult(BPR_ASTNode, c);
+    }
+    case BNF_EmptyList: {
+      return ParseResult(BPR_ASTNode, new ast::EmptyList());
+    }
+    case BNF_Append: {
+      auto e = new ast::Append(astn(0), astn(1));
+      return ParseResult(BPR_ASTNode, e);
+    }
+    default:
+      return ParseResult();
+  }
+}
+
+
 void BNFParser::defineSyntax() {
   PNamedRule sequence(this, "sequence");
   PNamedRule option(this, "option");
-  PNamedRule astNode(this, "astNode");
-
-  // astNodeList ::=
-  //   { [] }
-  //   |*(es)  e=astNode { (append es e) };
   PNamedRule astNodeList(this, "astNodeList");
-  astNodeList %=
-    PLet("es", PReturn(new ast::EmptyList()))
-    ^= (PLet("e", astNode.ref()) >>= PReturn("append", "es", "e"));
 
   // astNode ::=
   //    s=%TK_LitString   { (tokenStr s)  }
   //    id=%TK_Identifier { (variable id) }
   //    "(" f=%TK_Identifier args=astNodeList ")" { (construct f args) };
+  PNamedRule astNode(this, "astNode");
   astNode %=
        (PLet("s", PToken(TK_LitString))   >>= PReturn("tokenStr", "s"))
     |= (PLet("id", PToken(TK_Identifier)) >>= PReturn("variable", "id"))
@@ -48,6 +241,13 @@ void BNFParser::defineSyntax() {
         PLet("args", astNodeList.ref()) >>=
         PKeyword(")") >>=
         PReturn("construct", "f", "args"));
+
+  // astNodeList ::=
+  //   { [] }
+  //   |*(es)  e=astNode { (append es e) };
+  astNodeList %=
+    PLet("es", PReturn(new ast::EmptyList()))
+    ^= (PLet("e", astNode.ref()) >>= PReturn("append", "es", "e"));
 
   // simple ::=
   //     s=%TK_LitString      { (keyword s) }

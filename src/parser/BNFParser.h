@@ -15,11 +15,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// BNFParser is a concrete parser.  It parses grammar files in BNF form, and 
+// BNFParser is a concrete parser.  It parses grammar files in BNF form, and
 // will construct other parsers from them.
 //
 //===----------------------------------------------------------------------===//
 
+#include <unordered_map>
 
 #include "ASTNode.h"
 #include "DefaultLexer.h"
@@ -36,18 +37,48 @@ namespace parsing {
 
 class BNFParser : public Parser {
 public:
-  BNFParser(Lexer *lexer) : Parser(lexer) { }
+  enum BNF_Opcode {
+    // ParseRules
+    BNF_None = 0,
+    BNF_Token,
+    BNF_Keyword,
+    BNF_Sequence,
+    BNF_Option,
+    BNF_RecurseLeft,
+    BNF_Reference,
+    BNF_NamedDefinition,
+    BNF_Action,
+
+    // ASTNodes
+    BNF_Variable,
+    BNF_TokenStr,
+    BNF_Construct,
+    BNF_EmptyList,
+    BNF_Append
+  };
+
+  enum BNF_Result {
+    BPR_ParseRule = ParseResult::PRS_UserDefined,
+    BPR_ASTNode
+  };
+
+  BNFParser(Lexer *lexer) : Parser(lexer) {
+    initMap();
+  }
   ~BNFParser() { }
 
+  void initMap();
+
+  const char* getOpcodeName(BNF_Opcode op);
+
+  unsigned lookupOpcode(const std::string &s) override;
+
+  ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) override;
+
   void defineSyntax();
-  
-  ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) override {
-	return ParseResult();
-  }
-  
-  unsigned getLanguageOpcode(const std::string &s) override { 
-	return 0;
-  }
+
+public:
+  std::unordered_map<std::string, unsigned> opcodeNameMap_;
 };
 
 

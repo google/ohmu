@@ -129,8 +129,8 @@ class ParseKeyword : public ParseToken {
 public:
   static bool classof(const ParseRule *pr) { return pr->kind() == PR_Keyword; }
 
-  ParseKeyword(const std::string& s)
-    : ParseToken(PR_Keyword, 0, true), keywordStr_(s)
+  ParseKeyword(std::string s)
+    : ParseToken(PR_Keyword, 0, true), keywordStr_(std::move(s))
   { }
   ~ParseKeyword() { }
 
@@ -147,9 +147,9 @@ class ParseSequence : public ParseRule {
 public:
   static bool classof(const ParseRule *pr) { return pr->kind() == PR_Sequence; }
 
-  ParseSequence(const std::string& letName,
+  ParseSequence(std::string letName,
                 ParseRule *first, ParseRule *second)
-    : ParseRule(PR_Sequence), letName_(letName),
+    : ParseRule(PR_Sequence), letName_(std::move(letName)),
       first_(first), second_(second)
   { }
   ~ParseSequence() {
@@ -203,9 +203,8 @@ public:
     return pr->kind() == PR_RecurseLeft;
   }
 
-  ParseRecurseLeft(const std::string& letName,
-                   ParseRule *base, ParseRule *rest)
-    : ParseRule(PR_RecurseLeft), letName_(letName),
+  ParseRecurseLeft(std::string letName, ParseRule *base, ParseRule *rest)
+    : ParseRule(PR_RecurseLeft), letName_(std::move(letName)),
       base_(base), rest_(rest)
   { }
   ~ParseRecurseLeft() {
@@ -235,8 +234,8 @@ public:
     return pr->kind() == PR_NamedDefinition;
   }
 
-  ParseNamedDefinition(const std::string& name)
-    : ParseRule(PR_NamedDefinition), name_(name), rule_(nullptr)
+  ParseNamedDefinition(std::string name, ParseRule* r = nullptr)
+    : ParseRule(PR_NamedDefinition), name_(std::move(name)), rule_(r)
   { }
 
   bool       init(Parser& parser) override;
@@ -247,7 +246,7 @@ public:
   const std::string& name() const { return name_; }
   unsigned numArguments()   const { return argNames_.size(); }
 
-  void addArgument(const std::string& s) { argNames_.push_back(s); }
+  void addArgument(std::string s) { argNames_.push_back(std::move(s)); }
 
   void setDefinition(ParseRule* rule) { rule_ = rule; }
 
@@ -270,8 +269,8 @@ public:
     : ParseRule(PR_Reference), name_(def->name()), definition_(def),
       frameSize_(0), drop_(0)
   { }
-  ParseReference(const std::string& name)
-    : ParseRule(PR_Reference), name_(name), definition_(nullptr),
+  ParseReference(std::string name)
+    : ParseRule(PR_Reference), name_(std::move(name)), definition_(nullptr),
       frameSize_(0), drop_(0)
   { }
 
@@ -280,8 +279,8 @@ public:
   ParseRule* parse(Parser& parser) override;
   void       prettyPrint(Parser& parser, std::ostream& out) override;
 
-  inline void addArgument(const std::string& arg) {
-    argNames_.push_back(arg);
+  inline void addArgument(std::string arg) {
+    argNames_.emplace_back(std::move(arg));
   }
 
  private:
@@ -317,14 +316,17 @@ private:
 };
 
 
-// The result of parsing a rule is a ParseResult, which consists of:
-// (1) The id of the rule that created the result (if any).
-// (2) One of the following:
-//   (a) A token string, for simple tokens.
-//   (b) A unique pointer to a user-defined AST Node type.
-//   (c) A unique list (std::vector) of (b)
+// The result of parsing a rule is a ParseResult, which can be either:
+//   (1) A single token.
+//   (2) A pointer to a user-defined AST Node
+//   (3) A list of (1) or (2)
+//
+// ParseResults are move-only objects which hold unique pointers.
+// Teading the result will relinquish ownership of the pointer.
+// Failure to use a parse result is an error.
 class ParseResult {
 public:
+  typedef unsigned char      KindType;
   typedef std::vector<void*> ListType;
 
   enum ResultKind {
@@ -334,21 +336,14 @@ public:
   };
 
   ParseResult()
-      : ruleID_(0), resultKind_(PRS_None), isList_(false), result_(nullptr)
+      : resultKind_(PRS_None), isList_(false), result_(nullptr)
   { }
-  explicit ParseResult(const Token& tok)
-      : ruleID_(0), resultKind_(PRS_TokenStr), isList_(false),
-        result_(tok.c_str(), tok.length())
+  explicit ParseResult(Token* tok)
+      : resultKind_(PRS_TokenStr), isList_(false), result_(tok)
   { }
-  // A particular parser may have several different kinds of AST node;
-  // kind distingushes between them.
+  // Create a user defined AST Node; kinds specifies the kind of node.
   ParseResult(unsigned short kind, void* node)
-      : ruleID_(0), resultKind_(kind), isList_(false), result_(node) {
-    assert(kind >= PRS_UserDefined && "Invalid kind");
-  }
-  // Create a list of AST Nodes; kind specifies the kind of nodes in the list.
-  ParseResult(unsigned short kind, ListType *pl)
-      : ruleID_(0), resultKind_(kind), isList_(true), result_(pl) {
+      : resultKind_(kind), isList_(false), result_(node) {
     assert(kind >= PRS_UserDefined && "Invalid kind");
   }
   ~ParseResult() {
@@ -357,82 +352,76 @@ public:
   }
 
   ParseResult(ParseResult &&r)
-      : ruleID_(r.ruleID_), resultKind_(r.resultKind_), isList_(r.isList_),
-        result_(r.result_) {
+      : resultKind_(r.resultKind_), isList_(r.isList_), result_(r.result_) {
     r.release();
   }
 
   void operator=(ParseResult &&r) {
-    ruleID_ = r.ruleID_;
     resultKind_ = r.resultKind_;
     isList_ = r.isList_;
     result_ = r.result_;
     r.release();
   }
 
-  unsigned short kind() const { return resultKind_; }
+  KindType kind() const { return resultKind_; }
 
-  bool empty() const { return resultKind_ == PRS_None; }
+  bool isEmpty()            const { return resultKind_ == PRS_None; }
+  bool isToken()            const { return kind() == PRS_TokenStr && !isList_; }
+  bool isTokenList()        const { return kind() == PRS_TokenStr && isList_;  }
+  bool isSingle(KindType k) const { return kind() == k && !isList_; }
+  bool isList  (KindType k) const { return kind() == k && !isList_; }
 
-  unsigned ruleID() const { return ruleID_; }
-  void setRuleID(unsigned id) { ruleID_ = id; }
-
-  inline bool isUnique() const { return resultKind_ >= PRS_UserDefined; }
-
-  StringRef tokenStr() {
-    assert(resultKind_ == PRS_TokenStr);
-    return result_.string();
+  // Return a token, and release ownership.
+  Token* getToken() {
+    assert(isToken());
+    return getAs<Token>();
   }
 
-  // Return the node, and release ownership.
-  void* getNode() {
-    assert(resultKind_ >= PRS_UserDefined && isList_ == false);
-    void *p = result_.ptr_;
-    release();
-    return p;
+  // Return a list of tokens, and release ownership.
+  std::vector<Token*>* getTokenList() {
+    assert(isTokenList());
+    return getAs< std::vector<Token*> >();
+  }
+
+  // Return an AST node, and release ownership.
+  template <class T>
+  T* getNode(KindType k) {
+    assert(isSingle(k));
+    return getAs<T>();
   }
 
   // Return the node list, and release ownership.
-  ListType* getNodeList() {
-    assert(resultKind_ >= PRS_UserDefined && isList_ == false);
-    ListType* pl = result_.list();
-    release();
-    return pl;
+  template <class T>
+  std::vector<T*>* getList(KindType k) {
+    assert(isList(k));
+    return getAs< std::vector<T*> >();
   }
+
+  // Append p to this list, and consume p.
+  // If this is an empty result, create a new list.
+  // Returns false on failure, if kind of p does not match.
+  bool append(ParseResult&& p);
 
 private:
   ParseResult(const ParseResult& r) = delete;
   void operator=(const ParseResult &f) = delete;
 
-  inline void release() {  // release ownership of any data
+  inline void release() {       // release ownership of any data
     resultKind_ = PRS_None;
     isList_ = false;
-    result_.ptr_ = nullptr;
+    result_ = nullptr;
   }
 
-  struct ResultVal {
-  public:
-    void* ptr_;
-    unsigned len_;
+  template<class T>
+  inline T* getAs() {
+    T* p = reinterpret_cast<T*>(result_);
+    release();
+    return p;
+  }
 
-    explicit ResultVal(void* p) : ptr_(p), len_(0) { }
-    ResultVal(const char *s, unsigned l)
-        : ptr_(const_cast<char*>(s)), len_(l)
-    { }
-
-  public:
-    StringRef string() {
-      return StringRef(reinterpret_cast<const char*>(ptr_), len_);
-    }
-    ListType* list() {
-      return reinterpret_cast<ListType*>(ptr_);
-    }
-  };
-
-  unsigned       ruleID_;
-  unsigned short resultKind_;
-  bool           isList_;
-  ResultVal      result_;
+  KindType resultKind_;
+  bool     isList_;
+  void*    result_;
 };
 
 
@@ -451,7 +440,7 @@ public:
   }
 
   void push_back(const Token& tok) {
-    stack_.emplace_back(ParseResult(tok));
+    stack_.emplace_back(ParseResult(new Token(tok)));
   }
 
   void push_back(ParseResult &&r) {
@@ -583,12 +572,13 @@ class Parser {
 public:
   // Create a new parser.
   Parser(Lexer* lexer) : lexer_(lexer) { }
+  virtual ~Parser() { }
+
+  // Override this to look up the opcode for a string.
+  virtual unsigned lookupOpcode(const std::string &s) = 0;
 
   // Override this to construct an expression in the target language.
   virtual ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) = 0;
-
-  // Override this to look up the opcode for a string.
-  virtual unsigned getLanguageOpcode(const std::string &s) = 0;
 
   // Initialize the parser, with rule as the starting point.
   bool init();

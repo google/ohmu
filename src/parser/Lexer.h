@@ -86,7 +86,7 @@ private:
 // Base class for lexers.
 // Derived classes override readToken() to parse characters into Tokens.
 class Lexer {
- public:
+public:
   Lexer()
     : lineNum_(1), linePos_(1),
       buffer_(0), bufferLen_(0), bufferPos_(0),
@@ -181,7 +181,7 @@ class Lexer {
     return keyList_[k - startKeywordTokenID_];
   }
 
- protected:
+protected:
   // Gets the i'th character of lookahead.
   char lookChar(unsigned i = 0) {
     unsigned bsize = bufferSize();

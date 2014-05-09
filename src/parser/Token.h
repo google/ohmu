@@ -77,10 +77,14 @@ public:
     : tokenID_(tid), tokenStr_(s), sourceLoc_(loc)
   { }
 
-  unsigned              id()       const { return tokenID_;  }
-  unsigned              length()   const { return tokenStr_.length(); }
-  StringRef             string()   const { return tokenStr_;  }
-  const SourceLocation& location() const { return sourceLoc_; }
+  unsigned       id()        const { return tokenID_;  }
+  unsigned       length()    const { return tokenStr_.length(); }
+  StringRef      string()    const { return tokenStr_;  }
+  SourceLocation location()  const { return sourceLoc_; }
+
+  std::string cppString() const {
+    return std::string(tokenStr_.c_str(), tokenStr_.length());
+  }
 
   const char* c_str() const { return tokenStr_.c_str();  }
 

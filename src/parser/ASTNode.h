@@ -99,6 +99,9 @@ public:
   Variable(const std::string &s)
       : ASTNode(AST_Variable), name_(s), index_(0)
   { }
+  Variable(StringRef s)
+      : ASTNode(AST_Variable), name_(s.c_str(), s.length()), index_(0)
+  { }
 
   // Name of the variable.
   const std::string& name() const { return name_; }
@@ -131,6 +134,9 @@ public:
   TokenStr() = delete;
   TokenStr(const std::string &s)
      : ASTNode(AST_TokenStr), str_(s)
+  { }
+  TokenStr(StringRef s)
+     : ASTNode(AST_Variable), str_(s.c_str(), s.length())
   { }
 
   // Name of the variable.
