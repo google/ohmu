@@ -45,7 +45,7 @@ int main(int argc, const char** argv) {
 
   // bootstrap parser
   std::cout << "Opening sexpr.grammar:\n";
-  FILE* file = fopen("sexpr.grammar", "r");
+  FILE* file = fopen("src/grammar/parser.grammar", "r");
   if (!file) {
     std::cout << "File not found.\n";
     return -1;
@@ -60,6 +60,18 @@ int main(int argc, const char** argv) {
   bnfParser.setTrace(true);
   bnfParser.parse(startRule);
   fclose(file);
+
+  std::cout << "Bootstrap syntax definitions: \n";
+  bootstrapParser.printSyntax(std::cout);
+
+  std::cout << "Validating bootstrap parser: \n";
+  if (!bootstrapParser.init()) {
+    std::cout << "Validation failed.\n";
+    return -1;
+  }
+  else {
+    std::cout << "Validation succeeded.\n";
+  }
 }
 
 

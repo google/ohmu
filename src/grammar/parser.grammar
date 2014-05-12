@@ -1,42 +1,42 @@
 
 // An AST node, using Lisp-like syntax
 astNode ::=
-    s=%TK_LitString                              { (tokenStr s)       }
-  | id=%TK_Identifier                            { (variable id)      }
-  | "[" "]"                                      { (emptyList)        }
-  | "(" ( "append" e1=astNode e2=astNode    ")"  { (astAppend e1 e2)  }
-        | f=%TK_Identifier args=astNodeList ")"  { (construct f args) }
+    s = %TK_LitString                              { (tokenStr s)       }
+  | id = %TK_Identifier                            { (variable id)      }
+  | "[" "]"                                        { (emptyList)        }
+  | "(" ( "append" e1=astNode e2=astNode    ")"    { (astAppend e1 e2)  }
+        | f = %TK_Identifier args=astNodeList ")"  { (construct f args) }
         )
   ;
 
 astNodeList ::=
-                               { [] }
-  |*[es]  e=astNode            { (append es e) }
+                                 { [] }
+  |*[es]  e=astNode              { (append es e) }
   ;
 
 // Simple expressions, not including references
 simple ::=
-    s=%TK_LitString            { (keyword s) }
-  | "%" s=%TK_Identifier       { (token s)   }
-  | "(" e=recurseLeft ")"      { e }
-  | "{" e=astNode "}"          { (action e)  }
+    s = %TK_LitString            { (keyword s) }
+  | "%" s = %TK_Identifier       { (token s)   }
+  | "(" e=recurseLeft ")"        { e }
+  | "{" e=astNode "}"            { (action e)  }
   ;
 
 arguments ::=
-  id=%TK_Identifier            { (append [] id) }
-  |*[as] "," id=%TK_Identifier { (append as id) }
+  id = %TK_Identifier            { (append [] id) }
+  |*[as] "," id = %TK_Identifier { (append as id) }
   ;
 
 // Parse arguments, if any, and construct a reference from id
 referenceArgs[id] ::=
-    "[" as=arguments "]"       { (reference id as) }
-  |                            { (reference id []) }
+    "[" as=arguments "]"         { (reference id as) }
+  |                              { (reference id []) }
   ;
 
 // Simple expression or reference
 simpleCall ::=
     simple
-  | id=%TK_Identifier referenceArgs[id]
+  | id = %TK_Identifier referenceArgs[id]
   ;
 
 // Continue the sequence if possible, otherwise stop and return e.
@@ -46,9 +46,9 @@ maybeSequence[e] ::=
 
 sequence ::=
     e=simple  maybeSequence(e)
-  | id=%TK_Identifier ( "=" e=simpleCall sq=sequence { (sequence id e sq) }
-                      | e=referenceArgs[id]  maybeSequence(e)
-                      );
+  | id = %TK_Identifier ( "=" e=simpleCall sq=sequence { (sequence id e sq) }
+                        | e=referenceArgs[id]  maybeSequence(e)
+                        );
 
 option ::=
   e1=sequence ( "|" e2=option  { (option e1 e2) }
@@ -56,7 +56,7 @@ option ::=
               );
 
 recurseLeft ::=
-  e1=option ( "|*" "[" id=%TK_Identifier "]" e2=sequence
+  e1=option ( "|*" "[" id = %TK_Identifier "]" e2=sequence
                                { (recurseLeft id e1 e2 ) }
             |                  { e1 }
             );
@@ -66,7 +66,7 @@ maybeArguments ::=
   |                            { [] };
 
 definition ::=
-    id=%TK_Identifier as=maybeArguments "::=" e=recurseLeft ";"
+    id = %TK_Identifier as=maybeArguments "::=" e=recurseLeft ";"
                                { (definition id as e) };
 
 definitionList ::=
