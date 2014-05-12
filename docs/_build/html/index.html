@@ -1,0 +1,223 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Contents &mdash; ohmu 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="top" title="ohmu 0.1 documentation" href="#" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li><a href="#">ohmu 0.1 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="contents">
+<h1>Contents<a class="headerlink" href="#contents" title="Permalink to this headline">¶</a></h1>
+<div class="toctree-wrapper compound">
+<ul class="simple">
+</ul>
+</div>
+</div>
+<div class="section" id="introduction">
+<h1>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h1>
+<p>Ohmu is a new programming language being developed at Google.  Right now, it
+is just a hobby project that a few engineers are working on in their spare
+time.  Its purpose is to serve as a sandbox for experimenting with various
+compiler technologies, such as type systems, partial evaluation, run-time code
+generation, and GPU programming.</p>
+<p><em>Disclaimer</em>:  There are no plans to use ohmu internally or to release it as a
+real product.  Anything and everything is subject to change without notice.
+May be known to the State of California to cause cancer in lab animals,
+including engineers in computer labs. Do not eat.</p>
+<div class="section" id="why-a-new-language">
+<h2>Why a new language?<a class="headerlink" href="#why-a-new-language" title="Permalink to this headline">¶</a></h2>
+<p>We believe that a good programming language is one where the tool chain
+provides as much assistance as possible.  Optimizing compilers improve
+performance, type systems and warnings help find bugs, while IDEs and
+refactoring tools help organize and maintain code.  These tools are effective
+only if the language itself has a well-defined semantics, so that the compiler
+or IDE can analyze and understand the code.</p>
+<p>Unfortunately, most practical programming languages have a semantics that is
+informal, ad-hoc, overly complex, or unsound in various ways, which tends to
+confound any attempt at analysis. A great deal of academic research has been
+done in the area of formal programming language semantics, but academic
+languages go too far in the other direction; they are either too formal (e.g.
+Agda) or impractical for most real-world tasks (e.g. Haskell).</p>
+<p>Our goal is to collect the best ideas from academic research, combine those
+ideas together, and apply them to the design of a modern, elegant, and above
+all, a <em>practical</em> language.</p>
+</div>
+<div class="section" id="overview-of-language-features">
+<h2>Overview of Language Features<a class="headerlink" href="#overview-of-language-features" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li>High performance:<ul>
+<li>Faster than C.</li>
+<li>Suitable for systems programming, games, or scientific computation.</li>
+<li>Transparent foreign-function interface to C and C++ code.</li>
+<li>Transparent support for GPGPU programming.</li>
+<li>Advanced optimizations driven by static analysis (e.g. alias analysis).</li>
+</ul>
+</li>
+<li>Safe:<ul>
+<li>Type and memory safe.  No unsafe casts or buffer overflows...</li>
+<li>Thread-safe by design.  No race conditions...</li>
+<li>Designed from the ground-up for static analysis.</li>
+</ul>
+</li>
+<li>Modular and high-level:<ul>
+<li>Object-oriented programming: classes, inheritance, generics, and mixins.</li>
+<li>Functional programming: type-classes, variant data types, and ADTs.</li>
+<li>Mixin-modules: virtual classes and extensible data types.</li>
+</ul>
+</li>
+<li>Extensible:<ul>
+<li><em>Extensible syntax</em>: libraries can extend the language with new syntax.</li>
+<li><em>Partial evaluation</em>: compile language extensions down to the core language.</li>
+<li>Compile-time reflection and meta-programming.</li>
+<li>Support for embedding domain-specific languages (DSLs):<ul>
+<li>E.g. parser generators, matrix libraries, image filters, shaders, etc.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>Although this may look like merely a wish-list, all of these features depend
+primarily on just two key technologies:</p>
+<ol class="arabic simple">
+<li>A sophisticated static type system.</li>
+<li>Partial evaluation.</li>
+</ol>
+<p><strong>Type system</strong>.  Most programmers are familiar with simple types, like
+<tt class="docutils literal"><span class="pre">int</span></tt> and <tt class="docutils literal"><span class="pre">String</span></tt>.  However, type systems are a general purpose tool for
+encoding any program invariant, such as aliasing constraints, ownership, or
+freedom from race conditions.  The ohmu type system is responsible for the
+<em>safety</em> features above, and it is a key part of <em>modularity</em>, since mixin
+modules have very complex types.  Moreover, the type system enforces program
+invariants that are then used by the optimizer to achieve <em>high performance</em>.</p>
+<p><strong>Partial evaluation</strong>.  Partial evaluation optimizes code by shifting
+computations from run-time to compile-time.  Constant propogation is a simple
+version that is performed by most compilers.  The ohmu evaluator can perform
+arbitrary computations at compile-time, including program transformations
+(like method de-virtualization) based on static type information.  The
+<em>extensibility</em> features use partial evaluation to eliminate the run-time
+overhead that is generally associated with reflection and DSLs.</p>
+<p>The effect of these two technologies is discussed in more detail below.</p>
+<div class="section" id="high-performance">
+<h3>High Performance<a class="headerlink" href="#high-performance" title="Permalink to this headline">¶</a></h3>
+<p>There has traditionally been a tradeoff between performance and safety.  A
+safe language must perform additional run-time checks, such as a array bounds
+checks, to prevent unsafe operations from occuring.</p>
+<p>Similarly, there has traditionally been a tradeoff between performance and
+high-level abstractions.</p>
+</div>
+<div class="section" id="safe">
+<h3>Safe<a class="headerlink" href="#safe" title="Permalink to this headline">¶</a></h3>
+</div>
+<div class="section" id="modular-and-high-level">
+<h3>Modular and high level<a class="headerlink" href="#modular-and-high-level" title="Permalink to this headline">¶</a></h3>
+</div>
+<div class="section" id="extensiblility-and-dsls">
+<h3>Extensiblility and DSLs<a class="headerlink" href="#extensiblility-and-dsls" title="Permalink to this headline">¶</a></h3>
+</div>
+</div>
+</div>
+<div class="section" id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><a class="reference internal" href="genindex.html"><em>Index</em></a></li>
+<li><a class="reference internal" href="py-modindex.html"><em>Module Index</em></a></li>
+<li><a class="reference internal" href="search.html"><em>Search Page</em></a></li>
+</ul>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="#">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Contents</a></li>
+<li><a class="reference internal" href="#introduction">Introduction</a><ul>
+<li><a class="reference internal" href="#why-a-new-language">Why a new language?</a></li>
+<li><a class="reference internal" href="#overview-of-language-features">Overview of Language Features</a><ul>
+<li><a class="reference internal" href="#high-performance">High Performance</a></li>
+<li><a class="reference internal" href="#safe">Safe</a></li>
+<li><a class="reference internal" href="#modular-and-high-level">Modular and high level</a></li>
+<li><a class="reference internal" href="#extensiblility-and-dsls">Extensiblility and DSLs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
+</ul>
+
+  <h3>This Page</h3>
+  <ul class="this-page-menu">
+    <li><a href="_sources/index.txt"
+           rel="nofollow">Show Source</a></li>
+  </ul>
+<div id="searchbox" style="display: none">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li><a href="#">ohmu 0.1 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+        &copy; Copyright 2014, DeLesley Hutchins.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.2.2.
+    </div>
+  </body>
+</html>
