@@ -66,7 +66,7 @@ ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     return prs[i].getToken();
   };
   auto tokList = [=](unsigned i) -> std::vector< Token* >* {
-    if (!prs[i].isToken() || i >= arity)
+    if (!prs[i].isTokenList() || i >= arity)
       return nullptr;
     return prs[i].getTokenList();
   };
@@ -339,7 +339,7 @@ void BNFParser::defineSyntax() {
      |= PReturnVar("e");
 
   // sequence ::=
-  //     e=simple  maybeSequence(e)
+  //     e=simple  maybeSequence[e]
   //   | id=%TK_Identifier ( "=" e=simpleCall sq=sequence { (sequence id e sq) }
   //                       | e=reference[id]  maybeSequence(e)
   //                       );

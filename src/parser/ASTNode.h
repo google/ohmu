@@ -345,6 +345,7 @@ public:
       case ASTNode::AST_Append:
         return self()->traverseAppend(cast<Append>(node));
     }
+    return self()->reduceNone();
   }
 
   ResultType traverseVariable(Variable *node) {

@@ -1,0 +1,173 @@
+
+// First rule for files
+definitions ::= slotList;
+
+// First rule for read-eval-print loop
+command ::=
+    %TK_Newline          { (litNull) }
+  | e=expr %TK_Newline   { e }
+  ;
+
+literal ::=
+    "null"               { (litNull)         }
+  | "true"               { (litBool "true")  }
+  | "false"              { (litBool "false") }
+  | s= %TK_LitCharacter  { (litChar    s)    }
+  | s= %TK_LitInteger    { (litInt     s)    }
+  | s= %TK_LitFloat      { (litFloat   s)    }
+  | s= %TK_LitString     { (litString  s)    }
+  ;
+
+value ::=
+    literal
+  | "\\" "(" function
+  | "@" x= %TK_Identifier v=value   { (sfunction x v) }
+  | "{" ss=slotList "}"             { (record ss)     }
+  | "[" es=exprList "]"             { (array es)      }
+  ;
+
+function ::=
+    ")" funBody
+  | x= %TK_Identifier ":" t=expr v=funRest      { (function x t v) }
+  ;
+
+funRest ::=
+    ")" FunBody
+  | "," x= %TK_Identifier ":" t=expr v=funRest  { (function x t v) }
+  ;
+
+funBody ::=
+    "=" value
+  | ":" t=expr "->" ( e=expr   { (code t e)         }
+                    | "_"      { (code t (litNull)) }
+                    )
+  ;
+
+field ::=
+  ":" t=expr "=" ( e=expr      { (field t e)         }
+                 | "_"         { (field t (litNull)) }
+                 )
+  ;
+
+slot ::=
+    m= %TK_Identifier
+      ( "(" f=function ";"   { (slot m f) }
+      | "=" v=value    ";"   { (slot m v) }
+      | f=field        ";"   { (slot m f) }
+      )
+  ;
+
+slotList ::=
+  s=slot               { (append [] s) }
+  |*[ss] s=Slot        { (append ss s) }
+  ;
+
+exprList ::=
+  e=expr               { (append [] e) }
+  |*[es] "," e=expr    { (append es e) }
+  ;
+
+simple ::=
+    value
+  | s= %TK_Identifier  { (identifier s) }
+  | "(" e=expr ")"     { e }
+  ;
+
+mkApply[f,a] ::=
+    ")"      { (apply f a) }
+  | ","  app={ (apply f a) }  b=expr  mkApply[app, b]
+  ;
+
+mkIndex[a,i] ::=
+    "]"      { (deref (arrayAdd a i)) }
+  | ","  idx={ (deref (arrayAdd a i)) }  b=expr  mkIndex[idx, b]
+  ;
+
+postfix ::=
+  simple
+  |*[f] ( "(" ( ")"                     { (call f)      }
+              | a=expr  e=mkApply[f,a]  { (call e)      }
+              )
+        | "@" "(" ( ")"                 { (sapply f)    }
+                  | a=expr ")"          { (sapply f a)  }
+                  )
+        | "." m= %TK_Identifier         { (project f m) }
+        | "[" i=expr    mkIndex[f,i]
+        )
+  ;
+
+unary ::=
+  postfix
+  | "!" e=unary             { (unary "!" e) }
+  | "~" e=unary             { (unary "~" e) }
+  ;
+
+expr10 ::=
+  unary
+  |*[a] ( "*" b=unary       { (binary "*" a b) }
+        | "/" b=unary       { (binary "/" a b) }
+        )
+  ;
+
+expr20 ::=
+  expr10
+  |*[a] ( "+" b=expr10      { (binary "+" a b) }
+        | "-" b=expr10      { (binary "-" a b) }
+        )
+  ;
+
+expr30 ::=
+  expr20
+  |*[a] ( "<<" b=expr20     { (binary "<<" a b) }
+        | ">>" b=expr20     { (binary ">>" a b) }
+        )
+  ;
+
+expr40 ::=
+  expr30
+  |*[a] "&" b=expr30 { (binary "&" a b) }
+  ;
+
+expr41 ::=
+  expr40
+  |*[a] "^" b=expr40 { (binary "^" a b) }
+  ;
+
+expr42 ::=
+  expr41
+  |*[a] "|" b=expr41 { (binary "|" a b) }
+  ;
+
+expr50 ::=
+  a=expr42 ( "==" b=expr42  { (binary "==" a b) }
+           | "!=" b=expr42  { (binary "!=" a b) }
+           | "<"  b=expr42  { (binary "<"  a b) }
+           | "<=" b=expr42  { (binary ">=" a b) }
+           | ">"  b=expr42  { (binary ">"  a b) }
+           | ">=" b=expr42  { (binary ">=" a b) }
+           |                { a }
+           )
+  ;
+
+expr60 ::=
+  expr50
+  |*[a] "&&" b=expr50 { (binary "&&" a b) }
+  ;
+
+expr61 ::=
+  expr60
+  |*[a] "||" b=expr60 { (binary "||" a b) }
+  ;
+
+expr90 ::=
+  a=unary (":=" b=expr { (assign a b) }
+          |            { a }
+          )
+  ;
+
+expr ::=
+    expr90
+  | "let" s= %TK_Identifier "=" e1=expr ";" e2=expr   { (let s e1 e2) }
+  | "if" "(" c=expr ")" "then" e1=expr "else" e2=expr { (if c e1 e2)  }
+  ;
+

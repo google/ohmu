@@ -112,43 +112,47 @@ all, a <em>practical</em> language.</p>
 </ul>
 </li>
 </ul>
-<p>Although this may look like merely a wish-list, all of these features depend
+<div class="section" id="key-technologies">
+<h3>Key Technologies<a class="headerlink" href="#key-technologies" title="Permalink to this headline">¶</a></h3>
+<p>Although this may look like a long wish-list, all of these features depend
 primarily on just two key technologies:</p>
 <ol class="arabic simple">
 <li>A sophisticated static type system.</li>
 <li>Partial evaluation.</li>
 </ol>
-<p><strong>Type system</strong>.  Most programmers are familiar with simple types, like
-<tt class="docutils literal"><span class="pre">int</span></tt> and <tt class="docutils literal"><span class="pre">String</span></tt>.  However, type systems are a general purpose tool for
-encoding any program invariant, such as aliasing constraints, ownership, or
-freedom from race conditions.  The ohmu type system is responsible for the
-<em>safety</em> features above, and it is a key part of <em>modularity</em>, since mixin
-modules have very complex types.  Moreover, the type system enforces program
-invariants that are then used by the optimizer to achieve <em>high performance</em>.</p>
+<p><strong>Type system</strong>.  Type systems are routinely used to handle structural types,
+such as <tt class="docutils literal"><span class="pre">int</span></tt> and <tt class="docutils literal"><span class="pre">String</span></tt>.  However, they can do much more than that.
+Type systems a general purpose tool for declaring and enforcing any program
+invariant, including aliasing constraints, ownership, or freedom from race
+conditions.  The ohmu type system is responsible for the <em>safety</em> features
+above, and it is a key part of <em>modularity</em>, since mixin modules have very
+complex types.  Moreover, the type system enforces program invariants that are
+then used by the optimizer to achieve <em>high performance</em>.</p>
 <p><strong>Partial evaluation</strong>.  Partial evaluation optimizes code by shifting
-computations from run-time to compile-time.  Constant propogation is a simple
-version that is performed by most compilers.  The ohmu evaluator can perform
-arbitrary computations at compile-time, including program transformations
-(like method de-virtualization) based on static type information.  The
-<em>extensibility</em> features use partial evaluation to eliminate the run-time
-overhead that is generally associated with reflection and DSLs.</p>
-<p>The effect of these two technologies is discussed in more detail below.</p>
-<div class="section" id="high-performance">
-<h3>High Performance<a class="headerlink" href="#high-performance" title="Permalink to this headline">¶</a></h3>
-<p>There has traditionally been a tradeoff between performance and safety.  A
-safe language must perform additional run-time checks, such as a array bounds
-checks, to prevent unsafe operations from occuring.</p>
+computations from run-time to compile-time.  Most compilers can perform
+constant propogation.  However, the ohmu compiler can perform arbitrary
+computations at compile-time.  Moreover, the partial evaluator is linked to
+the static type system, which enables it to perform type-based
+transformations, like method de-virtualization.  The <em>extensibility</em> features
+use partial evaluation to eliminate the run-time overhead that is generally
+associated with reflection and DSLs.</p>
+</div>
+<div class="section" id="tradeoffs-in-language-design">
+<h3>Tradeoffs in Language Design<a class="headerlink" href="#tradeoffs-in-language-design" title="Permalink to this headline">¶</a></h3>
+<p>There has traditionally been a tradeoff in language design between performance
+and safety.  A safe language must perform additional run-time checks, such as
+array bounds checks, to prevent unsafe operations from occuring. Ohmu
+leverages the type system to achieve both performance and safety at the same
+time.  E.g. if the type system can prove that the array bounds check always
+succeeds, then run-time check can be omitted.</p>
 <p>Similarly, there has traditionally been a tradeoff between performance and
-high-level abstractions.</p>
-</div>
-<div class="section" id="safe">
-<h3>Safe<a class="headerlink" href="#safe" title="Permalink to this headline">¶</a></h3>
-</div>
-<div class="section" id="modular-and-high-level">
-<h3>Modular and high level<a class="headerlink" href="#modular-and-high-level" title="Permalink to this headline">¶</a></h3>
-</div>
-<div class="section" id="extensiblility-and-dsls">
-<h3>Extensiblility and DSLs<a class="headerlink" href="#extensiblility-and-dsls" title="Permalink to this headline">¶</a></h3>
+high-level abstractions.  Abstractions introduce an additional level of
+indirection, which usually has a run-time cost.  For example, object-oriented
+inheritance and virtual methods are a useful abstraction, but most compilers
+cannot inline virtual methods, so they have a high cost.  Ohmu leverages
+partial evaluation to eliminate the overhead of most abstractions.  For
+example, the partial evaluator can specialize a polymorphic function to a
+concrete type, thus allowing the virtual calls to be eliminated.</p>
 </div>
 </div>
 </div>
@@ -173,10 +177,8 @@ high-level abstractions.</p>
 <li><a class="reference internal" href="#introduction">Introduction</a><ul>
 <li><a class="reference internal" href="#why-a-new-language">Why a new language?</a></li>
 <li><a class="reference internal" href="#overview-of-language-features">Overview of Language Features</a><ul>
-<li><a class="reference internal" href="#high-performance">High Performance</a></li>
-<li><a class="reference internal" href="#safe">Safe</a></li>
-<li><a class="reference internal" href="#modular-and-high-level">Modular and high level</a></li>
-<li><a class="reference internal" href="#extensiblility-and-dsls">Extensiblility and DSLs</a></li>
+<li><a class="reference internal" href="#key-technologies">Key Technologies</a></li>
+<li><a class="reference internal" href="#tradeoffs-in-language-design">Tradeoffs in Language Design</a></li>
 </ul>
 </li>
 </ul>

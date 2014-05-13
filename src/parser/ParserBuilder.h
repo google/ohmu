@@ -112,22 +112,20 @@ public:
     return ParseBuilder(new ParseReference(definition()));
   }
 
-  ParseBuilder ref(const std::string& a0) {
+  ParseBuilder ref(std::string a0) {
     auto *r = new ParseReference(definition());
     r->addArgument(a0);
     return ParseBuilder(r);
   }
 
-  ParseBuilder ref(const std::string& a0, const std::string& a1) {
+  ParseBuilder ref(std::string a0, std::string a1) {
     auto *r = new ParseReference(definition());
     r->addArgument(a0);
     r->addArgument(a1);
     return ParseBuilder(r);
   }
 
-  ParseBuilder ref(const std::string& a0, const std::string& a1,
-                   const std::string& a2)
-  {
+  ParseBuilder ref(std::string a0, std::string a1, std::string a2) {
     auto *r = new ParseReference(definition());
     r->addArgument(a0);
     r->addArgument(a1);

@@ -643,7 +643,7 @@ bool ParseReference::accepts(const Token& tok) {
 ParseRule* ParseReference::parse(Parser& parser) {
   unsigned frameStart = parser.resultStack_.size() - frameSize_;
   for (unsigned i=0, n=arguments_.size(); i<n; ++i)
-    parser.resultStack_.moveAndPush(frameStart + i);
+    parser.resultStack_.moveAndPush(frameStart + arguments_[i]);
   if (drop_ > 0)
     parser.resultStack_.drop(drop_, arguments_.size());
   return definition_;
@@ -657,6 +657,8 @@ void ParseReference::prettyPrint(Parser& parser, std::ostream& out) {
     for (unsigned i=0,n=argNames_.size(); i<n; ++i) {
       if (i > 0) out << ",";
       out << argNames_[i];
+      if (parser.traceValidate_ && i < arguments_.size())
+        out << "_" << arguments_[i];
     }
     out << "]";
   }

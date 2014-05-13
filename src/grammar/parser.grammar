@@ -28,7 +28,7 @@ arguments ::=
   ;
 
 // Parse arguments, if any, and construct a reference from id
-referenceArgs[id] ::=
+reference[id] ::=
     "[" as=arguments "]"         { (reference id as) }
   |                              { (reference id []) }
   ;
@@ -36,7 +36,7 @@ referenceArgs[id] ::=
 // Simple expression or reference
 simpleCall ::=
     simple
-  | id = %TK_Identifier referenceArgs[id]
+  | id = %TK_Identifier reference[id]
   ;
 
 // Continue the sequence if possible, otherwise stop and return e.
@@ -45,9 +45,9 @@ maybeSequence[e] ::=
   |                            { e };
 
 sequence ::=
-    e=simple  maybeSequence(e)
+    e=simple  maybeSequence[e]
   | id = %TK_Identifier ( "=" e=simpleCall sq=sequence { (sequence id e sq) }
-                        | e=referenceArgs[id]  maybeSequence(e)
+                        | e=reference[id]  maybeSequence[e]
                         );
 
 option ::=
@@ -72,3 +72,4 @@ definition ::=
 definitionList ::=
                                { [] }
   |*[ds] d=definition          { (definitionList ds d) }
+  ;

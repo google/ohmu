@@ -438,40 +438,28 @@ public:
   // move the argument at index i onto the top of the stack.
   void moveAndPush(unsigned i) {
     assert(i < stack_.size() && "Array index out of bounds.");
-    std::cerr << "\n   movpush " << i << " -> " << stack_.size();
     stack_.emplace_back(std::move(stack_[i]));
-    dump();
   }
 
   void push_back(const Token& tok) {
-    std::cerr << "\n   push token " << stack_.size();
     stack_.emplace_back(ParseResult(new Token(tok)));
-    dump();
   }
 
   void push_back(ParseResult &&r) {
-    std::cerr << "\n   push result " << stack_.size();
     stack_.emplace_back(std::move(r));
-    dump();
   }
 
   // Drop n items from the stack, but keep the nsave top-most items.
   void drop(unsigned n, unsigned nsave) {
-    std::cerr << "\n   drop " << n << " " << nsave;
     if (n == 0)
       return;
     assert(stack_.size() >= n + nsave && "Stack too small");
-    dump();
     stack_.erase(stack_.end()-nsave-n, stack_.end()-nsave);
-    dump();
   }
 
   ParseResult getElem(unsigned i) {
     assert(i < stack_.size() && "Array index out of bounds.");
-    std::cerr << "\n   read var " << i;
-    ParseResult r = std::move(stack_[i]);
-    dump();
-    return std::move(r);
+    return std::move(stack_[i]);
   }
 
   ParseResult getBack() { return std::move(stack_.back()); }

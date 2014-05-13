@@ -77,54 +77,53 @@ Overview of Language Features
 
     * E.g. parser generators, matrix libraries, image filters, shaders, etc.
 
-Although this may look like merely a wish-list, all of these features depend
+
+Key Technologies
+^^^^^^^^^^^^^^^^
+
+Although this may look like a long wish-list, all of these features depend
 primarily on just two key technologies:
 
 #. A sophisticated static type system.
 #. Partial evaluation.
 
-**Type system**.  Most programmers are familiar with simple types, like
-``int`` and ``String``.  However, type systems are a general purpose tool for
-encoding any program invariant, such as aliasing constraints, ownership, or
-freedom from race conditions.  The ohmu type system is responsible for the
-*safety* features above, and it is a key part of *modularity*, since mixin
-modules have very complex types.  Moreover, the type system enforces program
-invariants that are then used by the optimizer to achieve *high performance*.
+**Type system**.  Type systems are routinely used to handle structural types,
+such as ``int`` and ``String``.  However, they can do much more than that.
+Type systems a general purpose tool for declaring and enforcing any program
+invariant, including aliasing constraints, ownership, or freedom from race
+conditions.  The ohmu type system is responsible for the *safety* features
+above, and it is a key part of *modularity*, since mixin modules have very
+complex types.  Moreover, the type system enforces program invariants that are
+then used by the optimizer to achieve *high performance*.
 
 **Partial evaluation**.  Partial evaluation optimizes code by shifting
-computations from run-time to compile-time.  Constant propogation is a simple
-version that is performed by most compilers.  The ohmu evaluator can perform
-arbitrary computations at compile-time, including program transformations
-(like method de-virtualization) based on static type information.  The
-*extensibility* features use partial evaluation to eliminate the run-time
-overhead that is generally associated with reflection and DSLs.
+computations from run-time to compile-time.  Most compilers can perform
+constant propogation.  However, the ohmu compiler can perform arbitrary
+computations at compile-time.  Moreover, the partial evaluator is linked to
+the static type system, which enables it to perform type-based
+transformations, like method de-virtualization.  The *extensibility* features
+use partial evaluation to eliminate the run-time overhead that is generally
+associated with reflection and DSLs.
 
-The effect of these two technologies is discussed in more detail below.
 
+Tradeoffs in Language Design
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-High Performance
-^^^^^^^^^^^^^^^^
-
-There has traditionally been a tradeoff between performance and safety.  A
-safe language must perform additional run-time checks, such as a array bounds
-checks, to prevent unsafe operations from occuring.
+There has traditionally been a tradeoff in language design between performance
+and safety.  A safe language must perform additional run-time checks, such as
+array bounds checks, to prevent unsafe operations from occuring. Ohmu
+leverages the type system to achieve both performance and safety at the same
+time.  E.g. if the type system can prove that the array bounds check always
+succeeds, then run-time check can be omitted.
 
 Similarly, there has traditionally been a tradeoff between performance and
-high-level abstractions.
-
-
-Safe
-^^^^
-
-Modular and high level
-^^^^^^^^^^^^^^^^^^^^^^
-
-Extensiblility and DSLs
-^^^^^^^^^^^^^^^^^^^^^^^
-
-
-
-
+high-level abstractions.  Abstractions introduce an additional level of
+indirection, which usually has a run-time cost.  For example, object-oriented
+inheritance and virtual methods are a useful abstraction, but most compilers
+cannot inline virtual methods, so they have a high cost.  Ohmu leverages
+partial evaluation to eliminate the overhead of most abstractions.  For
+example, the partial evaluator can specialize a polymorphic function to a
+concrete type, thus allowing the virtual calls to be eliminated.
 
 
 Indices and tables
