@@ -142,7 +142,7 @@ expr50 ::=
   a=expr42 ( "==" b=expr42  { (binary "==" a b) }
            | "!=" b=expr42  { (binary "!=" a b) }
            | "<"  b=expr42  { (binary "<"  a b) }
-           | "<=" b=expr42  { (binary ">=" a b) }
+           | "<=" b=expr42  { (binary "<=" a b) }
            | ">"  b=expr42  { (binary ">"  a b) }
            | ">=" b=expr42  { (binary ">=" a b) }
            |                { a }

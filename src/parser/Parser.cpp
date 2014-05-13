@@ -23,9 +23,6 @@
 
 #include <iostream>
 
-#include "Util.h"
-#include "Token.h"
-#include "Lexer.h"
 #include "Parser.h"
 
 

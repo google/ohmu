@@ -29,6 +29,12 @@
 #include <cstdlib>
 #include <iostream>
 
+// A few handy definitions borrowed from LLVM
+#ifndef LLVM_DELETED_FUNCTION
+#define LLVM_DELETED_FUNCTION = delete
+#endif
+
+
 namespace ohmu {
 
 
@@ -38,52 +44,52 @@ inline bool isa(const U* p) { return T::classof(p); }
 template <class T, class U>
 inline T* cast(U* p) {
   assert(T::classof(p));
-  return reinterpret_cast<T*>(p);
+  return static_cast<T*>(p);
 }
 
 template <class T, class U>
 inline const T* cast(const U* p) {
   assert(T::classof(p));
-  return reinterpret_cast<const T*>(p);
+  return static_cast<const T*>(p);
 }
 
 template <class T, class U>
 inline T* dyn_cast(U* p) {
   if (!T::classof(p))
     return 0;
-  return reinterpret_cast<T*>(p);
+  return static_cast<T*>(p);
 }
 
 template <class T, class U>
 inline const T* dyn_cast(const U* p) {
   if (!T::classof(p))
     return 0;
-  return reinterpret_cast<const T*>(p);
+  return static_cast<const T*>(p);
 }
 
 template <class T, class U>
 inline T* dyn_cast_or_null(U* p) {
   if (!p || !T::classof(p))
     return 0;
-  return reinterpret_cast<T*>(p);
+  return static_cast<T*>(p);
 }
 
 template <class T, class U>
 inline const T* dyn_cast_or_null(const U* p) {
   if (!p || !T::classof(p))
     return 0;
-  return reinterpret_cast<const T*>(p);
+  return static_cast<const T*>(p);
 }
 
 
 
 class StringRef {
 public:
+  StringRef(const char* s)
+    : str_(s), len_((unsigned) strlen(s))
+  { }
   StringRef(const char* s, unsigned len)
     : str_(s), len_(len)
-  { }
-  explicit StringRef(const char* s)
-    : str_(s), len_((unsigned) strlen(s))
   { }
   // Warning -- lifetime of s must be longer than this stringref.
   explicit StringRef(const std::string& s)
@@ -92,6 +98,8 @@ public:
 
   unsigned    length() const { return len_; }
   const char* c_str()  const { return str_; }
+
+  std::string cppString() const { return std::string(str_, len_); }
 
   bool operator<(const StringRef& s) const {
     return strncmp(str_, s.str_, min(len_, s.len_)) < 0;

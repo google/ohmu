@@ -44,7 +44,7 @@
 
 #include <iostream>
 
-#include "Util.h"
+#include "../base/Util.h"
 
 namespace ohmu {
 namespace parsing {
@@ -101,11 +101,14 @@ public:
   }
 
   Variable() = delete;
-  Variable(const std::string &s)
+  Variable(const char* s)
       : ASTNode(AST_Variable), name_(s), index_(0)
   { }
+  Variable(std::string s)
+      : ASTNode(AST_Variable), name_(std::move(s)), index_(0)
+  { }
   Variable(StringRef s)
-      : ASTNode(AST_Variable), name_(s.c_str(), s.length()), index_(0)
+      : ASTNode(AST_Variable), name_(s.cppString()), index_(0)
   { }
 
   // Name of the variable.
@@ -137,11 +140,14 @@ public:
   }
 
   TokenStr() = delete;
-  TokenStr(const std::string &s)
+  TokenStr(const char* s)
      : ASTNode(AST_TokenStr), str_(s)
   { }
+  TokenStr(std::string s)
+     : ASTNode(AST_TokenStr), str_(std::move(s))
+  { }
   TokenStr(StringRef s)
-     : ASTNode(AST_Variable), str_(s.c_str(), s.length())
+     : ASTNode(AST_Variable), str_(s.cppString())
   { }
 
   // Name of the variable.
