@@ -17,7 +17,7 @@
 #ifndef LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
 #define LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "ThreadSafetyTIL.h"
 
 namespace clang {
 namespace threadSafety {
@@ -72,7 +72,7 @@ public:
 #define TIL_OPCODE_DEF(X)                                                   \
     case COP_##X:                                                           \
       return self()->traverse##X(cast<X>(E));
-#include "clang/Analysis/Analyses/ThreadSafetyOps.def"
+#include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     case COP_MAX:
       return self()->reduceNull();
@@ -83,7 +83,7 @@ public:
 // Override these methods to do something for a particular kind of term.
 #define TIL_OPCODE_DEF(X)                                                   \
   typename R::R_SExpr traverse##X(X *e) { return e->traverse(*self()); }
-#include "clang/Analysis/Analyses/ThreadSafetyOps.def"
+#include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
 };
 
@@ -360,7 +360,7 @@ public:
 #define TIL_OPCODE_DEF(X)                                                     \
     case COP_##X:                                                             \
       return cast<X>(E1)->compare(cast<X>(E2), *self());
-#include "clang/Analysis/Analyses/ThreadSafetyOps.def"
+#include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     case COP_MAX:
       return false;
@@ -498,7 +498,7 @@ protected:
     case COP_##X:                                                          \
       self()->print##X(cast<X>(E), SS);                                    \
       return;
-#include "clang/Analysis/Analyses/ThreadSafetyOps.def"
+#include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     case COP_MAX:
       return;
@@ -522,25 +522,7 @@ protected:
   }
 
   void printLiteral(Literal *E, StreamType &SS) {
-    const clang::Expr *CE = E->clangExpr();
-    switch (CE->getStmtClass()) {
-      case Stmt::IntegerLiteralClass:
-        SS << cast<IntegerLiteral>(CE)->getValue().toString(10, true);
-        return;
-      case Stmt::StringLiteralClass:
-        SS << "\"" << cast<StringLiteral>(CE)->getString() << "\"";
-        return;
-      case Stmt::CharacterLiteralClass:
-      case Stmt::CXXNullPtrLiteralExprClass:
-      case Stmt::GNUNullExprClass:
-      case Stmt::CXXBoolLiteralExprClass:
-      case Stmt::FloatingLiteralClass:
-      case Stmt::ImaginaryLiteralClass:
-      case Stmt::ObjCStringLiteralClass:
-      default:
-        SS << "#lit";
-        return;
-    }
+    SS << getSourceLiteralString(E->clangExpr());
   }
 
   void printLiteralPtr(LiteralPtr *E, StreamType &SS) {
@@ -675,12 +657,13 @@ protected:
   }
 
   void printUnaryOp(UnaryOp *E, StreamType &SS) {
+    SS << getUnaryOpcodeString(E->unaryOpcode());
     self()->printSExpr(E->expr(), SS, Prec_Unary);
   }
 
   void printBinaryOp(BinaryOp *E, StreamType &SS) {
     self()->printSExpr(E->expr0(), SS, Prec_Binary-1);
-    SS << " " << clang::BinaryOperator::getOpcodeStr(E->binaryOpcode()) << " ";
+    SS << " " << getBinaryOpcodeString(E->binaryOpcode()) << " ";
     self()->printSExpr(E->expr1(), SS, Prec_Binary-1);
   }
 

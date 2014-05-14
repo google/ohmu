@@ -108,7 +108,7 @@ public:
       : ASTNode(AST_Variable), name_(std::move(s)), index_(0)
   { }
   Variable(StringRef s)
-      : ASTNode(AST_Variable), name_(s.cppString()), index_(0)
+      : ASTNode(AST_Variable), name_(s.str()), index_(0)
   { }
 
   // Name of the variable.
@@ -147,7 +147,7 @@ public:
      : ASTNode(AST_TokenStr), str_(std::move(s))
   { }
   TokenStr(StringRef s)
-     : ASTNode(AST_Variable), str_(s.cppString())
+     : ASTNode(AST_Variable), str_(s.str())
   { }
 
   // Name of the variable.

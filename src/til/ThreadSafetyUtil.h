@@ -31,6 +31,7 @@
 #include "../base/Util.h"
 #include "../parser/Token.h"
 
+
 // pull in all of the cast operations.
 using namespace ohmu;
 
@@ -43,6 +44,7 @@ typedef ohmu::parsing::SourceLocation SourceLocation;
 class ValueDecl {
 public:
   StringRef getName() const { return name_; }
+  std::string getNameAsString() const { return name_.str(); }
 
 private:
   StringRef name_;
@@ -53,44 +55,10 @@ class Stmt { };
 class Expr : public Stmt { };
 class CallExpr : public Expr { };
 
-
 namespace threadSafety {
 namespace til {
 
-enum TIL_UnaryOpcode {
-  UOP_None = 0,     //  no-op
-  UOP_BitNot,       //  ~
-  UOP_LogicNot      //  !
-};
-
-
-enum TIL_BinaryOpcode {
-  BOP_Mul,          //  *
-  BOP_Div,          //  /
-  BOP_Add,          //  +
-  BOP_Sub,          //  -
-  BOP_Shl,          //  <<
-  BOP_Shr,          //  >>
-  BOP_BitAnd,       //  &
-  BOP_BitXor,       //  ^
-  BOP_BitOr,        //  |
-  BOP_Eq,           //  ==
-  BOP_Neq,          //  !=
-  BOP_Lt,           //  <
-  BOP_Leq,          //  <=
-  BOP_LogicAnd,     //  &&
-  BOP_LogicOr       //  ||
-};
-
-
-enum TIL_CastOpcode {
-  CAST_None = 0,
-  CAST_extendNum,   // extend precision of numeric type
-  CAST_truncNum,    // truncate precision of numeric type
-  CAST_toFloat,     // convert to floating point type
-  CAST_toInt,       // convert to integer type
-};
-
+std::string getSourceLiteralString(const clang::Expr *E) { return ""; }
 
 } // end namespace til
 } // end namespace threadSafety

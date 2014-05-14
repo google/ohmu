@@ -49,6 +49,7 @@
 
 #include "ThreadSafetyUtil.h"
 
+#include <stdint.h>
 #include <cassert>
 #include <cstddef>
 #include <utility>
@@ -65,6 +66,179 @@ enum TIL_Opcode {
 #undef TIL_OPCODE_DEF
   COP_MAX
 };
+
+enum TIL_UnaryOpcode : unsigned char {
+  UOP_BitNot,       //  ~
+  UOP_LogicNot      //  !
+};
+
+enum TIL_BinaryOpcode : unsigned char {
+  BOP_Mul,          //  *
+  BOP_Div,          //  /
+  BOP_Add,          //  +
+  BOP_Sub,          //  -
+  BOP_Shl,          //  <<
+  BOP_Shr,          //  >>
+  BOP_BitAnd,       //  &
+  BOP_BitXor,       //  ^
+  BOP_BitOr,        //  |
+  BOP_Eq,           //  ==
+  BOP_Neq,          //  !=
+  BOP_Lt,           //  <
+  BOP_Leq,          //  <=
+  BOP_LogicAnd,     //  &&
+  BOP_LogicOr       //  ||
+};
+
+enum TIL_CastOpcode : unsigned char {
+  CAST_None = 0,
+  CAST_extendNum,   // extend precision of numeric type
+  CAST_truncNum,    // truncate precision of numeric type
+  CAST_toFloat,     // convert to floating point type
+  CAST_toInt,       // convert to integer type
+};
+
+const TIL_UnaryOpcode  UOP_Min  = UOP_BitNot;
+const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
+const TIL_BinaryOpcode BOP_Min  = BOP_Mul;
+const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
+const TIL_CastOpcode   CAST_Min = CAST_None;
+const TIL_CastOpcode   CAST_Max = CAST_toInt;
+
+StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
+StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
+
+
+// ValueTypes are data types that can actually be held in registers.
+// All variables and expressions must have a value type.
+// Pointer types are further subdivided into the various heap-allocated
+// types, such as functions, records, etc.
+// Structured types that are passed by value (e.g. complex numbers)
+// require special handling; they use BT_ValueRef, and size ST_0.
+struct ValueType {
+  enum BaseType : unsigned char {
+    BT_Void = 0,
+    BT_Bool,
+    BT_Int,
+    BT_Float,
+    BT_String,    // String literals
+    BT_Pointer,
+    BT_ValueRef
+  };
+
+  enum SizeType : unsigned char {
+    ST_0 = 0,
+    ST_1,
+    ST_8,
+    ST_16,
+    ST_32,
+    ST_64,
+    ST_128
+  };
+
+  static SizeType getSizeType(unsigned nbytes);
+
+  template <class T>
+  static ValueType getValueType();
+
+  ValueType(BaseType B, SizeType Sz, bool S, unsigned char VS)
+      : Base(B), Size(Sz), Signed(S), VectSize(VS)
+  { }
+
+  BaseType      Base;
+  SizeType      Size;
+  bool          Signed;
+  unsigned char VectSize;  // 0 for scalar, otherwise num elements in vector
+};
+
+
+ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
+  switch (nbytes) {
+    case 1: return ST_8;
+    case 2: return ST_16;
+    case 4: return ST_32;
+    case 8: return ST_64;
+    case 16: return ST_128;
+    default: return ST_0;
+  }
+}
+
+
+template<>
+ValueType ValueType::getValueType<void>() {
+  return ValueType(BT_Void, ST_0, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<bool>() {
+  return ValueType(BT_Bool, ST_1, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<int8_t>() {
+  return ValueType(BT_Int, ST_8, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<uint8_t>() {
+  return ValueType(BT_Int, ST_8, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<int16_t>() {
+  return ValueType(BT_Int, ST_16, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<uint16_t>() {
+  return ValueType(BT_Int, ST_16, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<int32_t>() {
+  return ValueType(BT_Int, ST_32, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<uint32_t>() {
+  return ValueType(BT_Int, ST_32, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<int64_t>() {
+  return ValueType(BT_Int, ST_64, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<uint64_t>() {
+  return ValueType(BT_Int, ST_64, false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<float>() {
+  return ValueType(BT_Float, ST_32, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<double>() {
+  return ValueType(BT_Float, ST_64, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<long double>() {
+  return ValueType(BT_Float, ST_128, true, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<StringRef>() {
+  return ValueType(BT_Pointer, getSizeType(sizeof(StringRef)), false, 0);
+}
+
+template<>
+ValueType ValueType::getValueType<void*>() {
+  return ValueType(BT_Pointer, getSizeType(sizeof(void*)), false, 0);
+}
+
 
 
 enum TraversalKind {
@@ -424,8 +598,11 @@ class Literal : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
 
-  Literal(const clang::Expr *C) : SExpr(COP_Literal), Cexpr(C) {}
-  Literal(const Literal &L) : SExpr(L), Cexpr(L.Cexpr) {}
+  Literal(const clang::Expr *C)
+     : SExpr(COP_Literal), ValType(ValueType::getValueType<void>())
+  { }
+  Literal(ValueType VT) : SExpr(COP_Literal), ValType(VT) {}
+  Literal(const Literal &L) : SExpr(L), ValType(L.ValType), Cexpr(L.Cexpr) {}
 
   // The clang expression for this literal.
   const clang::Expr *clangExpr() const { return Cexpr; }
@@ -440,8 +617,24 @@ public:
   }
 
 private:
+  ValueType ValType;
   const clang::Expr *Cexpr;
 };
+
+
+// Derived class for literal values, which stores the actual value.
+template<class T>
+class LiteralT {
+  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
+  LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
+
+  T  value() const { return Val;}
+  T& value() { return Val; }
+
+private:
+  T Val;
+};
+
 
 // Literal pointer to an object allocated in memory.
 // At compile time, pointer literals are represented by symbolic names.

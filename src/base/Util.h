@@ -99,7 +99,10 @@ public:
   unsigned    length() const { return len_; }
   const char* c_str()  const { return str_; }
 
-  std::string cppString() const { return std::string(str_, len_); }
+  std::string str() const {
+    if (!str_) return std::string();
+    return std::string(str_, len_);
+  }
 
   bool operator<(const StringRef& s) const {
     return strncmp(str_, s.str_, min(len_, s.len_)) < 0;
