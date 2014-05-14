@@ -39,6 +39,7 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
     case TCOP_Function:   return "function";
     case TCOP_SFunction:  return "sfucntion";
     case TCOP_Code:       return "code";
+    case TCOP_Field:      return "field";
 
     case TCOP_Apply:      return "apply";
     case TCOP_SApply:     return "sapply";
@@ -209,9 +210,9 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_Identifier: {
       assert(arity == 1);
       Token* t = tok(0);
-      // new id
+      auto* e = new (arena_) Identifier(copyStr(t->string()));
       delete t;
-      return ParseResult();
+      return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Function: {
       assert(arity == 3);
@@ -222,6 +223,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_SFunction: {
+      assert(arity == 2);
       Token* t = tok(0);
       auto* v = new (arena_) Variable(copyStr(t->string()));
       auto* e = new (arena_) Function(v, sexpr(1));
@@ -229,7 +231,13 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Code: {
+      assert(arity == 2);
       auto* e = new (arena_) Code(sexpr(0), sexpr(1));
+      return ParseResult(TILP_SExpr, e);
+    }
+    case TCOP_Field: {
+      assert(arity == 2);
+      auto* e = new (arena_) Field(sexpr(0), sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
 
@@ -308,12 +316,20 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     }
 
     case TCOP_If: {
-      return ParseResult();
+      assert(arity == 3);
+      auto *e = new (arena_) IfThenElse(sexpr(0), sexpr(1), sexpr(2));
+      return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Let: {
-      return ParseResult();
+      assert(arity == 3);
+      Token* t = tok(0);
+      auto* v = new (arena_) Variable(copyStr(t->string()), sexpr(1));
+      auto* e = new (arena_) Let(v, sexpr(2));
+      delete t;
+      return ParseResult(TILP_SExpr, e);
     }
-    default: return ParseResult();
+    default:
+      return ParseResult();
   }
 }
 

@@ -144,6 +144,9 @@ public:
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
     return new (Arena) Code(Orig, E0, E1);
   }
+  R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
+    return new (Arena) Field(Orig, E0, E1);
+  }
 
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
     return new (Arena) Apply(Orig, E0, E1);
@@ -194,6 +197,16 @@ public:
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
     return new (Arena) Branch(O, C, B0, B1);
+  }
+
+  R_SExpr reduceIdentifier(Identifier &Orig) {
+    return new (Arena) Identifier(Orig);
+  }
+  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
+    return new (Arena) IfThenElse(Orig, C, T, E);
+  }
+  R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
+    return new (Arena) Let(Orig, Nvd, B);
   }
 
   BasicBlock *reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
@@ -272,6 +285,9 @@ public:
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
     return E0 && E1;
   }
+  R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
+    return E0 && E1;
+  }
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
     return E0 && E1;
   }
@@ -304,6 +320,16 @@ public:
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
     return C;
+  }
+
+  R_SExpr reduceIdentifier(Identifier &Orig) {
+    return true;
+  }
+  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
+    return C && T && E;
+  }
+  R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
+    return Nvd && B;
   }
 
   BasicBlock *reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
@@ -375,7 +401,8 @@ public:
   CType trueResult() { return true; }
   bool notTrue(CType ct) { return !ct; }
 
-  bool compareIntegers(unsigned i, unsigned j) { return i == j; }
+  bool compareIntegers(unsigned i, unsigned j)       { return i == j; }
+  bool compareStrings (StringRef s, StringRef r)     { return s == r; }
   bool comparePointers(const void* P, const void* Q) { return P == Q; }
 
   bool compare(SExpr *E1, SExpr* E2) {
@@ -451,6 +478,7 @@ protected:
       case COP_Function:   return Prec_Decl;
       case COP_SFunction:  return Prec_Decl;
       case COP_Code:       return Prec_Decl;
+      case COP_Field:      return Prec_Decl;
 
       case COP_Apply:      return Prec_Postfix;
       case COP_SApply:     return Prec_Postfix;
@@ -471,6 +499,10 @@ protected:
       case COP_Phi:        return Prec_Atom;
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
+
+      case COP_Identifier: return Prec_Atom;
+      case COP_IfThenElse: return Prec_Other;
+      case COP_Let:        return Prec_Decl;
     }
     return Prec_MAX;
   }
@@ -571,6 +603,13 @@ protected:
   void printCode(Code *E, StreamType &SS) {
     SS << ": ";
     self()->printSExpr(E->returnType(), SS, Prec_Decl-1);
+    SS << " -> ";
+    self()->printSExpr(E->body(), SS, Prec_Decl);
+  }
+
+  void printField(Field *E, StreamType &SS) {
+    SS << ": ";
+    self()->printSExpr(E->range(), SS, Prec_Decl-1);
     SS << " = ";
     self()->printSExpr(E->body(), SS, Prec_Decl);
   }
@@ -727,6 +766,28 @@ protected:
     printBlockLabel(SS, E->thenBlock(), E->thenIndex());
     SS << " ";
     printBlockLabel(SS, E->elseBlock(), E->elseIndex());
+  }
+
+  void printIdentifier(Identifier *E, StreamType &SS) {
+    SS << "$" << E->name();
+  }
+
+  void printIfThenElse(IfThenElse *E, StreamType &SS) {
+    SS << "if (";
+    printSExpr(E->condition(), SS, Prec_MAX);
+    SS << ") then ";
+    printSExpr(E->thenExpr(), SS, Prec_Other);
+    SS << " else ";
+    printSExpr(E->elseExpr(), SS, Prec_Other);
+  }
+
+  void printLet(Let *E, StreamType &SS) {
+    SS << "let ";
+    SS << printVariable(E, SS, true);
+    SS << " = ";
+    printSExpr(E->variableDecl()->definition(), SS, Prec_Decl-1);
+    SS << ";";
+    printSExpr(E->body(), SS, Prec_Decl-1);
   }
 };
 

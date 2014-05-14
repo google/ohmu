@@ -340,9 +340,11 @@ namespace ThreadSafetyTIL {
   }
 }
 
+// Nodes which declare variables
 class Function;
 class SFunction;
 class BasicBlock;
+class Let;
 
 
 // A named variable, e.g. "x".
@@ -408,6 +410,7 @@ private:
   friend class Function;
   friend class SFunction;
   friend class BasicBlock;
+  friend class Let;
 
   // Function, SFunction, and BasicBlock will reset the kind.
   void setKind(VariableKind K) { Flags = K; }
@@ -662,6 +665,7 @@ private:
   const clang::ValueDecl *Cvdecl;
 };
 
+
 // A function -- a.k.a. lambda abstraction.
 // Functions with multiple arguments are created by currying,
 // e.g. (function (x: Int) (function (y: Int) (add x y)))
@@ -791,6 +795,40 @@ public:
 
 private:
   SExprRef ReturnType;
+  SExprRef Body;
+};
+
+
+// A typed, writable location in memory
+class Field : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Field; }
+
+  Field(SExpr *R, SExpr *B) : SExpr(COP_Field), Range(R), Body(B) {}
+  Field(const Field &C, SExpr *R, SExpr *B) // rewrite constructor
+      : SExpr(C), Range(R), Body(B) {}
+
+  SExpr *range() { return Range.get(); }
+  const SExpr *range() const { return Range.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  template <class V> typename V::R_SExpr traverse(V &Visitor) {
+    typename V::R_SExpr Nr = Visitor.traverse(Range, TRV_Lazy);
+    typename V::R_SExpr Nb = Visitor.traverse(Body,  TRV_Lazy);
+    return Visitor.reduceField(*this, Nr, Nb);
+  }
+
+  template <class C> typename C::CType compare(Field* E, C& Cmp) {
+    typename C::CType Ct = Cmp.compare(range(), E->range());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+    return Cmp.compare(body(), E->body());
+  }
+
+private:
+  SExprRef Range;
   SExprRef Body;
 };
 
@@ -1493,6 +1531,123 @@ private:
   unsigned ThenIndex;
   unsigned ElseIndex;
 };
+
+
+// An identifier, e.g. 'foo' or 'x'.
+// This is a pseduo-term; it will be lowered to a variable or projection.
+class Identifier : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Identifier; }
+
+  Identifier(StringRef Id): SExpr(COP_Identifier), Name(Id) { }
+  Identifier(const Identifier& I) : SExpr(I), Name(I.Name)  { }
+
+  StringRef name() const { return Name; }
+
+  template <class V> typename V::R_SExpr traverse(V &Visitor) {
+    return Visitor.reduceIdentifier(*this);
+  }
+
+  template <class C> typename C::CType compare(Identifier* E, C& Cmp) {
+    return Cmp.compareStrings(name(), E->name());
+  }
+
+private:
+  StringRef Name;
+};
+
+
+// An if-then-else expression.
+// This is a pseduo-term; it will be lowered to a CFG.
+class IfThenElse : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_IfThenElse; }
+
+  IfThenElse(SExpr *C, SExpr *T, SExpr *E)
+    : SExpr(COP_IfThenElse), Condition(C), ThenExpr(T), ElseExpr(E)
+  { }
+  IfThenElse(const IfThenElse &I, SExpr *C, SExpr *T, SExpr *E)
+    : SExpr(I), Condition(C), ThenExpr(T), ElseExpr(E)
+  { }
+
+  SExpr *condition() { return Condition.get(); }   // Address to store to
+  const SExpr *condition() const { return Condition.get(); }
+
+  SExpr *thenExpr() { return ThenExpr.get(); }     // Value to store
+  const SExpr *thenExpr() const { return ThenExpr.get(); }
+
+  SExpr *elseExpr() { return ElseExpr.get(); }     // Value to store
+  const SExpr *elseExpr() const { return ElseExpr.get(); }
+
+  template <class V> typename V::R_SExpr traverse(V &Visitor) {
+    typename V::R_SExpr Nc = Visitor.traverse(Condition);
+    typename V::R_SExpr Nt = Visitor.traverse(ThenExpr);
+    typename V::R_SExpr Ne = Visitor.traverse(ElseExpr);
+    return Visitor.reduceIfThenElse(*this, Nc, Nt, Ne);
+  }
+
+  template <class C> typename C::CType compare(IfThenElse* E, C& Cmp) {
+    typename C::CType Ct = Cmp.compare(condition(), E->condition());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+    Ct = Cmp.compare(thenExpr(), E->thenExpr());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+    return Cmp.compare(elseExpr(), E->elseExpr());
+  }
+
+private:
+  SExprRef Condition;
+  SExprRef ThenExpr;
+  SExprRef ElseExpr;
+};
+
+
+// A let-expression,  e.g.  let x=t; u.
+// This is a pseduo-term; it will be lowered to a CFG.
+class Let : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }
+
+  Let(Variable *Vd, SExpr *Bd) : SExpr(COP_Let), VarDecl(Vd), Body(Bd) {
+    Vd->setKind(Variable::VK_Let);
+  }
+  Let(const Let &L, Variable *Vd, SExpr *Bd) : SExpr(L), VarDecl(Vd), Body(Bd) {
+    Vd->setKind(Variable::VK_Let);
+  }
+
+  Variable *variableDecl()  { return VarDecl; }
+  const Variable *variableDecl() const { return VarDecl; }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  template <class V> typename V::R_SExpr traverse(V &Visitor) {
+    // This is a variable declaration, so traverse the definition.
+    typename V::R_SExpr E0 = Visitor.traverse(VarDecl->Definition, TRV_Lazy);
+    // Tell the rewriter to enter the scope of the let variable.
+    Variable *Nvd = Visitor.enterScope(*VarDecl, E0);
+    typename V::R_SExpr E1 = Visitor.traverse(Body);
+    Visitor.exitScope(*VarDecl);
+    return Visitor.reduceLet(*this, Nvd, E1);
+  }
+
+  template <class C> typename C::CType compare(Let* E, C& Cmp) {
+    typename C::CType Ct =
+      Cmp.compare(VarDecl->definition(), E->VarDecl->definition());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+    Cmp.enterScope(variableDecl(), E->variableDecl());
+    Ct = Cmp.compare(body(), E->body());
+    Cmp.leaveScope();
+    return Ct;
+  }
+
+private:
+  Variable *VarDecl;
+  SExprRef Body;
+};
+
 
 
 SExpr *getCanonicalVal(SExpr *E);
