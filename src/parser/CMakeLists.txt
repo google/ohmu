@@ -9,6 +9,7 @@ add_library(parser STATIC
   Parser.cpp
   ASTNode.cpp
   BNFParser.cpp
+  TILParser.cpp
 )
 
 target_link_libraries(parser readline)

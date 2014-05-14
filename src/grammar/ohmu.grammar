@@ -79,8 +79,8 @@ mkApply[f,a] ::=
   ;
 
 mkIndex[a,i] ::=
-    "]"      { (deref (arrayAdd a i)) }
-  | ","  idx={ (deref (arrayAdd a i)) }  b=expr  mkIndex[idx, b]
+    "]"      { (arrayFirst (arrayAdd a i)) }
+  | ","  idx={ (arrayFirst (arrayAdd a i)) }  b=expr  mkIndex[idx, b]
   ;
 
 postfix ::=

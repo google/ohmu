@@ -64,7 +64,6 @@ enum TIL_Opcode {
 #define TIL_OPCODE_DEF(X) COP_##X,
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-  COP_MAX
 };
 
 enum TIL_UnaryOpcode : unsigned char {
@@ -91,18 +90,20 @@ enum TIL_BinaryOpcode : unsigned char {
 };
 
 enum TIL_CastOpcode : unsigned char {
-  CAST_None = 0,
+  CAST_none = 0,
   CAST_extendNum,   // extend precision of numeric type
   CAST_truncNum,    // truncate precision of numeric type
   CAST_toFloat,     // convert to floating point type
   CAST_toInt,       // convert to integer type
 };
 
+const TIL_Opcode       COP_Min  = COP_Future;
+const TIL_Opcode       COP_Max  = COP_Branch;
 const TIL_UnaryOpcode  UOP_Min  = UOP_BitNot;
 const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
 const TIL_BinaryOpcode BOP_Min  = BOP_Mul;
 const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
-const TIL_CastOpcode   CAST_Min = CAST_None;
+const TIL_CastOpcode   CAST_Min = CAST_none;
 const TIL_CastOpcode   CAST_Max = CAST_toInt;
 
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
@@ -110,7 +111,7 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
 
 
 // ValueTypes are data types that can actually be held in registers.
-// All variables and expressions must have a value type.
+// All variables and expressions must have a vBNF_Nonealue type.
 // Pointer types are further subdivided into the various heap-allocated
 // types, such as functions, records, etc.
 // Structured types that are passed by value (e.g. complex numbers)
@@ -368,14 +369,13 @@ public:
   };
 
   // These are defined after SExprRef contructor, below
-  inline Variable(VariableKind K, SExpr *D = nullptr,
-                  const clang::ValueDecl *Cvd = nullptr);
+  inline Variable(StringRef s, SExpr *D = nullptr);
   inline Variable(SExpr *D = nullptr, const clang::ValueDecl *Cvd = nullptr);
   inline Variable(const Variable &Vd, SExpr *D);
 
   VariableKind kind() const { return static_cast<VariableKind>(Flags); }
 
-  const StringRef name() const { return Cvdecl ? Cvdecl->getName() : "_x"; }
+  const StringRef name() const { return Name; }
   const clang::ValueDecl *clangDecl() const { return Cvdecl; }
 
   // Returns the definition (for let vars) or type (for parameter & self vars)
@@ -412,7 +412,8 @@ private:
   // Function, SFunction, and BasicBlock will reset the kind.
   void setKind(VariableKind K) { Flags = K; }
 
-  SExprRef Definition;             // The TIL type or definition
+  StringRef Name;                  // The name of the variable.
+  SExprRef  Definition;            // The TIL type or definition
   const clang::ValueDecl *Cvdecl;  // The clang declaration for this variable.
 
   unsigned short BlockID;
@@ -522,20 +523,20 @@ inline void SExprRef::reset(SExpr *P) {
 }
 
 
-inline Variable::Variable(VariableKind K, SExpr *D, const clang::ValueDecl *Cvd)
-    : SExpr(COP_Variable), Definition(D), Cvdecl(Cvd),
-      BlockID(0), Id(0),  NumUses(0) {
-  Flags = K;
+inline Variable::Variable(StringRef s, SExpr *D)
+    : SExpr(COP_Variable), Name(s), Definition(D), Cvdecl(nullptr),
+      BlockID(0), Id(0), NumUses(0) {
+  Flags = VK_Let;
 }
 
 inline Variable::Variable(SExpr *D, const clang::ValueDecl *Cvd)
-    : SExpr(COP_Variable), Definition(D), Cvdecl(Cvd),
-      BlockID(0), Id(0),  NumUses(0) {
+    : SExpr(COP_Variable), Name(Cvd ? Cvd->getName() : "_x"),
+      Definition(D), Cvdecl(Cvd), BlockID(0), Id(0), NumUses(0) {
   Flags = VK_Let;
 }
 
 inline Variable::Variable(const Variable &Vd, SExpr *D) // rewrite constructor
-    : SExpr(Vd), Definition(D), Cvdecl(Vd.Cvdecl),
+    : SExpr(Vd), Name(Vd.Name), Definition(D), Cvdecl(Vd.Cvdecl),
       BlockID(0), Id(0), NumUses(0) {
   Flags = Vd.kind();
 }
@@ -624,7 +625,8 @@ private:
 
 // Derived class for literal values, which stores the actual value.
 template<class T>
-class LiteralT {
+class LiteralT : public Literal {
+public:
   LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
   LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
 
@@ -869,9 +871,15 @@ class Project : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Project; }
 
+  Project(SExpr *R, StringRef SName)
+      : SExpr(COP_Project), Rec(R), SlotName(SName), Cvdecl(nullptr)
+  { }
   Project(SExpr *R, clang::ValueDecl *Cvd)
-      : SExpr(COP_Project), Rec(R), Cvdecl(Cvd) {}
-  Project(const Project &P, SExpr *R) : SExpr(P), Rec(R), Cvdecl(P.Cvdecl) {}
+      : SExpr(COP_Project), Rec(R), SlotName(Cvd->getName()), Cvdecl(Cvd)
+  { }
+  Project(const Project &P, SExpr *R)
+      : SExpr(P), Rec(R), SlotName(P.SlotName), Cvdecl(P.Cvdecl)
+  { }
 
   SExpr *record() { return Rec.get(); }
   const SExpr *record() const { return Rec.get(); }
@@ -894,6 +902,7 @@ public:
 
 private:
   SExprRef Rec;
+  StringRef SlotName;
   clang::ValueDecl *Cvdecl;
 };
 

@@ -74,8 +74,6 @@ public:
       return self()->traverse##X(cast<X>(E));
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-    case COP_MAX:
-      return self()->reduceNull();
     }
   }
 
@@ -362,8 +360,6 @@ public:
       return cast<X>(E1)->compare(cast<X>(E2), *self());
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-    case COP_MAX:
-      return false;
     }
   }
 };
@@ -475,7 +471,6 @@ protected:
       case COP_Phi:        return Prec_Atom;
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
-      case COP_MAX:        return Prec_MAX;
     }
     return Prec_MAX;
   }
@@ -500,8 +495,6 @@ protected:
       return;
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-    case COP_MAX:
-      return;
     }
   }
 
@@ -668,7 +661,7 @@ protected:
   }
 
   void printCast(Cast *E, StreamType &SS) {
-    SS << "~";
+    SS << "%";
     self()->printSExpr(E->expr(), SS, Prec_Unary);
   }
 
