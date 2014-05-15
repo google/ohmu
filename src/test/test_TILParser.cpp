@@ -72,7 +72,7 @@ int main(int argc, const char** argv) {
   std::cout << "\nParsing " << argv[1] << "...\n";
   FileStream fs(file);
   lexer.setStream(&fs);
-  tilParser.setTrace(true);
+  // tilParser.setTrace(true);
   ParseResult result = tilParser.parse(startRule);
   if (tilParser.parseError())
     return -1;
