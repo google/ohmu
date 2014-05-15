@@ -58,7 +58,9 @@ class CallExpr : public Expr { };
 namespace threadSafety {
 namespace til {
 
-std::string getSourceLiteralString(const clang::Expr *E) { return ""; }
+inline std::string getSourceLiteralString(const clang::Expr *E) {
+  return "";
+}
 
 } // end namespace til
 } // end namespace threadSafety

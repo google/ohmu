@@ -673,7 +673,7 @@ protected:
 
   void printArrayFirst(ArrayFirst *E, StreamType &SS) {
     self()->printSExpr(E->array(), SS, Prec_Postfix);
-    if (ArrayAdd *A = dyn_cast_or_null<ArrayAdd>(E)) {
+    if (ArrayAdd *A = dyn_cast_or_null<ArrayAdd>(E->array())) {
       SS << "[";
       printSExpr(A->index(), SS, Prec_MAX);
       SS << "]";
@@ -783,7 +783,7 @@ protected:
 
   void printLet(Let *E, StreamType &SS) {
     SS << "let ";
-    SS << printVariable(E, SS, true);
+    printVariable(E->variableDecl(), SS, true);
     SS << " = ";
     printSExpr(E->variableDecl()->definition(), SS, Prec_Decl-1);
     SS << ";";

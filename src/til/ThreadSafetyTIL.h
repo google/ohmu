@@ -47,6 +47,8 @@
 #ifndef LLVM_CLANG_THREAD_SAFETY_TIL_H
 #define LLVM_CLANG_THREAD_SAFETY_TIL_H
 
+// All clang include dependencies for this file must be put in
+// ThreadSafetyUtil.h.
 #include "ThreadSafetyUtil.h"
 
 #include <stdint.h>
@@ -67,6 +69,7 @@ enum TIL_Opcode {
 };
 
 enum TIL_UnaryOpcode : unsigned char {
+  UOP_Minus,        //  -
   UOP_BitNot,       //  ~
   UOP_LogicNot      //  !
 };
@@ -74,6 +77,7 @@ enum TIL_UnaryOpcode : unsigned char {
 enum TIL_BinaryOpcode : unsigned char {
   BOP_Mul,          //  *
   BOP_Div,          //  /
+  BOP_Rem,          //  %
   BOP_Add,          //  +
   BOP_Sub,          //  -
   BOP_Shl,          //  <<
@@ -99,7 +103,7 @@ enum TIL_CastOpcode : unsigned char {
 
 const TIL_Opcode       COP_Min  = COP_Future;
 const TIL_Opcode       COP_Max  = COP_Branch;
-const TIL_UnaryOpcode  UOP_Min  = UOP_BitNot;
+const TIL_UnaryOpcode  UOP_Min  = UOP_Minus;
 const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
 const TIL_BinaryOpcode BOP_Min  = BOP_Mul;
 const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
@@ -137,10 +141,10 @@ struct ValueType {
     ST_128
   };
 
-  static SizeType getSizeType(unsigned nbytes);
+  inline static SizeType getSizeType(unsigned nbytes);
 
   template <class T>
-  static ValueType getValueType();
+  inline static ValueType getValueType();
 
   ValueType(BaseType B, SizeType Sz, bool S, unsigned char VS)
       : Base(B), Size(Sz), Signed(S), VectSize(VS)
@@ -153,7 +157,7 @@ struct ValueType {
 };
 
 
-ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
+inline ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
   switch (nbytes) {
     case 1: return ST_8;
     case 2: return ST_16;
@@ -166,77 +170,77 @@ ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
 
 
 template<>
-ValueType ValueType::getValueType<void>() {
+inline ValueType ValueType::getValueType<void>() {
   return ValueType(BT_Void, ST_0, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<bool>() {
+inline ValueType ValueType::getValueType<bool>() {
   return ValueType(BT_Bool, ST_1, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<int8_t>() {
+inline ValueType ValueType::getValueType<int8_t>() {
   return ValueType(BT_Int, ST_8, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<uint8_t>() {
+inline ValueType ValueType::getValueType<uint8_t>() {
   return ValueType(BT_Int, ST_8, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<int16_t>() {
+inline ValueType ValueType::getValueType<int16_t>() {
   return ValueType(BT_Int, ST_16, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<uint16_t>() {
+inline ValueType ValueType::getValueType<uint16_t>() {
   return ValueType(BT_Int, ST_16, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<int32_t>() {
+inline ValueType ValueType::getValueType<int32_t>() {
   return ValueType(BT_Int, ST_32, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<uint32_t>() {
+inline ValueType ValueType::getValueType<uint32_t>() {
   return ValueType(BT_Int, ST_32, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<int64_t>() {
+inline ValueType ValueType::getValueType<int64_t>() {
   return ValueType(BT_Int, ST_64, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<uint64_t>() {
+inline ValueType ValueType::getValueType<uint64_t>() {
   return ValueType(BT_Int, ST_64, false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<float>() {
+inline ValueType ValueType::getValueType<float>() {
   return ValueType(BT_Float, ST_32, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<double>() {
+inline ValueType ValueType::getValueType<double>() {
   return ValueType(BT_Float, ST_64, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<long double>() {
+inline ValueType ValueType::getValueType<long double>() {
   return ValueType(BT_Float, ST_128, true, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<StringRef>() {
+inline ValueType ValueType::getValueType<StringRef>() {
   return ValueType(BT_Pointer, getSizeType(sizeof(StringRef)), false, 0);
 }
 
 template<>
-ValueType ValueType::getValueType<void*>() {
+inline ValueType ValueType::getValueType<void*>() {
   return ValueType(BT_Pointer, getSizeType(sizeof(void*)), false, 0);
 }
 
@@ -396,6 +400,7 @@ public:
   }
   void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
   void setDefinition(SExpr *E);
+  void setKind(VariableKind K) { Flags = K; }
 
   template <class V> typename V::R_SExpr traverse(V &Visitor) {
     // This routine is only called for variable references.
@@ -411,9 +416,6 @@ private:
   friend class SFunction;
   friend class BasicBlock;
   friend class Let;
-
-  // Function, SFunction, and BasicBlock will reset the kind.
-  void setKind(VariableKind K) { Flags = K; }
 
   StringRef Name;                  // The name of the variable.
   SExprRef  Definition;            // The TIL type or definition
