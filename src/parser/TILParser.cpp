@@ -310,7 +310,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       Token* t = tok(0);
       TIL_UnaryOpcode op = lookupUnaryOpcode(t->string());
       delete t;
-      auto* e = new (arena_) UnaryOp(op, sexpr(0));
+      auto* e = new (arena_) UnaryOp(op, sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_BinaryOp: {
@@ -318,7 +318,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       Token* t = tok(0);
       TIL_BinaryOpcode op = lookupBinaryOpcode(t->string());
       delete t;
-      auto* e = new (arena_) BinaryOp(op, sexpr(0), sexpr(1));
+      auto* e = new (arena_) BinaryOp(op, sexpr(1), sexpr(2));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Cast: {
@@ -326,7 +326,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       Token* t = tok(0);
       TIL_CastOpcode op = lookupCastOpcode(t->string());
       delete t;
-      auto* e = new (arena_) Cast(op, sexpr(0));
+      auto* e = new (arena_) Cast(op, sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
 

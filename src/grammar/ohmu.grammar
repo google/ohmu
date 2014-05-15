@@ -1,6 +1,10 @@
 
 // First rule for files
-definitions ::= slotList;
+definitions ::=
+  e=expr ";"           { (append [] e) }
+  |*[es] e=expr ";"    { (append es e) }
+  ;
+
 
 // First rule for read-eval-print loop
 command ::=
@@ -160,9 +164,9 @@ expr61 ::=
   ;
 
 expr90 ::=
-  a=unary (":=" b=expr { (store a b) }
-          |            { a }
-          )
+  a=expr61 (":=" b=expr { (store a b) }
+           |            { a }
+           )
   ;
 
 expr ::=

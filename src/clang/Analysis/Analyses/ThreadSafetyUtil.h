@@ -59,7 +59,7 @@ namespace threadSafety {
 namespace til {
 
 inline std::string getSourceLiteralString(const clang::Expr *E) {
-  return "";
+  return "#lit";
 }
 
 } // end namespace til

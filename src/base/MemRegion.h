@@ -115,6 +115,8 @@ public:
   MemRegionRef() : allocator_(nullptr) {}
   MemRegionRef(MemRegion *region) : allocator_(region) { }
 
+  void setRegion(MemRegion *r) { allocator_ = r; }
+
   void *allocate(size_t sz) {
     return allocator_->allocate(sz);
   }

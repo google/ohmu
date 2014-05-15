@@ -29,8 +29,8 @@ using namespace clang::threadSafety;
 
 class TILPrinter : public til::PrettyPrinter<TILPrinter, std::ostream> {};
 
-void printSCFG(til::SCFG* cfg) {
-  TILPrinter::print(cfg, std::cerr);
+void printSExpr(til::SExpr* e) {
+  TILPrinter::print(e, std::cout);
 }
 
 
@@ -38,9 +38,11 @@ int main(int argc, const char** argv) {
   DefaultLexer lexer;
   TILParser tilParser(&lexer);
 
-  FILE* file = fopen("src/grammar/ohmu.grammar", "r");
+
+  const char* grammarFileName = "src/grammar/ohmu.grammar";
+  FILE* file = fopen(grammarFileName, "r");
   if (!file) {
-    std::cout << "File not found.\n";
+    std::cout << "File " << grammarFileName << " not found.\n";
     return -1;
   }
 
@@ -50,6 +52,45 @@ int main(int argc, const char** argv) {
     tilParser.printSyntax(std::cout);
 
   fclose(file);
+
+  if (argc == 0)
+    return 0;
+
+  // Read the ohmu file.
+  auto *startRule = tilParser.findDefinition("definitions");
+  if (!startRule) {
+    std::cout << "Grammar does not contain rule named 'definitions'.\n";
+    return -1;
+  }
+
+  file = fopen(argv[1], "r");
+  if (!file) {
+    std::cout << "File " << argv[1] << " not found.\n";
+    return -1;
+  }
+
+  std::cout << "\nParsing " << argv[1] << "...\n";
+  FileStream fs(file);
+  lexer.setStream(&fs);
+  tilParser.setTrace(true);
+  ParseResult result = tilParser.parse(startRule);
+  if (tilParser.parseError())
+    return -1;
+
+  // Pretty print the parsed ohmu code.
+  auto* v = result.getList<til::SExpr>(TILParser::TILP_SExpr);
+  if (!v) {
+    std::cout << "No definitions found.\n";
+    return 0;
+  }
+
+  for (SExpr* e : *v) {
+    std::cout << "\nDefinition:\n";
+    printSExpr(e);
+  }
+  delete v;
+
+  std::cout << "\n";
   return 0;
 }
 

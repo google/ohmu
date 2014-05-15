@@ -77,11 +77,13 @@ public:
   };
 
   // All parse rules return SExprs.
-  unsigned short TILP_SExpr = ParseResult::PRS_UserDefined;
+  static const unsigned short TILP_SExpr = ParseResult::PRS_UserDefined;
 
 
   TILParser(Lexer *lexer) : Parser(lexer) {
     initMap();
+    stringArena_.setRegion(&region_);
+    arena_.setRegion(&region_);
   }
   ~TILParser() { }
 
@@ -105,6 +107,7 @@ public:
   ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) override;
 
 private:
+   MemRegion    region_;
    MemRegionRef stringArena_;  // permanent arena for strings.
    MemRegionRef arena_;
 
