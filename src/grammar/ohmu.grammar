@@ -160,7 +160,7 @@ expr61 ::=
   ;
 
 expr90 ::=
-  a=unary (":=" b=expr { (assign a b) }
+  a=unary (":=" b=expr { (store a b) }
           |            { a }
           )
   ;
