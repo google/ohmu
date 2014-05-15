@@ -590,6 +590,8 @@ public:
   // Parse rule and return the result.
   ParseResult parse(ParseNamedDefinition* start);
 
+  bool parseError() const { return parseError_; }
+
   // Add a new top-level named definition.
   void addDefinition(ParseNamedDefinition* def) {
     definitions_.push_back(def);
@@ -606,21 +608,28 @@ public:
     else return it->second;
   }
 
+  // Register a new keyword with the lexer, and return the token ID.
   unsigned registerKeyword(const std::string& s) {
     return lexer_->registerKeyword(s);
   }
 
+  // Get the token ID string for tid.
   const char* getTokenIDString(unsigned tid) {
     return lexer_->getTokenIDString(tid);
   }
 
+  // Lookup the token ID for string s.
   unsigned lookupTokenID(const std::string& s) {
     return lexer_->lookupTokenID(s);
   }
 
+  // Dump the syntax definitions for this parser to out.
   void printSyntax(std::ostream& out);
 
+  // For debugging, this will print a trace to stderr during parsing.
   void setTrace(bool b)         { trace_ = b; }
+
+  // For debugging, this will print a trace to stderr during parser init.
   void setTraceValidate(bool b) { traceValidate_ = b; }
 
 protected:

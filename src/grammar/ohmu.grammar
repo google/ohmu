@@ -13,7 +13,7 @@ literal ::=
   | "true"               { (litBool "true")  }
   | "false"              { (litBool "false") }
   | s= %TK_LitCharacter  { (litChar    s)    }
-  | s= %TK_LitInteger    { (litInt     s)    }
+  | s= %TK_LitInteger    { (litInteger s)    }
   | s= %TK_LitFloat      { (litFloat   s)    }
   | s= %TK_LitString     { (litString  s)    }
   ;
@@ -32,7 +32,7 @@ function ::=
   ;
 
 funRest ::=
-    ")" FunBody
+    ")" funBody
   | "," x= %TK_Identifier ":" t=expr v=funRest  { (function x t v) }
   ;
 
@@ -59,7 +59,7 @@ slot ::=
 
 slotList ::=
   s=slot               { (append [] s) }
-  |*[ss] s=Slot        { (append ss s) }
+  |*[ss] s=slot        { (append ss s) }
   ;
 
 exprList ::=

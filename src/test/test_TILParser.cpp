@@ -17,8 +17,14 @@
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "parser/DefaultLexer.h"
+#include "parser/BNFParser.h"
+#include "parser/TILParser.h"
+
+#include <iostream>
 
 using namespace ohmu;
+using namespace ohmu::parsing;
 using namespace clang::threadSafety;
 
 class TILPrinter : public til::PrettyPrinter<TILPrinter, std::ostream> {};
@@ -27,6 +33,23 @@ void printSCFG(til::SCFG* cfg) {
   TILPrinter::print(cfg, std::cerr);
 }
 
-int main(int argc, char** argv) {
+
+int main(int argc, const char** argv) {
+  DefaultLexer lexer;
+  TILParser tilParser(&lexer);
+
+  FILE* file = fopen("src/grammar/ohmu.grammar", "r");
+  if (!file) {
+    std::cout << "File not found.\n";
+    return -1;
+  }
+
+  bool success = BNFParser::initParserFromFile(tilParser, file, false);
+  std::cout << "\n";
+  if (success)
+    tilParser.printSyntax(std::cout);
+
+  fclose(file);
   return 0;
 }
+

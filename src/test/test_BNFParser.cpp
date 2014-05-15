@@ -23,55 +23,21 @@
 
 using namespace ohmu::parsing;
 
-bool validate(Parser &p) {
-  // validate parser
-  std::cout << "Validating parser: \n";
-  // p.setTraceValidate(true);
-  if (!p.init()) {
-    std::cout << "Validation failed.\n";
-    return false;
-  }
-  else {
-    std::cout << "Validation succeeded.\n";
-  }
-
-  // p.setTraceValidate(true);
-  std::cout << "Syntax definitions: \n";
-  p.printSyntax(std::cout);
-  return true;
-}
-
 
 int main(int argc, const char** argv) {
   ohmu::parsing::DefaultLexer lexer;
-  ohmu::parsing::BNFParser bnfParser(&lexer);
+  ohmu::parsing::BNFParser bootstrapBNFParser(&lexer);
 
-  // build parser
-  bnfParser.defineSyntax();
-  if (!validate(bnfParser))
-    return -1;
-
-  // bootstrap parser
-  std::cout << "Opening sexpr.grammar:\n";
   FILE* file = fopen("src/grammar/parser.grammar", "r");
   if (!file) {
     std::cout << "File not found.\n";
     return -1;
   }
 
-  FileStream fs(file);
-  lexer.setStream(&fs);
-  auto *startRule = bnfParser.findDefinition("definitionList");
+  BNFParser::initParserFromFile(bootstrapBNFParser, file, false);
+  bootstrapBNFParser.printSyntax(std::cout);
 
-  ohmu::parsing::BNFParser bootstrapParser(&lexer);
-  bnfParser.setTarget(&bootstrapParser);
-  // bnfParser.setTrace(true);
-  bnfParser.parse(startRule);
   fclose(file);
-
-  if (!validate(bootstrapParser))
-    return -1;
-
   return 0;
 }
 

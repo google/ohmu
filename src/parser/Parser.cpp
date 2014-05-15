@@ -36,7 +36,7 @@ bool Parser::init() {
   for (ParseRule *r : definitions_)
     success = success && r->init(*this);
   if (!success) {
-    validationError() << "Invalid parser.";
+    std::cerr << "\nFailed to initialize parser.\n";
   }
   return success;
 }
@@ -50,7 +50,9 @@ ParseResult Parser::parse(ParseNamedDefinition* start) {
   parseError_ = false;
   resultStack_.clear();
   parseRule(start);
-  return resultStack_.getBack();
+  if (!parseError_)
+    return resultStack_.getBack();
+  return ParseResult();
 }
 
 
@@ -521,7 +523,7 @@ bool ParseNamedDefinition::init(Parser& parser) {
 
   if (!rule_) {
     parser.validationError() <<
-      "Syntax rule " << name_  << " has not been defined.\n";
+      "Syntax rule " << name_  << " has not been defined.";
     return false;
   }
 
@@ -682,9 +684,9 @@ public:
 
   bool reduceConstruct(ast::Construct &node, ResultArray& results) {
     unsigned op = parser_->lookupOpcode(node.opcodeName());
-    if (op == 0 || op >= 0xFFFF) {
+    if (op == ast::Construct::InvalidOpcode) {
       parser_->validationError()
-        << "Cannot find opcode for " << node.opcodeName();
+        << "Cannot find opcode for " << node.opcodeName() << ".";
       return false;
     }
     node.setLangOpcode(op);

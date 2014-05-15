@@ -167,6 +167,7 @@ private:
 class Construct : public ASTNode {
 public:
   static unsigned const int Max_Arity = 5;
+  static unsigned const int InvalidOpcode = 0xFFFF;
 
   static bool classof(const ASTNode *e) {
     return e->opcode() == AST_Construct;

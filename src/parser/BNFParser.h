@@ -63,20 +63,31 @@ public:
     BPR_ASTNode
   };
 
+  // Main entry point.
+  // Read grammar definition from file, and use it to initialize parser.
+  // If trace is true, will print out debugging information.
+  static bool initParserFromFile(Parser &parser, FILE* file, bool trace=false);
+
+public:
   BNFParser(Lexer *lexer) : Parser(lexer) {
     initMap();
   }
   ~BNFParser() { }
 
+  // Initialize opcode dictionary.  (Dictionary used by lookupOpcode.)
   void initMap();
 
+  // Get the name of op.  Used to construct opcode dictionary.
   const char* getOpcodeName(BNF_Opcode op);
 
+  // Lookup the opcode for string s.
   unsigned lookupOpcode(const std::string &s) override;
 
+  // Make a ParseRule or ASTNode.
   ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) override;
 
-  void defineSyntax();
+  // Create the default BNF grammar.
+  void defineGrammar();
 
   // The BNF parser parses a grammar definition in BNF form,
   // and it will add all of the definitions to the target parser.

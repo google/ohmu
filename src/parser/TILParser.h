@@ -53,6 +53,9 @@ public:
     TCOP_SFunction,
     TCOP_Code,
     TCOP_Field,
+    TCOP_Record,
+    TCOP_Slot,
+    TCOP_Array,
 
     TCOP_Apply,
     TCOP_SApply,

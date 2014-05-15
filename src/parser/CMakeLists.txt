@@ -12,4 +12,5 @@ add_library(parser STATIC
   TILParser.cpp
 )
 
+target_link_libraries(parser base)
 target_link_libraries(parser readline)

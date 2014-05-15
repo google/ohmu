@@ -21,6 +21,37 @@ namespace ohmu {
 namespace parsing {
 
 
+bool BNFParser::initParserFromFile(Parser &parser, FILE* file, bool trace) {
+  ohmu::parsing::DefaultLexer lexer;
+  ohmu::parsing::BNFParser bnfParser(&lexer);
+
+  // create BNF parser
+  bnfParser.defineGrammar();
+  if (!bnfParser.init()) {
+    std::cerr << "Internal error: cannot create BNF parser.\n";
+    return false;
+  }
+
+  FileStream fs(file);
+  lexer.setStream(&fs);
+  auto *startRule = bnfParser.findDefinition("definitionList");
+
+  bnfParser.setTarget(&parser);
+  bnfParser.setTrace(trace);
+  bnfParser.parse(startRule);
+
+  if (bnfParser.parseError()) {
+    return false;
+  }
+  parser.setTraceValidate(trace);
+  if (!parser.init()) {
+    return false;
+  }
+  return true;
+}
+
+
+
 const char* BNFParser::getOpcodeName(BNF_Opcode op) {
   switch (op) {
     case BNF_None:             return "none";
@@ -55,7 +86,7 @@ unsigned BNFParser::lookupOpcode(const std::string &s) {
   auto it = opcodeNameMap_.find(s);
   if (it != opcodeNameMap_.end())
     return it->second;
-  return 0;
+  return ast::Construct::InvalidOpcode;
 }
 
 
@@ -239,7 +270,7 @@ ParseResult BNFParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
 }
 
 
-void BNFParser::defineSyntax() {
+void BNFParser::defineGrammar() {
   PNamedRule sequence(this, "sequence");
   PNamedRule option(this, "option");
   PNamedRule astNodeList(this, "astNodeList");

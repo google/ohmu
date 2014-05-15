@@ -37,9 +37,12 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
 
     case TCOP_Identifier: return "identifier";
     case TCOP_Function:   return "function";
-    case TCOP_SFunction:  return "sfucntion";
+    case TCOP_SFunction:  return "sfunction";
     case TCOP_Code:       return "code";
     case TCOP_Field:      return "field";
+    case TCOP_Record:     return "record";
+    case TCOP_Slot:       return "slot";
+    case TCOP_Array:      return "array";
 
     case TCOP_Apply:      return "apply";
     case TCOP_SApply:     return "sapply";
@@ -89,7 +92,7 @@ inline EnumT lookup(std::unordered_map<std::string, unsigned>& map,
 }
 
 unsigned TILParser::lookupOpcode(const std::string &s) {
-  return lookup<unsigned>(unaryOpcodeMap_, s, 0);
+  return lookup<unsigned>(opcodeMap_, s, ast::Construct::InvalidOpcode);
 }
 
 TIL_UnaryOpcode TILParser::lookupUnaryOpcode(StringRef s) {
@@ -181,7 +184,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_LitChar: {
       assert(arity == 1);
       Token *t = tok(0);
-      auto* e = new (arena_) LiteralT<char>(toChar(t->string()));
+      auto* e = new (arena_) LiteralT<uint8_t>(toChar(t->string()));
       delete t;
       return ParseResult(TILP_SExpr, e);
     }
@@ -239,6 +242,18 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       assert(arity == 2);
       auto* e = new (arena_) Field(sexpr(0), sexpr(1));
       return ParseResult(TILP_SExpr, e);
+    }
+    case TCOP_Record: {
+      assert(arity == 2);
+      return ParseResult();
+    }
+    case TCOP_Slot: {
+      assert(arity == 2);
+      return ParseResult();
+    }
+    case TCOP_Array: {
+      assert(arity == 2);
+      return ParseResult();
     }
 
     case TCOP_Apply: {

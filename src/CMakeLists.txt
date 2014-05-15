@@ -19,8 +19,8 @@ endif()
 include_directories("${PROJECT_SOURCE_DIR}/src")
 
 add_subdirectory(base)
-add_subdirectory(parser)
 add_subdirectory(clang)
+add_subdirectory(grammar)
+add_subdirectory(parser)
 add_subdirectory(x64builder)
 add_subdirectory(test)
-
