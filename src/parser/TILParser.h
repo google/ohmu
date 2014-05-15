@@ -25,7 +25,7 @@
 
 #include "Parser.h"
 #include "BNFParser.h"
-#include "../til/ThreadSafetyTIL.h"
+#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 
 
 namespace ohmu {

@@ -44,7 +44,7 @@
 
 #include <iostream>
 
-#include "../base/Util.h"
+#include "base/Util.h"
 
 namespace ohmu {
 namespace parsing {

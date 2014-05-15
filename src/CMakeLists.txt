@@ -16,9 +16,11 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   add_definitions(/D_HAS_EXCEPTIONS=0)
 endif()
 
+include_directories("${PROJECT_SOURCE_DIR}/src")
+
 add_subdirectory(base)
 add_subdirectory(parser)
-add_subdirectory(til)
+add_subdirectory(clang)
 add_subdirectory(x64builder)
 add_subdirectory(test)
 

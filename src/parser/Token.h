@@ -27,7 +27,7 @@
 #ifndef OHMU_TOKEN_H
 #define OHMU_TOKEN_H
 
-#include "../base/Util.h"
+#include "base/Util.h"
 
 namespace ohmu {
 

@@ -18,8 +18,8 @@
 #include <iostream>
 #include <stdio.h>
 
-#include "../parser/DefaultLexer.h"
-#include "../parser/BNFParser.h"
+#include "parser/DefaultLexer.h"
+#include "parser/BNFParser.h"
 
 using namespace ohmu::parsing;
 

@@ -15,8 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../til/ThreadSafetyTIL.h"
-#include "../til/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 
 using namespace ohmu;
 using namespace clang::threadSafety;

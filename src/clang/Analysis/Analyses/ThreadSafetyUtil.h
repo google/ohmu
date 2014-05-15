@@ -26,10 +26,10 @@
 #ifndef OHMU_THREAD_SAFETY_UTIL_H
 #define OHMU_THREAD_SAFETY_UTIL_H
 
-#include "../base/MemRegion.h"
-#include "../base/SimpleArray.h"
-#include "../base/Util.h"
-#include "../parser/Token.h"
+#include "base/MemRegion.h"
+#include "base/SimpleArray.h"
+#include "base/Util.h"
+#include "parser/Token.h"
 
 
 // pull in all of the cast operations.
