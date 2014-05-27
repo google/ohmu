@@ -65,7 +65,7 @@ public:
     TCOP_Alloc,
     TCOP_Load,
     TCOP_Store,
-    TCOP_ArrayFirst,
+    TCOP_ArrayIndex,
     TCOP_ArrayAdd,
 
     TCOP_UnaryOp,

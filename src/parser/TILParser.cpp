@@ -52,7 +52,7 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
     case TCOP_Alloc:      return "alloc";
     case TCOP_Load:       return "load";
     case TCOP_Store:      return "store";
-    case TCOP_ArrayFirst: return "arrayFirst";
+    case TCOP_ArrayIndex: return "arrayIndex";
     case TCOP_ArrayAdd:   return "arrayAdd";
 
     case TCOP_UnaryOp:    return "unary";
@@ -294,9 +294,9 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       auto* e = new (arena_) Store(sexpr(0), sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
-    case TCOP_ArrayFirst: {
-      assert(arity == 1);
-      auto* e = new (arena_) ArrayFirst(sexpr(0));
+    case TCOP_ArrayIndex: {
+      assert(arity == 2);
+      auto* e = new (arena_) ArrayIndex(sexpr(0), sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_ArrayAdd: {

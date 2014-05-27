@@ -82,11 +82,6 @@ mkApply[f,a] ::=
   | ","  app={ (apply f a) }  b=expr  mkApply[app, b]
   ;
 
-mkIndex[a,i] ::=
-    "]"      { (arrayFirst (arrayAdd a i)) }
-  | ","  idx={ (arrayFirst (arrayAdd a i)) }  b=expr  mkIndex[idx, b]
-  ;
-
 postfix ::=
   simple
   |*[f] ( "(" ( ")"                     { (call f)      }
@@ -96,7 +91,7 @@ postfix ::=
                   | a=expr ")"          { (sapply f a)  }
                   )
         | "." m= %TK_Identifier         { (project f m) }
-        | "[" i=expr    mkIndex[f,i]
+        | "[" i=expr "]"                { (arrayIndex f i) }
         )
   ;
 

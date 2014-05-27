@@ -245,7 +245,6 @@ inline ValueType ValueType::getValueType<void*>() {
 }
 
 
-
 enum TraversalKind {
   TRV_Normal,
   TRV_Lazy, // subexpression may need to be traversed lazily
@@ -615,16 +614,14 @@ public:
 
   ValueType valueType() const { return ValType; }
 
-  template <class V> typename V::R_SExpr traverse(V &Visitor) {
-    return Visitor.reduceLiteral(*this);
-  }
+  template <class V> typename V::R_SExpr traverse(V &Vs);
 
   template <class C> typename C::CType compare(Literal* E, C& Cmp) {
     // TODO -- use value, not pointer equality
     return Cmp.comparePointers(Cexpr, E->Cexpr);
   }
 
-private:
+protected:
   const ValueType ValType;
   const clang::Expr *Cexpr;
 };
@@ -643,6 +640,65 @@ public:
 private:
   T Val;
 };
+
+
+template <class V>
+typename V::R_SExpr Literal::traverse(V &Vs) {
+  if (Cexpr)
+    return Vs.reduceLiteral(*this);
+
+  switch (ValType.Base) {
+  case ValueType::BT_Void:
+    break;
+  case ValueType::BT_Bool:
+    return Vs.reduceLiteralT(*static_cast<LiteralT<bool>*>(this));
+  case ValueType::BT_Int: {
+    switch (ValType.Size) {
+    case ValueType::ST_8:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(*static_cast<LiteralT<int8_t>*>(this));
+      else
+        return Vs.reduceLiteralT(*static_cast<LiteralT<uint8_t>*>(this));
+    case ValueType::ST_16:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(*static_cast<LiteralT<int16_t>*>(this));
+      else
+        return Vs.reduceLiteralT(*static_cast<LiteralT<uint16_t>*>(this));
+    case ValueType::ST_32:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(*static_cast<LiteralT<int32_t>*>(this));
+      else
+        return Vs.reduceLiteralT(*static_cast<LiteralT<uint32_t>*>(this));
+    case ValueType::ST_64:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(*static_cast<LiteralT<int64_t>*>(this));
+      else
+        return Vs.reduceLiteralT(*static_cast<LiteralT<uint64_t>*>(this));
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_Float: {
+    switch (ValType.Size) {
+    case ValueType::ST_32:
+      return Vs.reduceLiteralT(*static_cast<LiteralT<float>*>(this));
+    case ValueType::ST_64:
+      return Vs.reduceLiteralT(*static_cast<LiteralT<double>*>(this));
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_String:
+    return Vs.reduceLiteralT(*static_cast<LiteralT<StringRef>*>(this));
+  case ValueType::BT_Pointer:
+    return Vs.reduceLiteralT(*static_cast<LiteralT<void*>*>(this));
+  case ValueType::BT_ValueRef:
+    break;
+  }
+  return Vs.reduceLiteral(*this);
+}
 
 
 // Literal pointer to an object allocated in memory.
@@ -749,7 +805,7 @@ public:
     // A self-variable points to the SFunction itself.
     // A rewrite must introduce the variable with a null definition, and update
     // it after 'this' has been rewritten.
-    Variable *Nvd = Visitor.enterScope(*VarDecl, nullptr /* def */);
+    Variable *Nvd = Visitor.enterScope(*VarDecl, nullptr);
     typename V::R_SExpr E1 = Visitor.traverse(Body);
     Visitor.exitScope(*VarDecl);
     // A rewrite operation will call SFun constructor to set Vvd->Definition.
@@ -1079,27 +1135,36 @@ private:
 
 // If p is a reference to an array, then first(p) is a reference to the first
 // element.  The usual array notation p[i]  becomes first(p + i).
-class ArrayFirst : public SExpr {
+class ArrayIndex : public SExpr {
 public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_ArrayFirst; }
+  static bool classof(const SExpr *E) { return E->opcode() == COP_ArrayIndex; }
 
-  ArrayFirst(SExpr *A) : SExpr(COP_ArrayFirst), Array(A) {}
-  ArrayFirst(const ArrayFirst &E, SExpr *A) : SExpr(E), Array(A) {}
+  ArrayIndex(SExpr *A, SExpr *N) : SExpr(COP_ArrayIndex), Array(A), Index(N) {}
+  ArrayIndex(const ArrayIndex &E, SExpr *A, SExpr *N)
+    : SExpr(E), Array(A), Index(N) {}
 
   SExpr *array() { return Array.get(); }
   const SExpr *array() const { return Array.get(); }
 
+  SExpr *index() { return Index.get(); }
+  const SExpr *index() const { return Index.get(); }
+
   template <class V> typename V::R_SExpr traverse(V &Visitor) {
     typename V::R_SExpr Na = Visitor.traverse(Array);
-    return Visitor.reduceArrayFirst(*this, Na);
+    typename V::R_SExpr Ni = Visitor.traverse(Index);
+    return Visitor.reduceArrayIndex(*this, Na, Ni);
   }
 
-  template <class C> typename C::CType compare(ArrayFirst* E, C& Cmp) {
-    return Cmp.compare(array(), E->array());
+  template <class C> typename C::CType compare(ArrayIndex* E, C& Cmp) {
+    typename C::CType Ct = Cmp.compare(array(), E->array());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+    return Cmp.compare(index(), E->index());
   }
 
 private:
   SExprRef Array;
+  SExprRef Index;
 };
 
 
@@ -1313,20 +1378,28 @@ private:
 // are "arguments" to the function, followed by a sequence of instructions.
 // Both arguments and instructions define new variables.  It ends with a
 // branch or goto to another basic block in the same SCFG.
-class BasicBlock {
+class BasicBlock : public SExpr {
 public:
   typedef SimpleArray<Variable*> VarArray;
 
-  BasicBlock(MemRegionRef A, unsigned Nargs, unsigned Nins,
-             SExpr *Term = nullptr)
-      : BlockID(0), NumVars(0), NumPredecessors(0), Parent(nullptr),
-        Args(A, Nargs), Instrs(A, Nins), Terminator(Term) {}
+  static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
+
+  explicit BasicBlock(BasicBlock* P = nullptr)
+      : SExpr(COP_BasicBlock), BlockID(0), NumArgs(0), NumPredecessors(0)
+        Parent(P), Terminator(nullptr)
+  { }
+  BasicBlock(MemRegionRef A, unsigned Nargs, unsigned Nins, SExpr *T = nullptr)
+      : SExpr(COP_BasicBlock), BlockID(0), NumArgs(0), NumPredecessors(0),
+        Parent(nullptr), Args(A, Nargs), Instrs(A, Nins), Terminator(T)
+  { }
   BasicBlock(const BasicBlock &B, VarArray &&As, VarArray &&Is, SExpr *T)
-      : BlockID(0),  NumVars(B.NumVars), NumPredecessors(B.NumPredecessors),
-        Parent(nullptr), Args(std::move(As)), Instrs(std::move(Is)),
-        Terminator(T) {}
+      : SExpr(B), BlockID(0),  NumVars(B.NumArgs),
+        NumPredecessors(B.NumPredecessors), Parent(nullptr),
+        Args(std::move(As)), Instrs(std::move(Is)), Terminator(T)
+  { }
 
   unsigned blockID() const { return BlockID; }
+  unsigned numArgs() const { return NumArgs; }
   unsigned numPredecessors() const { return NumPredecessors; }
 
   const BasicBlock *parent() const { return Parent; }
@@ -1355,9 +1428,12 @@ public:
     Instrs.push_back(V);
   }
 
-  template <class V> BasicBlock *traverse(V &Visitor) {
+  template <class V> typename V::R_BasicBlock traverse(V &Visitor) {
     typename V::template Container<Variable*> Nas(Visitor, Args.size());
     typename V::template Container<Variable*> Nis(Visitor, Instrs.size());
+
+    // Entering the basic block should do any scope initialization.
+    Visitor.enterBasicBlock(*this);
 
     for (auto *A : Args) {
       typename V::R_SExpr Ne = Visitor.traverse(A->Definition);
@@ -1371,11 +1447,8 @@ public:
     }
     typename V::R_SExpr Nt = Visitor.traverse(Terminator);
 
-    // TODO: use reverse iterator
-    for (unsigned J = 0, JN = Instrs.size(); J < JN; ++J)
-      Visitor.exitScope(*Instrs[JN-J]);
-    for (unsigned I = 0, IN = Instrs.size(); I < IN; ++I)
-      Visitor.exitScope(*Args[IN-I]);
+    // Exiting the basic block should handle any scope cleanup.
+    Visitor.exitBasicBlock(*this);
 
     return Visitor.reduceBasicBlock(*this, Nas, Nis, Nt);
   }
@@ -1388,15 +1461,15 @@ public:
 private:
   friend class SCFG;
 
-  unsigned BlockID;
-  unsigned NumVars;
+  unsigned BlockID;         // unique id for this BB in the containing CFG
+  unsigned NumArgs;         // Number of phi nodes
   unsigned NumPredecessors; // Number of blocks which jump to this one.
 
   BasicBlock *Parent;       // The parent block is the enclosing lexical scope.
                             // The parent dominates this block.
   VarArray Args;            // Phi nodes.  One argument per predecessor.
-  VarArray Instrs;
-  SExprRef Terminator;
+  VarArray Instrs;          // Instructions.
+  SExprRef Terminator;      // Branch or Goto
 };
 
 
@@ -1411,8 +1484,7 @@ typename V::R_SExpr SCFG::traverse(V &Visitor) {
   Visitor.enterCFG(*this);
   typename V::template Container<BasicBlock *> Bbs(Visitor, Blocks.size());
   for (auto *B : Blocks) {
-    BasicBlock *Nbb = B->traverse(Visitor);
-    Bbs.push_back(Nbb);
+    Bbs.push_back(B->traverse(Visitor));
   }
   Visitor.exitCFG(*this);
   return Visitor.reduceSCFG(*this, Bbs);
@@ -1426,7 +1498,7 @@ public:
 
   // In minimal SSA form, all Phi nodes are MultiVal.
   // During conversion to SSA, incomplete Phi nodes may be introduced, which
-  // are later determined to be SingleVal.
+  // are later determined to be SingleVal, and are thus redundant.
   enum Status {
     PH_MultiVal = 0, // Phi node has multiple distinct values.  (Normal)
     PH_SingleVal,    // Phi node has one distinct value, and can be eliminated
@@ -1449,8 +1521,7 @@ public:
     typename V::template Container<typename V::R_SExpr> Nvs(Visitor,
                                                             Values.size());
     for (auto *Val : Values) {
-      typename V::R_SExpr Nv = Visitor.traverse(Val);
-      Nvs.push_back(Nv);
+      Nvs.push_back( Visitor.traverse(Val) );
     }
     return Visitor.reducePhi(*this, Nvs);
   }
@@ -1567,7 +1638,7 @@ private:
 
 
 // An if-then-else expression.
-// This is a pseduo-term; it will be lowered to a CFG.
+// This is a pseduo-term; it will be lowered to a branch in a CFG.
 class IfThenElse : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_IfThenElse; }
@@ -1613,7 +1684,7 @@ private:
 
 
 // A let-expression,  e.g.  let x=t; u.
-// This is a pseduo-term; it will be lowered to a CFG.
+// This is a pseduo-term; it will be lowered to instructions in a CFG.
 class Let : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }

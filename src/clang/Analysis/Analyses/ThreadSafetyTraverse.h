@@ -45,11 +45,15 @@ namespace til {
 //       compute a result for a node of type X
 //
 // The reduceX methods control the kind of traversal (visitor, copy, etc.).
-// These are separated into a separate class R for the purpose of code reuse.
-// The full reducer interface also has methods to handle scopes
-template <class Self, class R> class Traversal : public R {
+// They are defined in derived classes.
+//
+// Class R defines the basic interface types (R_SExpr).
+template <class Self, class R>
+class Traversal {
 public:
-  Self *self() { return reinterpret_cast<Self *>(this); }
+  Self *self() { return static_cast<Self *>(this); }
+
+  typedef typename R::R_SExpr R_SExpr;
 
   // Traverse an expression -- returning a result of type R_SExpr.
   // Override this method to do something for every expression, regardless
@@ -58,16 +62,16 @@ public:
   //   TRV_Normal
   //   TRV_Lazy   -- e may need to be traversed lazily, using a Future.
   //   TRV_Tail   -- e occurs in a tail position
-  typename R::R_SExpr traverse(SExprRef &E, TraversalKind K = TRV_Normal) {
+  R_SExpr traverse(SExprRef &E, TraversalKind K = TRV_Normal) {
     return traverse(E.get(), K);
   }
 
-  typename R::R_SExpr traverse(SExpr *E, TraversalKind K = TRV_Normal) {
+  R_SExpr traverse(SExpr *E, TraversalKind K = TRV_Normal) {
     return traverseByCase(E);
   }
 
   // Helper method to call traverseX(e) on the appropriate type.
-  typename R::R_SExpr traverseByCase(SExpr *E) {
+  R_SExpr traverseByCase(SExpr *E) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                   \
     case COP_##X:                                                           \
@@ -80,40 +84,47 @@ public:
 // Traverse e, by static dispatch on the type "X" of e.
 // Override these methods to do something for a particular kind of term.
 #define TIL_OPCODE_DEF(X)                                                   \
-  typename R::R_SExpr traverse##X(X *e) { return e->traverse(*self()); }
+  R_SExpr traverse##X(X *e) { return e->traverse(*self()); }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
 };
 
 
-// Implements a Reducer that makes a deep copy of an SExpr.
-// The default behavior of reduce##X(...) is to create a copy of the original.
-// Subclasses can override reduce##X to implement non-destructive rewriting
-// passes.
-class CopyReducer {
+// Base class for traversals that rewrite an SExpr to another SExpr.
+class CopyReducerBase {
 public:
-  CopyReducer() {}
-
-  void setArena(MemRegionRef A) { Arena = A; }
-
   // R_SExpr is the result type for a traversal.
   // A copy or non-destructive rewrite returns a newly allocated term.
   typedef SExpr *R_SExpr;
+  typedef BasicBlock *R_BasicBlock;
 
   // Container is a minimal interface used to store results when traversing
   // SExprs of variable arity, such as Phi, Goto, and SCFG.
   template <class T> class Container {
   public:
     // Allocate a new container with a capacity for n elements.
-    Container(CopyReducer &R, unsigned N) : Elems(R.Arena, N) {}
+    Container(CopyReducerBase &S, unsigned N) : Elems(S.Arena, N) {}
 
     // Push a new element onto the container.
     void push_back(T E) { Elems.push_back(E); }
 
-  private:
-    friend class CopyReducer;
     SimpleArray<T> Elems;
   };
+
+protected:
+  MemRegionRef Arena;
+};
+
+
+// Implements a traversal that makes a deep copy of an SExpr.
+// The default behavior of reduce##X(...) is to create a copy of the original.
+// Subclasses can override reduce##X to implement non-destructive rewriting
+// passes.
+template<class Self>
+class CopyReducer : public Traversal<Self, CopyReducerBase>,
+                    public CopyReducerBase {
+public:
+  CopyReducer(MemRegionRef A) { Arena = A; }
 
 public:
   R_SExpr reduceNull() {
@@ -130,6 +141,10 @@ public:
 
   R_SExpr reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);
+  }
+  template<class T>
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
+    return new (Arena) LiteralT<T>(Orig);
   }
   R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
     return new (Arena) LiteralPtr(Orig);
@@ -170,8 +185,8 @@ public:
   R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
     return new (Arena) Store(Orig, E0, E1);
   }
-  R_SExpr reduceArrayFirst(ArrayFirst &Orig, R_SExpr E0) {
-    return new (Arena) ArrayFirst(Orig, E0);
+  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
+    return new (Arena) ArrayIndex(Orig, E0, E1);
   }
   R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
     return new (Arena) ArrayAdd(Orig, E0, E1);
@@ -188,6 +203,11 @@ public:
 
   R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> &Bbs) {
     return new (Arena) SCFG(Orig, std::move(Bbs.Elems));
+  }
+  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
+                                Container<Variable *> &Is, R_SExpr T) {
+    return new (Arena) BasicBlock(Orig, std::move(As.Elems),
+                                        std::move(Is.Elems), T);
   }
   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return new (Arena) Phi(Orig, std::move(As.Elems));
@@ -209,12 +229,6 @@ public:
     return new (Arena) Let(Orig, Nvd, B);
   }
 
-  BasicBlock *reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
-                               Container<Variable *> &Is, R_SExpr T) {
-    return new (Arena) BasicBlock(Orig, std::move(As.Elems),
-                                        std::move(Is.Elems), T);
-  }
-
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
     return new (Arena) Variable(Orig, E0);
@@ -224,21 +238,22 @@ public:
 
   void enterCFG(SCFG &Cfg) {}
   void exitCFG(SCFG &Cfg) {}
+  void enterBasicBlock(BasicBlock &BB) {}
+  void exitBasicBlock(BasicBlock &BB) {}
 
   // Map Variable references to their rewritten definitions.
   Variable *reduceVariableRef(Variable *Ovd) { return Ovd; }
 
-  // Map BasicBlock references to their rewritten defs.
+  // Map BasicBlock references to their rewritten definitions.
   BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }
-
-private:
-  MemRegionRef Arena;
 };
 
 
-class SExprCopier : public Traversal<SExprCopier, CopyReducer> {
+class SExprCopier : public CopyReducer<SExprCopier> {
 public:
-  SExprCopier(MemRegionRef A) { setArena(A); }
+  typedef SExpr *R_SExpr;
+
+  SExprCopier(MemRegionRef A) : CopyReducer(A) { }
 
   // Create a copy of e in region a.
   static SExpr *copy(SExpr *E, MemRegionRef A) {
@@ -248,25 +263,32 @@ public:
 };
 
 
-// Implements a Reducer that visits each subexpression, and returns either
-// true or false.
-class VisitReducer {
-public:
-  VisitReducer() {}
 
+// Base class for visit traversals.
+class VisitReducerBase {
+public:
   // A visitor returns a bool, representing success or failure.
   typedef bool R_SExpr;
+  typedef bool R_BasicBlock;
 
   // A visitor "container" is a single bool, which accumulates success.
   template <class T> class Container {
   public:
-    Container(VisitReducer &R, unsigned N) : Success(true) {}
+    Container(VisitReducerBase &S, unsigned N) : Success(true) {}
     void push_back(bool E) { Success = Success && E; }
 
-  private:
-    friend class VisitReducer;
     bool Success;
   };
+};
+
+
+// Implements a traversal that visits each subexpression, and returns either
+// true or false.
+template <class Self>
+class VisitReducer : public Traversal<Self, VisitReducerBase>,
+                     public VisitReducerBase {
+public:
+  VisitReducer() {}
 
 public:
   R_SExpr reduceNull() { return true; }
@@ -274,6 +296,8 @@ public:
   R_SExpr reduceWildcard(Wildcard &Orig) { return true; }
 
   R_SExpr reduceLiteral(Literal &Orig) { return true; }
+  template<class T>
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) { return true; }
   R_SExpr reduceLiteralPtr(Literal &Orig) { return true; }
 
   R_SExpr reduceFunction(Function &Orig, Variable *Nvd, R_SExpr E0) {
@@ -299,7 +323,9 @@ public:
   R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) { return E0; }
   R_SExpr reduceLoad(Load &Orig, R_SExpr E0) { return E0; }
   R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) { return E0 && E1; }
-  R_SExpr reduceArrayFirst(Store &Orig, R_SExpr E0) { return E0; }
+  R_SExpr reduceArrayIndex(Store &Orig, R_SExpr E0, R_SExpr E1) {
+    return E0 && E1;
+  }
   R_SExpr reduceArrayAdd(Store &Orig, R_SExpr E0, R_SExpr E1) {
     return E0 && E1;
   }
@@ -312,7 +338,11 @@ public:
   R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> Bbs) {
     return Bbs.Success;
   }
-   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
+  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
+                                Container<Variable *> &Is, R_SExpr T) {
+    return (As.Success && Is.Success && T);
+  }
+  R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return As.Success;
   }
   R_SExpr reduceGoto(Goto &Orig, BasicBlock *B, unsigned Index) {
@@ -332,38 +362,24 @@ public:
     return Nvd && B;
   }
 
-  BasicBlock *reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
-                               Container<Variable *> &Is, R_SExpr T) {
-    return (As.Success && Is.Success && T) ? &Orig : nullptr;
-  }
-
-  Variable *enterScope(Variable &Orig, R_SExpr E0) {
-    return E0 ? &Orig : nullptr;
-  }
+  Variable *enterScope(Variable &Orig, R_SExpr E0) { return &Orig; }
   void exitScope(const Variable &Orig) {}
-
   void enterCFG(SCFG &Cfg) {}
   void exitCFG(SCFG &Cfg) {}
+  void enterBasicBlock(BasicBlock &BB) {}
+  void exitBasicBlock(BasicBlock &BB) {}
 
-  Variable *reduceVariableRef(Variable *Ovd) { return Ovd; }
-
+  Variable   *reduceVariableRef  (Variable *Ovd)   { return Ovd; }
   BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }
-};
 
-
-// A visitor will visit each node, and halt if any reducer returns false.
-template <class Self>
-class SExprVisitor : public Traversal<Self, VisitReducer> {
 public:
-  SExprVisitor() : Success(true) {}
-
   bool traverse(SExpr *E, TraversalKind K = TRV_Normal) {
     Success = Success && this->traverseByCase(E);
     return Success;
   }
 
   static bool visit(SExpr *E) {
-    SExprVisitor Visitor;
+    Self Visitor;
     return Visitor.traverse(E);
   }
 
@@ -488,7 +504,7 @@ protected:
       case COP_Alloc:      return Prec_Other;
       case COP_Load:       return Prec_Postfix;
       case COP_Store:      return Prec_Other;
-      case COP_ArrayFirst: return Prec_Postfix;
+      case COP_ArrayIndex: return Prec_Postfix;
       case COP_ArrayAdd:   return Prec_Postfix;
 
       case COP_UnaryOp:    return Prec_Unary;
@@ -496,6 +512,7 @@ protected:
       case COP_Cast:       return Prec_Unary;
 
       case COP_SCFG:       return Prec_Decl;
+      case COP_BasicBlock: return Prec_MAX;
       case COP_Phi:        return Prec_Atom;
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
@@ -614,7 +631,7 @@ protected:
       }
       case ValueType::BT_String: {
         SS << "\"";
-        printLiteralT(reinterpret_cast<LiteralT<bool>*>(E), SS);
+        printLiteralT(reinterpret_cast<LiteralT<StringRef>*>(E), SS);
         SS << "\"";
         return;
       }
@@ -755,15 +772,11 @@ protected:
     self()->printSExpr(E->source(), SS, Prec_Other-1);
   }
 
-  void printArrayFirst(ArrayFirst *E, StreamType &SS) {
+  void printArrayIndex(ArrayIndex *E, StreamType &SS) {
     self()->printSExpr(E->array(), SS, Prec_Postfix);
-    if (ArrayAdd *A = dyn_cast_or_null<ArrayAdd>(E->array())) {
-      SS << "[";
-      printSExpr(A->index(), SS, Prec_MAX);
-      SS << "]";
-      return;
-    }
-    SS << "[0]";
+    SS << "[";
+    self()->printSExpr(E->index(), SS, Prec_MAX);
+    SS << "]";
   }
 
   void printArrayAdd(ArrayAdd *E, StreamType &SS) {
@@ -791,35 +804,39 @@ protected:
   void printSCFG(SCFG *E, StreamType &SS) {
     SS << "#CFG {\n";
     for (auto BBI : *E) {
-      SS << "BB_" << BBI->blockID() << ":";
-      newline(SS);
-      for (auto A : BBI->arguments()) {
-        SS << "let ";
-        self()->printVariable(A, SS, true);
-        SS << " = ";
-        self()->printSExpr(A->definition(), SS, Prec_MAX);
-        SS << ";";
-        newline(SS);
-      }
-      for (auto I : BBI->instructions()) {
-        if (I->definition()->opcode() != COP_Store) {
-          SS << "let ";
-          self()->printVariable(I, SS, true);
-          SS << " = ";
-        }
-        self()->printSExpr(I->definition(), SS, Prec_MAX);
-        SS << ";";
-        newline(SS);
-      }
-      SExpr *T = BBI->terminator();
-      if (T) {
-        self()->printSExpr(T, SS, Prec_MAX);
-        SS << ";";
-        newline(SS);
-      }
-      newline(SS);
+      printBasicBlock(BBI, SS);
     }
     SS << "}";
+    newline(SS);
+  }
+
+  void printBasicBlock(BasicBlock *E, StreamType &SS) {
+    SS << "BB_" << E->blockID() << ":";
+    newline(SS);
+    for (auto A : E->arguments()) {
+      SS << "let ";
+      self()->printVariable(A, SS, true);
+      SS << " = ";
+      self()->printSExpr(A->definition(), SS, Prec_MAX);
+      SS << ";";
+      newline(SS);
+    }
+    for (auto I : E->instructions()) {
+      if (I->definition()->opcode() != COP_Store) {
+        SS << "let ";
+        self()->printVariable(I, SS, true);
+        SS << " = ";
+      }
+      self()->printSExpr(I->definition(), SS, Prec_MAX);
+      SS << ";";
+      newline(SS);
+    }
+    SExpr *T = E->terminator();
+    if (T) {
+      self()->printSExpr(T, SS, Prec_MAX);
+      SS << ";";
+      newline(SS);
+    }
     newline(SS);
   }
 

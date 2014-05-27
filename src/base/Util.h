@@ -28,6 +28,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
+#include <unordered_map>
+
 
 // A few handy definitions borrowed from LLVM
 #ifndef LLVM_DELETED_FUNCTION
@@ -165,6 +167,30 @@ public:
     unsigned i = *reinterpret_cast<unsigned*>(&ptr);
     return (((i*m) ^ (i >> 2))*m ^ (i >> 24))*m;
   }
+};
+
+
+template <class K, class T>
+class HashMap {
+private:
+  typedef std::unordered_map<K, T> MapType;
+
+public:
+  size_t size() const { return hashmap_.size(); }
+
+  void insert(const K& k, const T& t) {
+    hashmap_.emplace(std::make_pair(k, t));
+  }
+
+  T find(const K& k, const T& invalid) {
+    typename MapType::iterator it = hashmap_.find(k);
+    if (it == hashmap_.end())
+      return invalid;
+    return (*it).second;
+  }
+
+private:
+  MapType hashmap_;
 };
 
 
