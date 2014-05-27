@@ -48,6 +48,29 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
+  unsigned Idx = Predecessors.size();
+  Predecessors.reserveCheck(1, Arena);
+  Predecessors.push_back(Pred);
+  for (Variable *V : Args) {
+    if (Phi* Ph = dyn_cast<Phi>(V->definition())) {
+      Ph->values().reserveCheck(1, Arena);
+      Ph->values().push_back(nullptr);
+    }
+  }
+  return Idx;
+}
+
+void BasicBlock::reservePredecessors(unsigned NumPreds) {
+  Predecessors.reserve(NumPreds, Arena);
+  for (Variable *V : Args) {
+    if (Phi* Ph = dyn_cast<Phi>(V->definition())) {
+      Ph->values().reserve(NumPreds, Arena);
+    }
+  }
+}
+
+
 
 // If E is a variable, then trace back through any aliases or redundant
 // Phi nodes to find the canonical definition.

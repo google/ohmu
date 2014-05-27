@@ -30,21 +30,52 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-template <class Self>
-class CFGReducer : public Traversal<Self, CopyReducerBase>.
-                   public CopyReducerBase {
-public:
-  struct PendingBlock {
-    BasicBlock* BB;             // The basic block to finish
-    SExpr*      Exp;            // The expression that the block computes
-    BasicBlock* Continuation;   // The continuation for the block
-
-    PendingBlock(BasicBlock *B, SExpr *E, BasicBlock *C)
-        : BB(B), Exp(E), Continuation(C)
-    { }
+class CFGReducerBase {
+  enum TraversalKind {
+    TRV_Normal,
+    TRV_Decl,
+    TRV_Lazy,
+    TRV_Type
   };
 
+  struct Context {
+    TraversalKind Kind;
+    BasicBlock *Continuation;
 
+    Context(TraversalKind K, BasicBlock *C) : Kind(K), Continuation(C) {}
+  };
+
+  typedef Context R_Ctx;
+
+  R_Ctx subExprCtx(const R_Ctx& Ctx) { return Context(TRV_Normal, nullptr); }
+  R_Ctx declCtx   (const R_Ctx& Ctx) { return Context(TRV_Decl,   nullptr); }
+  R_Ctx lazyCtx   (const R_Ctx& Ctx) { return Context(TRV_Lazy,   nullptr); }
+  R_Ctx typeCtx   (const R_Ctx& Ctx) { return Context(TRV_Type,   nullptr); }
+
+  // R_SExpr is the result type for a traversal.
+  // A copy or non-destructive rewrite returns a newly allocated term.
+  typedef SExpr *R_SExpr;
+  typedef BasicBlock *R_BasicBlock;
+
+  // Container is a minimal interface used to store results when traversing
+  // SExprs of variable arity, such as Phi, Goto, and SCFG.
+  template <class T> class Container {
+  public:
+    // Allocate a new container with a capacity for n elements.
+    Container(CopyReducerBase &S, unsigned N) : Elems(S.Arena, N) {}
+
+    // Push a new element onto the container.
+    void push_back(T E) { Elems.push_back(E); }
+
+    SimpleArray<T> Elems;
+  };
+};
+
+
+template <class Self>
+class CFGReducer : public Traversal<Self, CFGReducerBase>.
+                   public CFGReducerBase {
+public:
   R_SExpr reduceNull() {
     return nullptr;
   }
@@ -138,55 +169,53 @@ public:
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
-    return nullptr;
+    return new (Arena) Identifier(Orig);
   }
 
   // We have to trap IfThenElse on the traverse rather than reduce, since it
   // the then/else expressions must be evaluated in different basic blocks.
-  R_SExpr traverseIfThenElse(IfThenElse *E) {
-    SExpr* Nc = addLetVar(Visitor.traverse(condition()));
+  R_SExpr traverseIfThenElse(IfThenElse *E, Context Ctx) {
+    if (!currentBB) {
+      // Just do a normal traversal if we're not current rewriting the CFG.
+      return E->traverse(*self(), Ctx);
+    }
 
-    // Create new basic blocks for then, else, and continuation.
-    BasicBlock *Ntb = new (Arena) BasicBlock(currentBB);
-    BasicBlock *Neb = new (Arena) BasicBlock(currentBB);
-    BasicBlock *Ncb = new (Arena) BasicBlock(currentBB);
-    Ncb->arguments.reserve(1);  // FIXME
+    SExpr* Nc = addLetVar(Visitor.traverse(E->condition()));
 
-    // Terminate the current block with a branch
-    BasicBlock *Cont = currentContinuation;
-    SExpr *Nt = new (Arena) Branch(Nc, Ntb, Neb);
+    // Create new basic blocks for then and else.
+    BasicBlock *Ntb = new (Arena) BasicBlock(Arena, currentBB);
+    BasicBlock *Neb = new (Arena) BasicBlock(Arena, currentBB);
+
+    // Create a continuation if we don't already have one.
+    BasicBlock *Ncb = Ctx.Continuation;
+    if (!Ncb) {
+      Ncb = new (Arena) BasicBlock(Arena, currentBB);
+      Variable *V = new (Arena) Variable(new (Arena) Phi());
+      Ncb->addArgument(V);
+    }
+
+    unsigned IdxT = Ntb->addPredecessor(currentBB);
+    unsigned IdxE = Ntb->addPredecessor(currentBB);
+    SExpr *Nt = new (Arena) Branch(Nc, Ntb, Neb, IdxT, IdxE);
     finishCurrentBB(Nt);
 
-    startBB(Ntb, Ncb);
-    self()->traverseAndFinishBB(E->thenExpr());
+    startBB(Ntb);
+    SExpr *Rt = self()->traverse(E->thenExpr(), Context(TRV_Normal, Ncb));
+    finishWithGoto(Rt, Ncb);
 
-    startBB(Neb, Ncb);
-    self()->traverseAndFinishBB(E->elseExpr());
+    startBB(Neb);
+    SExpr *Re = self()->traverse(E->elseExpr(), Context(TRV_Normal, Ncb));
+    finishWithGoto(Re, Ncb);
 
-    startBB(Ncb, Cont);
-
+    // If we created a new continuation, jump to it
+    if (Ncb != Ctx.Continuation)
+      startBB(Ncb, Cont);
   }
-
-
-  R_SExpr traverseLet(Let* E) {
-    // This is a variable declaration, so traverse the definition.
-    SExpr *E0 = self()->traverse(E->variableDecl()->definition());
-    Variable *Nvd = Visitor.enterScope(E->variableDecl(), E0);
-    typename V::R_SExpr E1 = Visitor.traverse(Body);
-    Visitor.exitScope(*VarDecl);
-    return Visitor.reduceLet(*this, Nvd, E1);
-  }
-
-
-
-
-
 
 
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
     Variable* nv = new (Arena) Variable(Orig, E0);
-
   }
   // Exit the lexical scope of orig.
   void exitScope(const Variable &Orig) {}
@@ -216,37 +245,51 @@ protected:
   }
 
   // Start a new basic block, and traverse E.
-  void startBB(BasicBlock *BB, BasicBlock *Cont) {
+  void startBB(BasicBlock *BB) {
     assert(currentBB == nullptr);
     assert(currentArgs.empty());
     assert(currentInstrs.empty());
 
     currentBB = BB;
-    currentBB->setBlockID(currentBlockID++);
-    currentContinuation = Cont;
+    currentCFG->add(BB);
   }
 
+  // Finish the current basic block, terminating it with Term.
+  void terminateCurrentBB(SExpr* Term) {
+    assert(currentBB);
+    assert(currentBB->instructions().size() == 0);
 
-  // Finish the current basic block, setting T as the terminator.
-  void finishCurrentBB(SExpr* T) {
-    currentBB->arguments().reserve(currentArgs.size(), Arena);
-    currentBB->arguments().append(currentArgs.begin(), currentArgs.end());
     currentBB->instructions().reserve(currentInstrs.size(), Arena);
     currentBB->instructions().append(currentArgs.begin(), currentArgs.end());
-    currentBB->setTerminator(T);
+    currentBB->setTerminator(Term);
     currentArgs.clear();
     currentInstrs.clear();
     currentBB = nullptr;
   }
+
+  // If the current basic block exists, terminate it with a goto to the
+  // target continuation.  Result is passes as argument to the continuation.
+  void maybeTerminateWithGoto(SExpr* Result, BasicBlock *Target) {
+    assert(Target->arguments().size() > 0);
+    if (!currentBB)
+      return;
+
+    unsigned Idx = Target->addPredecessor(currentBB);
+    Variable *V : Target->arguments()[0];
+    if (Phi *Ph = dyn_cast<Phi>(V->definition())) {
+      Ph->values()[Idx] = Result;
+    }
+
+    SExpr *Term = new (Arena) Goto(Target, Idx);
+    terminateCurrentBB(Term);
+  }
+
 
   CFGReducer(MemRegionRef A) : Arena(A) {}
 
 protected:
   SCFG*       currentCFG;                 // the current SCFG
   BasicBlock* currentBB;                  // the current basic block
-  BasicBlock* currentContinuation;        // the continuation for currentBB.
-  unsigned    currentBlockID;             // the next available block ID
-
   std::vector<Variable*> currentArgs;     // arguments in currentBB.
   std::vector<Variable*> currentInstrs;   // instructions in currentBB.
 };

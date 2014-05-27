@@ -53,29 +53,23 @@ class Traversal {
 public:
   Self *self() { return static_cast<Self *>(this); }
 
-  typedef typename R::R_SExpr R_SExpr;
-
   // Traverse an expression -- returning a result of type R_SExpr.
   // Override this method to do something for every expression, regardless
-  // of which kind it is.  TraversalKind indicates the context in which
-  // the expression occurs, and can be:
-  //   TRV_Normal
-  //   TRV_Lazy   -- e may need to be traversed lazily, using a Future.
-  //   TRV_Tail   -- e occurs in a tail position
-  R_SExpr traverse(SExprRef &E, TraversalKind K = TRV_Normal) {
-    return traverse(E.get(), K);
+  // of which kind it is.
+  typename R::R_SExpr traverse(SExprRef &E, typename R::R_Ctx Ctx) {
+    return traverse(E.get(), Ctx);
   }
 
-  R_SExpr traverse(SExpr *E, TraversalKind K = TRV_Normal) {
-    return traverseByCase(E);
+  typename R::R_SExpr traverse(SExpr *E, typename R::R_Ctx Ctx) {
+    return traverseByCase(E, Ctx);
   }
 
   // Helper method to call traverseX(e) on the appropriate type.
-  R_SExpr traverseByCase(SExpr *E) {
+  typename R::R_SExpr traverseByCase(SExpr *E, typename R::R_Ctx Ctx) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                   \
     case COP_##X:                                                           \
-      return self()->traverse##X(cast<X>(E));
+      return self()->traverse##X(cast<X>(E), Ctx);
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     }
@@ -84,14 +78,47 @@ public:
 // Traverse e, by static dispatch on the type "X" of e.
 // Override these methods to do something for a particular kind of term.
 #define TIL_OPCODE_DEF(X)                                                   \
-  R_SExpr traverse##X(X *e) { return e->traverse(*self()); }
+  typename R::R_SExpr traverse##X(X *e, typename R::R_Ctx Ctx) {            \
+    return e->traverse(*self(), Ctx);                                       \
+  }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
 };
 
 
+// Base class for simple reducers that don't much care about the context.
+class SimpleReducerBase {
+public:
+  enum TraversalKind {
+    TRV_Normal,
+    TRV_Decl,
+    TRV_Lazy,
+    TRV_Type
+  };
+
+  // R_Ctx defines a "context" for the traversal, which encodes information
+  // about where a term appears.  This can be used to encoding the
+  // "current continuation" for CPS transforms, or other information.
+  typedef TraversalKind R_Ctx;
+
+  // Create context for an ordinary subexpression.
+  R_Ctx subExprCtx(R_Ctx Ctx) { return TRV_Normal; }
+
+  // Create context for a subexpression that occurs in a declaration position
+  // (e.g. function body).
+  R_Ctx declCtx(R_Ctx Ctx) { return TRV_Decl; }
+
+  // Create context for a subexpression that occurs in a position that
+  // should be reduced lazily.  (e.g. code body).
+  R_Ctx lazyCtx(R_Ctx Ctx) { return TRV_Lazy; }
+
+  // Create context for a subexpression that occurs in a type position.
+  R_Ctx typeCtx(R_Ctx Ctx) { return TRV_Type; }
+};
+
+
 // Base class for traversals that rewrite an SExpr to another SExpr.
-class CopyReducerBase {
+class CopyReducerBase : public SimpleReducerBase {
 public:
   // R_SExpr is the result type for a traversal.
   // A copy or non-destructive rewrite returns a newly allocated term.
@@ -202,21 +229,20 @@ public:
   }
 
   R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> &Bbs) {
-    return new (Arena) SCFG(Orig, std::move(Bbs.Elems));
+    return nullptr;  // FIXME: implement CFG rewriting
   }
   R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
                                 Container<Variable *> &Is, R_SExpr T) {
-    return new (Arena) BasicBlock(Orig, std::move(As.Elems),
-                                        std::move(Is.Elems), T);
+    return nullptr;  // FIXME: implement CFG rewriting
   }
   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return new (Arena) Phi(Orig, std::move(As.Elems));
   }
-  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B, unsigned Index) {
-    return new (Arena) Goto(Orig, B, Index);
+  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B) {
+    return new (Arena) Goto(Orig, B, 0);  // FIXME: set index
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
-    return new (Arena) Branch(O, C, B0, B1);
+    return new (Arena) Branch(O, C, B0, B1, 0, 0);  // FIXME: set indices
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
@@ -258,14 +284,14 @@ public:
   // Create a copy of e in region a.
   static SExpr *copy(SExpr *E, MemRegionRef A) {
     SExprCopier Copier(A);
-    return Copier.traverse(E);
+    return Copier.traverse(E, TRV_Normal);
   }
 };
 
 
 
 // Base class for visit traversals.
-class VisitReducerBase {
+class VisitReducerBase : public SimpleReducerBase {
 public:
   // A visitor returns a bool, representing success or failure.
   typedef bool R_SExpr;
@@ -345,7 +371,7 @@ public:
   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return As.Success;
   }
-  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B, unsigned Index) {
+  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B) {
     return true;
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
@@ -380,7 +406,7 @@ public:
 
   static bool visit(SExpr *E) {
     Self Visitor;
-    return Visitor.traverse(E);
+    return Visitor.traverse(E, TRV_Normal);
   }
 
 private:
