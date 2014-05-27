@@ -144,30 +144,27 @@ public:
   // We have to trap IfThenElse on the traverse rather than reduce, since it
   // the then/else expressions must be evaluated in different basic blocks.
   R_SExpr traverseIfThenElse(IfThenElse *E) {
-    typename V::R_SExpr Nc = Visitor.traverse(condition());
+    SExpr* Nc = addLetVar(Visitor.traverse(condition()));
 
-    // Create a new continuation for the result of the ifthenelse
-    // and push it onto the work list.
-    BasicBlock *Ncb = new (Arena) BasicBlock(currentBB);
-    pendingBlocks.emplace_back(
-      PendingBlock(Ncb, nullptr, currentContinuation));
-    // FIXME -- what's the expr?
-    // FIXME -- how to set args?
-
-    // Create an else block, and push it onto the work list.
-    BasicBlock *Neb = new (Arena) BasicBlock(currentBB);
-    pendingBlocks.emplace_back(
-      PendingBlock(Neb, E->elseExpr(), Ncb);
-
-    // Create a then block, which we will switch to
+    // Create new basic blocks for then, else, and continuation.
     BasicBlock *Ntb = new (Arena) BasicBlock(currentBB);
+    BasicBlock *Neb = new (Arena) BasicBlock(currentBB);
+    BasicBlock *Ncb = new (Arena) BasicBlock(currentBB);
+    Ncb->arguments.reserve(1);  // FIXME
 
     // Terminate the current block with a branch
+    BasicBlock *Cont = currentContinuation;
     SExpr *Nt = new (Arena) Branch(Nc, Ntb, Neb);
     finishCurrentBB(Nt);
 
-    // Switch to working on the then branch.
-    startBB(Neb, E->thenExpr(), Ncb);
+    startBB(Ntb, Ncb);
+    self()->traverseAndFinishBB(E->thenExpr());
+
+    startBB(Neb, Ncb);
+    self()->traverseAndFinishBB(E->elseExpr());
+
+    startBB(Ncb, Cont);
+
   }
 
 
@@ -207,6 +204,8 @@ public:
 
 protected:
   Variable* addLetVar(SExpr* E) {
+    if (!currentBB)
+      return E;
     if (!E)
       return nullptr;
     if (til::ThreadSafetyTIL::isTrivial(E))
@@ -217,7 +216,7 @@ protected:
   }
 
   // Start a new basic block, and traverse E.
-  void startBB(BasicBlock *BB, SExpr *E, BasicBlock *Cont) {
+  void startBB(BasicBlock *BB, BasicBlock *Cont) {
     assert(currentBB == nullptr);
     assert(currentArgs.empty());
     assert(currentInstrs.empty());
@@ -225,7 +224,6 @@ protected:
     currentBB = BB;
     currentBB->setBlockID(currentBlockID++);
     currentContinuation = Cont;
-    self()->traverse(E);
   }
 
 
@@ -244,8 +242,6 @@ protected:
   CFGReducer(MemRegionRef A) : Arena(A) {}
 
 protected:
-  std::vector<PendingBlock> pendingBlocks;   // work list
-
   SCFG*       currentCFG;                 // the current SCFG
   BasicBlock* currentBB;                  // the current basic block
   BasicBlock* currentContinuation;        // the continuation for currentBB.
