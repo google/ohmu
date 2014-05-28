@@ -1453,6 +1453,16 @@ public:
   // Reserve space for NumPreds predecessors, including space in phi nodes.
   void reservePredecessors(unsigned NumPreds);
 
+  // Return the index of BB, or Predecessors.size if BB is not a predecessor.
+  unsigned findPredecessorIndex(BasicBlock *BB) {
+    unsigned I = 0;
+    for (BasicBlock *B : Predecessors) {
+      if (B == BB) return I;
+      ++I;
+    }
+    return Predecessors.size();
+  }
+
   // Set id numbers for variables.
   void renumberVars();
 
