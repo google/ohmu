@@ -302,7 +302,8 @@ protected:
     assert(currentBB->instructions().size() == 0);
 
     currentBB->instructions().reserve(currentInstrs.size(), Arena);
-    currentBB->instructions().append(currentArgs.begin(), currentArgs.end());
+    currentBB->instructions().append(currentInstrs.begin(),
+                                     currentInstrs.end());
     currentBB->setTerminator(Term);
     currentArgs.clear();
     currentInstrs.clear();

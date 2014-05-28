@@ -832,7 +832,7 @@ protected:
   }
 
   void printSCFG(SCFG *E, StreamType &SS) {
-    SS << "#CFG {\n";
+    SS << "CFG {\n";
     for (auto BBI : *E) {
       printBasicBlock(BBI, SS);
     }
@@ -842,6 +842,8 @@ protected:
 
   void printBasicBlock(BasicBlock *E, StreamType &SS) {
     SS << "BB_" << E->blockID() << ":";
+    if (E->parent())
+      SS << " BB_" << E->parent()->blockID();
     newline(SS);
     for (auto A : E->arguments()) {
       SS << "let ";
