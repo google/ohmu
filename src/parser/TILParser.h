@@ -87,6 +87,8 @@ public:
   }
   ~TILParser() { }
 
+  MemRegionRef arena() { return arena_; }
+
   const char* getOpcodeName(TIL_ConstructOp op);
 
   void initMap();

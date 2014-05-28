@@ -138,6 +138,8 @@ public:
     SimpleArray<T> Elems;
   };
 
+  CopyReducerBase(MemRegionRef A) : Arena(A) {}
+
 protected:
   MemRegionRef Arena;
 };
@@ -151,7 +153,7 @@ template<class Self>
 class CopyReducer : public Traversal<Self, CopyReducerBase>,
                     public CopyReducerBase {
 public:
-  CopyReducer(MemRegionRef A) { Arena = A; }
+  CopyReducer(MemRegionRef A) : CopyReducerBase(A) {}
 
 public:
   R_SExpr reduceNull() {
@@ -496,6 +498,8 @@ protected:
     }
     SS << "BB_";
     SS << BB->blockID();
+    SS << ":";
+    SS << index;
   }
 
   // TODO: further distinguish between binary operations.

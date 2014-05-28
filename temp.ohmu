@@ -1,14 +1,1 @@
-
-x;
-
-x + y;
-
-(x + y)*2 << z;
-
-a.b(1).foo(x,y,z);
-
-\(x: Int, y: Int): Int -> (x + y)*2;
-
-let x = 2;
-let z = x*x;
-if (z == 4) then true else false;
+1 + 2*3;

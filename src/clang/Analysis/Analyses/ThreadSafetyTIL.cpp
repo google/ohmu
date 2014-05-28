@@ -70,6 +70,23 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
   }
 }
 
+void BasicBlock::renumberVars() {
+  unsigned VID = 0;
+  for (Variable *V : Args) {
+    V->setID(BlockID, VID++);
+  }
+  for (Variable *V : Instrs) {
+    V->setID(BlockID, VID++);
+  }
+}
+
+void SCFG::renumberVars() {
+  for (BasicBlock *B : Blocks) {
+    B->renumberVars();
+  }
+}
+
+
 
 
 // If E is a variable, then trace back through any aliases or redundant

@@ -5,6 +5,6 @@ target_link_libraries(test_BNFParser base parser)
 add_dependencies(test_BNFParser parser_grammar)
 
 add_executable(test_TILParser test_TILParser.cpp)
-target_link_libraries(test_TILParser base parser ohmu_til)
+target_link_libraries(test_TILParser base parser ohmu_til tilpasslib)
 add_dependencies(test_TILParser ohmu_grammar)
 

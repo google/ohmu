@@ -20,6 +20,7 @@
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
+#include "til/CFGReducer.h"
 
 #include <iostream>
 
@@ -87,6 +88,9 @@ int main(int argc, const char** argv) {
   for (SExpr* e : *v) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
+    std::cout << "\nCFG:\n";
+    SCFG* cfg = CFGLoweringPass::convertSExprToCFG(e, tilParser.arena());
+    printSExpr(cfg);
   }
   delete v;
 

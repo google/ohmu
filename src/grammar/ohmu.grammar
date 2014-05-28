@@ -25,9 +25,9 @@ literal ::=
 value ::=
     literal
   | "\\" "(" function
-  | "@" x= %TK_Identifier v=value   { (sfunction x v) }
-  | "{" ss=slotList "}"             { (record ss)     }
-  | "[" es=exprList "]"             { (array es)      }
+  | "\\@" x= %TK_Identifier v=value   { (sfunction x v) }
+  | "{" ss=slotList "}"               { (record ss)     }
+  | "[" es=exprList "]"               { (array es)      }
   ;
 
 function ::=

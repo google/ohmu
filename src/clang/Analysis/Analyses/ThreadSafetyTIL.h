@@ -1333,58 +1333,53 @@ private:
 };
 
 
+class SCFG;
 
-class BasicBlock;
 
-// An SCFG is a control-flow graph.  It consists of a set of basic blocks, each
-// of which terminates in a branch to another basic block.  There is one
-// entry point, and one exit point.
-class SCFG : public SExpr {
+class Phi : public SExpr {
 public:
-  typedef SimpleArray<BasicBlock *> BlockArray;
-  typedef BlockArray::iterator iterator;
-  typedef BlockArray::const_iterator const_iterator;
+  // TODO: change to SExprRef
+  typedef SimpleArray<SExpr *> ValArray;
 
-  static bool classof(const SExpr *E) { return E->opcode() == COP_SCFG; }
+  // In minimal SSA form, all Phi nodes are MultiVal.
+  // During conversion to SSA, incomplete Phi nodes may be introduced, which
+  // are later determined to be SingleVal, and are thus redundant.
+  enum Status {
+    PH_MultiVal = 0, // Phi node has multiple distinct values.  (Normal)
+    PH_SingleVal,    // Phi node has one distinct value, and can be eliminated
+    PH_Incomplete    // Phi node is incomplete
+  };
 
-  SCFG(MemRegionRef A, unsigned Nblocks)
-      : SExpr(COP_SCFG), Blocks(A, Nblocks),
-        Entry(nullptr), Exit(nullptr) {}
-  SCFG(const SCFG &Cfg, BlockArray &&Ba) // steals memory from Ba
-      : SExpr(COP_SCFG), Blocks(std::move(Ba)), Entry(nullptr), Exit(nullptr) {
-    // TODO: set entry and exit!
-  }
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
 
-  iterator begin() { return Blocks.begin(); }
-  iterator end() { return Blocks.end(); }
+  Phi() : SExpr(COP_Phi) {}
+  Phi(MemRegionRef A, unsigned Nvals) : SExpr(COP_Phi), Values(A, Nvals) {}
+  Phi(const Phi &P, ValArray &&Vs)    : SExpr(P), Values(std::move(Vs)) {}
 
-  const_iterator begin() const { return cbegin(); }
-  const_iterator end() const { return cend(); }
+  const ValArray &values() const { return Values; }
+  ValArray &values() { return Values; }
 
-  const_iterator cbegin() const { return Blocks.cbegin(); }
-  const_iterator cend() const { return Blocks.cend(); }
-
-  const BasicBlock *entry() const { return Entry; }
-  BasicBlock *entry() { return Entry; }
-  const BasicBlock *exit() const { return Exit; }
-  BasicBlock *exit() { return Exit; }
-
-  void add(BasicBlock *BB);
-  void setEntry(BasicBlock *BB) { Entry = BB; }
-  void setExit(BasicBlock *BB) { Exit = BB; }
+  Status status() const { return static_cast<Status>(Flags); }
+  void setStatus(Status s) { Flags = s; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx);
+  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
+    typename V::template Container<typename V::R_SExpr>
+      Nvs(Vs, Values.size());
 
-  template <class C> typename C::CType compare(SCFG *E, C &Cmp) {
-    // TODO -- implement CFG comparisons
+    for (auto *Val : Values) {
+      Nvs.push_back( Vs.traverse(Val, Vs.subExprCtx(Ctx)) );
+    }
+    return Vs.reducePhi(*this, Nvs);
+  }
+
+  template <class C> typename C::CType compare(Phi *E, C &Cmp) {
+    // TODO: implement CFG comparisons
     return Cmp.comparePointers(this, E);
   }
 
 private:
-  BlockArray Blocks;
-  BasicBlock *Entry;
-  BasicBlock *Exit;
+  ValArray Values;
 };
 
 
@@ -1403,6 +1398,11 @@ public:
   explicit BasicBlock(MemRegionRef A, BasicBlock* P = nullptr)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
         Parent(P), Terminator(nullptr)
+  { }
+  BasicBlock(BasicBlock &B, VarArray &&As, VarArray &&Is, SExpr *T)
+      : SExpr(COP_BasicBlock), Arena(B.Arena), CFGPtr(nullptr), BlockID(0),
+        Parent(nullptr), Args(std::move(As)), Instrs(std::move(Is)),
+        Terminator(T)
   { }
 
   unsigned blockID() const { return BlockID; }
@@ -1426,9 +1426,9 @@ public:
   const SExpr *terminator() const { return Terminator.get(); }
   SExpr *terminator() { return Terminator.get(); }
 
-  void setBlockID(unsigned i) { BlockID = i; }
-  void setParent(BasicBlock *P) { Parent = P; }
-  void setTerminator(SExpr *E) { Terminator.reset(E); }
+  void setBlockID(unsigned i)   { BlockID = i; }
+  void setParent(BasicBlock *P) { Parent = P;  }
+  void setTerminator(SExpr *E)  { Terminator.reset(E); }
 
   // Add a new argument.  V must define a phi-node.
   void addArgument(Variable *V) {
@@ -1453,6 +1453,8 @@ public:
   // Reserve space for NumPreds predecessors, including space in phi nodes.
   void reservePredecessors(unsigned NumPreds);
 
+  // Set id numbers for variables.
+  void renumberVars();
 
   template <class V>
   typename V::R_BasicBlock traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1501,70 +1503,82 @@ private:
 };
 
 
-inline void SCFG::add(BasicBlock *BB) {
-  assert(BB->CFGPtr == nullptr || BB->CFGPtr == this);
-  BB->setBlockID(Blocks.size());
-  BB->CFGPtr = this;
-  Blocks.push_back(BB);
-}
-
-
-template <class V>
-typename V::R_SExpr SCFG::traverse(V &Vs, typename V::R_Ctx Ctx) {
-  Vs.enterCFG(*this);
-  typename V::template Container<BasicBlock *> Bbs(Vs, Blocks.size());
-  for (auto *B : Blocks) {
-    Bbs.push_back( B->traverse(Vs, Vs.subExprCtx(Ctx)) );
-  }
-  Vs.exitCFG(*this);
-  return Vs.reduceSCFG(*this, Bbs);
-}
-
-
-class Phi : public SExpr {
+// An SCFG is a control-flow graph.  It consists of a set of basic blocks, each
+// of which terminates in a branch to another basic block.  There is one
+// entry point, and one exit point.
+class SCFG : public SExpr {
 public:
-  // TODO: change to SExprRef
-  typedef SimpleArray<SExpr *> ValArray;
+  typedef SimpleArray<BasicBlock *> BlockArray;
+  typedef BlockArray::iterator iterator;
+  typedef BlockArray::const_iterator const_iterator;
 
-  // In minimal SSA form, all Phi nodes are MultiVal.
-  // During conversion to SSA, incomplete Phi nodes may be introduced, which
-  // are later determined to be SingleVal, and are thus redundant.
-  enum Status {
-    PH_MultiVal = 0, // Phi node has multiple distinct values.  (Normal)
-    PH_SingleVal,    // Phi node has one distinct value, and can be eliminated
-    PH_Incomplete    // Phi node is incomplete
-  };
+  static bool classof(const SExpr *E) { return E->opcode() == COP_SCFG; }
 
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
+  SCFG(MemRegionRef A, unsigned Nblocks)
+    : SExpr(COP_SCFG), Arena(A), Blocks(A, Nblocks),
+      Entry(nullptr), Exit(nullptr) {
+    Entry = new (A) BasicBlock(A, nullptr);
+    Exit  = new (A) BasicBlock(A, Entry);
+    auto *V = new (A) Variable(new (A) Phi());
+    Exit->addArgument(V);
+    add(Entry);
+    add(Exit);
+  }
+  SCFG(const SCFG &Cfg, BlockArray &&Ba) // steals memory from Ba
+      : SExpr(COP_SCFG), Arena(Cfg.Arena), Blocks(std::move(Ba)),
+        Entry(nullptr), Exit(nullptr) {
+    // TODO: set entry and exit!
+  }
 
-  Phi(MemRegionRef A, unsigned Nvals) : SExpr(COP_Phi), Values(A, Nvals) {}
-  Phi(const Phi &P, ValArray &&Vs)
-      : SExpr(COP_Phi), Values(std::move(Vs)) {}
+  iterator begin() { return Blocks.begin(); }
+  iterator end() { return Blocks.end(); }
 
-  const ValArray &values() const { return Values; }
-  ValArray &values() { return Values; }
+  const_iterator begin() const { return cbegin(); }
+  const_iterator end() const { return cend(); }
 
-  Status status() const { return static_cast<Status>(Flags); }
-  void setStatus(Status s) { Flags = s; }
+  const_iterator cbegin() const { return Blocks.cbegin(); }
+  const_iterator cend() const { return Blocks.cend(); }
+
+  const BasicBlock *entry() const { return Entry; }
+  BasicBlock *entry() { return Entry; }
+  const BasicBlock *exit() const { return Exit; }
+  BasicBlock *exit() { return Exit; }
+
+  inline void add(BasicBlock *BB) {
+    assert(BB->CFGPtr == nullptr || BB->CFGPtr == this);
+    BB->setBlockID(Blocks.size());
+    BB->CFGPtr = this;
+    Blocks.reserveCheck(1, Arena);
+    Blocks.push_back(BB);
+  }
+
+  void setEntry(BasicBlock *BB) { Entry = BB; }
+  void setExit(BasicBlock *BB)  { Exit = BB;  }
+
+  // Set varable ids in all blocks.
+  void renumberVars();
 
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    typename V::template Container<typename V::R_SExpr>
-      Nvs(Vs, Values.size());
-
-    for (auto *Val : Values) {
-      Nvs.push_back( Vs.traverse(Val, Vs.subExprCtx(Ctx)) );
+    Vs.enterCFG(*this);
+    typename V::template Container<BasicBlock *> Bbs(Vs, Blocks.size());
+    for (auto *B : Blocks) {
+      Bbs.push_back( B->traverse(Vs, Vs.subExprCtx(Ctx)) );
     }
-    return Vs.reducePhi(*this, Nvs);
+    Vs.exitCFG(*this);
+    return Vs.reduceSCFG(*this, Bbs);
   }
 
-  template <class C> typename C::CType compare(Phi *E, C &Cmp) {
-    // TODO: implement CFG comparisons
+  template <class C> typename C::CType compare(SCFG *E, C &Cmp) {
+    // TODO -- implement CFG comparisons
     return Cmp.comparePointers(this, E);
   }
 
 private:
-  ValArray Values;
+  MemRegionRef Arena;
+  BlockArray   Blocks;
+  BasicBlock   *Entry;
+  BasicBlock   *Exit;
 };
 
 
