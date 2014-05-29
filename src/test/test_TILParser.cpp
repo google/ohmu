@@ -28,7 +28,10 @@ using namespace ohmu;
 using namespace ohmu::parsing;
 using namespace clang::threadSafety;
 
-class TILPrinter : public til::PrettyPrinter<TILPrinter, std::ostream> {};
+class TILPrinter : public til::PrettyPrinter<TILPrinter, std::ostream> {
+public:
+  TILPrinter() : PrettyPrinter(false, false) { }
+};
 
 void printSExpr(til::SExpr* e) {
   TILPrinter::print(e, std::cout);

@@ -1,1 +1,6 @@
 
+let a = 1;
+let b = a+a;
+let c = b*b + a*b + 1;
+let d = if (b == c) then b*a else c*a;
+if (d == c) then d*a else (d+d)*a;

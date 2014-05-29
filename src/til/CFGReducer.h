@@ -31,6 +31,46 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
+class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
+public:
+  TILDebugPrinter() : PrettyPrinter(false, false) { }
+};
+
+
+
+class VarContext {
+public:
+  VarContext() { }
+
+  SExpr* lookup(StringRef S) {
+    for (unsigned i=0,n=Vars.size(); i < n; ++i) {
+      Variable* V = Vars[n-i-1];
+      if (V->name() == S)
+        return V;
+    }
+    return nullptr;
+  }
+
+  void push(Variable *V) {
+    Vars.push_back(V);
+  }
+
+  void pop() {
+    Vars.pop_back();
+  }
+
+  VarContext* clone() {
+    return new VarContext(Vars);
+  }
+
+private:
+  VarContext(const std::vector<Variable*>& Vs) : Vars(Vs) { }
+
+  std::vector<Variable*> Vars;
+};
+
+
+
 class CFGReducerBase {
 public:
   enum TraversalKind {
@@ -147,41 +187,41 @@ public:
   }
 
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) Apply(Orig, E0, addLetVar(E1));
+    return new (Arena) Apply(Orig, E0, E1);
   }
   R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) SApply(Orig, addLetVar(E0), addLetVar(E1));
+    return new (Arena) SApply(Orig, E0, E1);
   }
   R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
     return new (Arena) Project(Orig, E0);
   }
   R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
-    return new (Arena) Call(Orig, E0);
+    return addLetVar(new (Arena) Call(Orig, E0));
   }
 
   R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
-    return new (Arena) Alloc(Orig, addLetVar(E0));
+    return addLetVar(new (Arena) Alloc(Orig, E0));
   }
   R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
-    return new (Arena) Load(Orig, addLetVar(E0));
+    return addLetVar(new (Arena) Load(Orig, E0));
   }
   R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) Store(Orig, addLetVar(E0), addLetVar(E1));
+    return addLetVar(new (Arena) Store(Orig, E0, E1));
   }
   R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) ArrayIndex(Orig, addLetVar(E0), addLetVar(E1));
+    return addLetVar(new (Arena) ArrayIndex(Orig, E0, E1));
   }
   R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) ArrayAdd(Orig, addLetVar(E0), addLetVar(E1));
+    return addLetVar(new (Arena) ArrayAdd(Orig, E0, E1));
   }
   R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
-    return new (Arena) UnaryOp(Orig, addLetVar(E0));
+    return addLetVar(new (Arena) UnaryOp(Orig, E0));
   }
   R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) BinaryOp(Orig, addLetVar(E0), addLetVar(E1));
+    return addLetVar(new (Arena) BinaryOp(Orig, E0, E1));
   }
   R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
-    return new (Arena) Cast(Orig, addLetVar(E0));
+    return addLetVar(new (Arena) Cast(Orig, E0));
   }
 
   R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> &Bbs) {
@@ -203,13 +243,21 @@ public:
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
+    SExpr* E = varCtx.lookup(Orig.name());
+    // TODO: emit warning on name-not-found.
+    if (E)
+      return E;
     return new (Arena) Identifier(Orig);
   }
   R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
+
     return new (Arena) IfThenElse(Orig, C, T, E);
   }
   R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
-    return new (Arena) Let(Orig, Nvd, B);
+    if (currentCFG)
+      return B;   // eliminate the let
+    else
+      return new (Arena) Let(Orig, Nvd, B);
   }
 
   // We have to trap IfThenElse on the traverse rather than reduce, since it
@@ -220,8 +268,7 @@ public:
       return E->traverse(*this->self(), Ctx);
     }
 
-    SExpr* Nc = addLetVar(
-      this->self()->traverse(E->condition(), subExprCtx(Ctx)) );
+    SExpr* Nc = this->self()->traverse(E->condition(), subExprCtx(Ctx));
 
     // Create new basic blocks for then and else.
     BasicBlock *Ntb = new (Arena) BasicBlock(Arena, currentBB);
@@ -257,14 +304,26 @@ public:
     return NcbArg;
   }
 
-
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
-    Variable* Nv = new (Arena) Variable(Orig, E0);
+    Variable *Nv;
+    if (currentInstrs.size() > 0 && currentInstrs.back() == E0) {
+      Nv = static_cast<Variable*>(E0);
+      Nv->setName(Orig.name());
+    } else {
+      Nv = new (Arena) Variable(Orig, E0);
+      if (currentBB && Nv->kind() == Variable::VK_Let)
+        currentInstrs.push_back(Nv);
+    }
+    if (Nv->name().length() > 0)
+      varCtx.push(Nv);
     return Nv;
   }
+
   // Exit the lexical scope of orig.
-  void exitScope(const Variable &Orig) {}
+  void exitScope(const Variable &Orig) {
+    varCtx.pop();
+  }
 
   void enterCFG(SCFG &Cfg) {}
   void exitCFG(SCFG &Cfg) {}
@@ -302,8 +361,9 @@ protected:
     assert(currentBB->instructions().size() == 0);
 
     currentBB->instructions().reserve(currentInstrs.size(), Arena);
-    currentBB->instructions().append(currentInstrs.begin(),
-                                     currentInstrs.end());
+    for (Variable *V : currentInstrs) {
+      currentBB->addInstruction(V);
+    }
     currentBB->setTerminator(Term);
     currentArgs.clear();
     currentInstrs.clear();
@@ -316,7 +376,6 @@ protected:
     assert(currentBB);
     assert(Target->arguments().size() > 0);
 
-    Result = addLetVar(Result);
     unsigned Idx = Target->addPredecessor(currentBB);
     Variable *V = Target->arguments()[0];
     if (Phi *Ph = dyn_cast<Phi>(V->definition())) {
@@ -331,6 +390,8 @@ protected:
      : CFGReducerBase(A), currentCFG(nullptr), currentBB(nullptr) {}
 
 protected:
+  VarContext varCtx;
+
   SCFG*       currentCFG;                 // the current SCFG
   BasicBlock* currentBB;                  // the current basic block
   std::vector<Variable*> currentArgs;     // arguments in currentBB.
