@@ -35,9 +35,9 @@ unsigned FileStream::fillBuffer(char* buf, unsigned size) {
 }
 
 
+#ifndef _MSC_VER
 bool InteractiveStream::readlineLibraryInitialized_ = false;
 
-#ifndef _MSC_VER
 InteractiveStream::InteractiveStream(const char* p1, const char* p2)
     : prompt1_(p1), prompt2_(p2), firstLine_(true) {
   if (!readlineLibraryInitialized_) {

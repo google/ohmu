@@ -43,6 +43,7 @@
 #define OHMU_AST_NODE_H
 
 #include <iostream>
+#include <string>
 
 #include "base/Util.h"
 
