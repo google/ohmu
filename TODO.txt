@@ -1,0 +1,44 @@
+
+This is a list of bugs and missing functionality that needs to be fixed in
+the near term.
+
+Front-end
+=========
+
+(p1) Fix parsing of floats, strings, and integer literals of different widths.
+(p1) Report position of syntax errors.
+
+(p2) Better recovery after parse errors.
+
+
+Middle-end
+==========
+
+(p1) Finish missing cases in rewriting pass:
+     + CFG -> CFG rewriting
+     + rewriting in non-CFG contexts (type expressions) and nested CFGs.
+(p1) Add variables and conversion to SSA.
+(p1) Add loops.
+(p1) Add CFG simplification & cleanup pass (unused phi, dup vars, empty BBs)
+(p1) Add records, slots, and inheritance.
+(p1) Add arithmetic up-conversions and type-checking.
+(p1) Calculate numUses and distance metric for variables.
+
+(p2) Add initial type-checking pass.
+(p2) Implement lazy rewriting.
+(p2) Implement partial evaluator.
+
+
+Back-end
+=========
+
+(p1) Find and solve constraints.
+(p1) Register allocation.
+(p1) Emit x86 instructions for CFG.
+(p1) JIT-compiler. (Create code page, emit instructions to code page, and run.)
+
+
+Misc
+====
+
+(p1) Make test infrastructure to automatically run tests.
