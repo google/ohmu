@@ -160,6 +160,16 @@ void DefaultLexer::readInteger(char startChar) {
 }
 
 
+void DefaultLexer::readHexInteger() {
+  char c = lookChar();
+  while (isDigit(c) || isHexDigit(c)) {
+    putChar(c);
+    skipChar();
+    c = lookChar();
+  }
+}
+
+
 void DefaultLexer::readOperator(char startChar) {
   char c = startChar;
   do {
@@ -233,6 +243,27 @@ bool DefaultLexer::readString() {
   skipChar();  // skip trailing '"'
   return true;
 }
+
+
+bool DefaultLexer::readFloatExp(char startChar) {
+  putChar(startChar);  // put 'e' or 'E'
+  skipChar();
+
+  char c = lookChar();
+  if (c == '+' || c == '-') {
+    putChar(c);
+    skipChar();
+  } else
+    return false;
+
+  c = lookChar();
+  if (isDigit(c)) {
+    readInteger(c);
+    return true;
+  }
+  return false;
+}
+
 
 
 bool DefaultLexer::readCharacter() {
@@ -352,9 +383,38 @@ Token DefaultLexer::readToken() {
 
   // numbers
   if (isDigit(c)) {
+    if (c == '0' && lookChar(1) == 'x') {
+      putChar('0');
+      skipChar();
+      putChar('x');
+      skipChar();
+      readHexInteger();
+      StringRef str = copyStr(finishToken());
+      return Token(TK_LitInteger, str, sloc);
+    }
+
     readInteger(c);
-    StringRef str = copyStr(finishToken());
-    return Token(TK_LitInteger, str, sloc);
+    char c2 = lookChar();
+    if (c2 == '.') {
+      readInteger(c2);
+      c2 = lookChar();
+      if (c2 == 'e' || c2 == 'E') {
+        if (!readFloatExp(c2))
+          signalLexicalError();
+      }
+      StringRef str = copyStr(finishToken());
+      return Token(TK_LitFloat, str, sloc);
+    }
+    else if (c2 == 'e' || c2 == 'E') {
+      if (!readFloatExp(c2))
+        signalLexicalError();
+      StringRef str = copyStr(finishToken());
+      return Token(TK_LitFloat, str, sloc);
+    }
+    else {
+      StringRef str = copyStr(finishToken());
+      return Token(TK_LitInteger, str, sloc);
+    }
   }
 
   // characters

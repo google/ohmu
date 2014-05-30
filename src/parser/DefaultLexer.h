@@ -80,12 +80,14 @@ public:
 
   void readIdentifier(char startChar);
   void readInteger   (char startChar);
+  void readHexInteger();
   void readOperator  (char startChar);
 
   void readLineComment();
   bool readEscapeCharacter(char c);
   bool readString();
   bool readCharacter();
+  bool readFloatExp(char startChar);
 
   StringRef copyStr(StringRef s) {
     char* mem = static_cast<char*>(stringArena_.allocate(s.length()+1));

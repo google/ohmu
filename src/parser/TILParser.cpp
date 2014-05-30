@@ -123,7 +123,7 @@ bool TILParser::toBool(StringRef s) {
 }
 
 char TILParser::toChar(StringRef s) {
-  return s.c_str()[1];  // skip past leading quote
+  return s.c_str()[0];
 }
 
 int TILParser::toInteger(StringRef s) {
@@ -143,7 +143,7 @@ double TILParser::toDouble(StringRef s) {
 }
 
 StringRef TILParser::toString(StringRef s) {
-  return copyStr(StringRef(s.c_str()+1, s.length()-2));  // drop the quotes.
+  return copyStr(s);  // Lexer has already stripped the ""
 }
 
 
