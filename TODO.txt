@@ -5,7 +5,7 @@ the near term.
 Front-end
 =========
 
-(p1) Fix parsing of floats, strings, and integer literals of different widths.
+(p1) Parsing of float and integer literals of different widths.
 (p1) Report position of syntax errors.
 
 (p2) Better recovery after parse errors.
