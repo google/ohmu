@@ -99,8 +99,8 @@ public:
   }
 
   virtual ~Lexer() {
-    if (buffer_)      delete buffer_;
-    if (tokenBuffer_) delete tokenBuffer_;
+    if (buffer_)      delete[] buffer_;
+    if (tokenBuffer_) delete[] tokenBuffer_;
   }
 
   // Defined by derived classes to register supported tokens

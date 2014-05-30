@@ -237,6 +237,9 @@ public:
   ParseNamedDefinition(std::string name, ParseRule* r = nullptr)
     : ParseRule(PR_NamedDefinition), name_(std::move(name)), rule_(r)
   { }
+  ~ParseNamedDefinition() {
+    if (rule_) delete rule_;
+  }
 
   bool       init(Parser& parser) override;
   bool       accepts(const Token& tok) override;
@@ -303,6 +306,9 @@ public:
   ParseAction(ast::ASTNode *n)
     : ParseRule(PR_Action), node_(n), drop_(0)
   { }
+  ~ParseAction() {
+    if (node_) delete node_;
+  }
 
   bool       init(Parser& parser) override;
   bool       accepts(const Token& tok) override;
@@ -576,7 +582,10 @@ class Parser {
 public:
   // Create a new parser.
   Parser(Lexer* lexer) : lexer_(lexer) { }
-  virtual ~Parser() { }
+  virtual ~Parser() {
+    for (auto *d : definitions_)
+      if (d) delete d;
+  }
 
   // Override this to look up the opcode for a string.
   virtual unsigned lookupOpcode(const std::string &s) = 0;

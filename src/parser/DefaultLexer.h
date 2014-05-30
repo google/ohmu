@@ -34,6 +34,8 @@
 #ifndef OHMU_DEFAULTLEXER_H
 #define OHMU_DEFAULTLEXER_H
 
+#include "base/MemRegion.h"
+
 #include "Token.h"
 #include "Lexer.h"
 
@@ -70,7 +72,9 @@ class DefaultLexer : public Lexer {
 public:
   DefaultLexer() : interactive_(false) {
     setKeywordStartID(TK_BeginKeywordIDs);
+    stringArena_.setRegion(&stringRegion_);
   }
+  DefaultLexer(const DefaultLexer& l) = delete;
 
   void readNewline(char c);
 
@@ -84,7 +88,7 @@ public:
   bool readCharacter();
 
   StringRef copyStr(StringRef s) {
-    char* mem = reinterpret_cast<char*>(allocate(s.length()+1));
+    char* mem = static_cast<char*>(stringArena_.allocate(s.length()+1));
     return copyStringRef(mem, s);
   }
 
@@ -97,10 +101,8 @@ public:
   inline void setInteractive(bool b) { interactive_ = b; }
 
 private:
-  void* allocate(unsigned i) {
-    // FIXME: use arena.
-    return malloc(i);
-  }
+  MemRegion    stringRegion_;   // Region to allocate all token strings
+  MemRegionRef stringArena_;
 
   bool interactive_;
 };

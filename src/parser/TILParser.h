@@ -82,8 +82,8 @@ public:
 
   TILParser(Lexer *lexer) : Parser(lexer) {
     initMap();
-    stringArena_.setRegion(&region_);
     arena_.setRegion(&region_);
+    stringArena_.setRegion(&stringRegion_);
   }
   ~TILParser() { }
 
@@ -110,8 +110,9 @@ public:
 
 private:
    MemRegion    region_;
-   MemRegionRef stringArena_;  // permanent arena for strings.
    MemRegionRef arena_;
+   MemRegion    stringRegion_;
+   MemRegionRef stringArena_;
 
    std::unordered_map<std::string, unsigned> opcodeMap_;
    std::unordered_map<std::string, unsigned> unaryOpcodeMap_;

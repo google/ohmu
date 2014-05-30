@@ -289,10 +289,8 @@ public:
       : ASTNode(AST_Append), list_(l), item_(i)
   { }
   ~Append() {
-    if (list_)
-      delete list_;
-    if (item_)
-      delete item_;
+    if (list_) delete list_;
+    if (item_) delete item_;
   }
 
   ASTNode* list() { return list_; }
