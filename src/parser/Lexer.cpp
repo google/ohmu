@@ -18,8 +18,10 @@
 #include <cstdlib>
 #include <iostream>
 
+#ifndef _MSC_VER
 #include <readline/readline.h>
 #include <readline/history.h>
+#endif
 
 #include "Lexer.h"
 
@@ -35,7 +37,7 @@ unsigned FileStream::fillBuffer(char* buf, unsigned size) {
 
 bool InteractiveStream::readlineLibraryInitialized_ = false;
 
-
+#ifndef _MSC_VER
 InteractiveStream::InteractiveStream(const char* p1, const char* p2)
     : prompt1_(p1), prompt2_(p2), firstLine_(true) {
   if (!readlineLibraryInitialized_) {
@@ -66,6 +68,7 @@ unsigned InteractiveStream::fillBuffer(char* buf, unsigned size) {
   firstLine_ = false;
   return i;
 }
+#endif
 
 
 // Look up the token id for the token named s.

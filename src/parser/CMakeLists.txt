@@ -12,4 +12,8 @@ add_library(parser STATIC
   TILParser.cpp
 )
 
-target_link_libraries(parser base readline)
+target_link_libraries(parser base)
+
+if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+target_link_libraries(parser readline)
+endif()

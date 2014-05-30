@@ -65,6 +65,7 @@ private:
 };
 
 
+#ifndef _MSC_VER
 // Reads a stream of characters from standard input, using the readline library.
 class InteractiveStream : public CharStream {
 public:
@@ -81,6 +82,7 @@ private:
   const char* prompt2_;
   bool firstLine_;
 };
+#endif
 
 
 // Base class for lexers.
