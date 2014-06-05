@@ -26,6 +26,7 @@
 #ifndef OHMU_THREAD_SAFETY_UTIL_H
 #define OHMU_THREAD_SAFETY_UTIL_H
 
+#include "base/DenseMap.h"
 #include "base/MemRegion.h"
 #include "base/SimpleArray.h"
 #include "base/Util.h"

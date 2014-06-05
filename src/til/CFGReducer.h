@@ -124,12 +124,12 @@ class CFGReducer : public Traversal<Self, CFGReducerBase>,
                    public CFGReducerBase {
 public:
   SCFG* convertToCFG(SExpr *E) {
-    assert(currentCFG == nullptr && currentBB == nullptr);
-    currentCFG = new (Arena) SCFG(Arena, 0);
-    currentBB = currentCFG->entry();
-    traverse(E, Context(TRV_Normal, currentCFG->exit()));
-    currentCFG->renumberVars();
-    return currentCFG;
+    assert(currentCFG_ == nullptr && currentBB_ == nullptr);
+    currentCFG_ = new (Arena) SCFG(Arena, 0);
+    currentBB_ = currentCFG_->entry();
+    traverse(E, Context(TRV_Normal, currentCFG_->exit()));
+    currentCFG_->renumberVars();
+    return currentCFG_;
   }
 
   R_SExpr traverse(SExprRef &E, R_Ctx Ctx) {
@@ -143,7 +143,7 @@ public:
     R_SExpr Result = this->self()->traverseByCase(E, Ctx);
     if (!Ctx.Continuation)
       return Result;  // No continuation.  Continue with current basic block.
-    if (!currentBB)
+    if (!currentBB_)
       return Result;  // No current basic block.  Rewrite expressions in place.
     terminateWithGoto(Result, Ctx.Continuation);
     return nullptr;
@@ -243,27 +243,25 @@ public:
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
-    SExpr* E = varCtx.lookup(Orig.name());
+    SExpr* E = varCtx_.lookup(Orig.name());
     // TODO: emit warning on name-not-found.
     if (E)
       return E;
     return new (Arena) Identifier(Orig);
   }
-  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
 
-    return new (Arena) IfThenElse(Orig, C, T, E);
-  }
   R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
-    if (currentCFG)
+    if (currentCFG_)
       return B;   // eliminate the let
     else
       return new (Arena) Let(Orig, Nvd, B);
   }
 
+
   // We have to trap IfThenElse on the traverse rather than reduce, since it
   // the then/else expressions must be evaluated in different basic blocks.
   R_SExpr traverseIfThenElse(IfThenElse *E, Context Ctx) {
-    if (!currentBB) {
+    if (!currentBB_) {
       // Just do a normal traversal if we're not currently rewriting in a CFG.
       return E->traverse(*this->self(), Ctx);
     }
@@ -271,21 +269,21 @@ public:
     SExpr* Nc = this->self()->traverse(E->condition(), subExprCtx(Ctx));
 
     // Create new basic blocks for then and else.
-    BasicBlock *Ntb = new (Arena) BasicBlock(Arena, currentBB);
-    BasicBlock *Neb = new (Arena) BasicBlock(Arena, currentBB);
+    BasicBlock *Ntb = new (Arena) BasicBlock(Arena, currentBB_);
+    BasicBlock *Neb = new (Arena) BasicBlock(Arena, currentBB_);
 
     // Create a continuation if we don't already have one.
     BasicBlock *Ncb = Ctx.Continuation;
     Variable *NcbArg = nullptr;
     if (!Ncb) {
-      Ncb = new (Arena) BasicBlock(Arena, currentBB);
+      Ncb = new (Arena) BasicBlock(Arena, currentBB_);
       NcbArg = new (Arena) Variable(new (Arena) Phi());
       Ncb->addArgument(NcbArg);
     }
 
     // Terminate current basic block with a branch
-    unsigned IdxT = Ntb->addPredecessor(currentBB);
-    unsigned IdxE = Neb->addPredecessor(currentBB);
+    unsigned IdxT = Ntb->addPredecessor(currentBB_);
+    unsigned IdxE = Neb->addPredecessor(currentBB_);
     SExpr *Nt = new (Arena) Branch(Nc, Ntb, Neb, IdxT, IdxE);
     terminateCurrentBB(Nt);
 
@@ -304,25 +302,31 @@ public:
     return NcbArg;
   }
 
+  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
+    return new (Arena) IfThenElse(Orig, C, T, E);
+  }
+
+
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
     Variable *Nv;
-    if (currentInstrs.size() > 0 && currentInstrs.back() == E0) {
+    if (currentInstrs_.size() > 0 && currentInstrs_.back() == E0) {
       Nv = static_cast<Variable*>(E0);
       Nv->setName(Orig.name());
     } else {
       Nv = new (Arena) Variable(Orig, E0);
-      if (currentBB && Nv->kind() == Variable::VK_Let)
-        currentInstrs.push_back(Nv);
+      if (currentBB_ && Nv->kind() == Variable::VK_Let)
+        currentInstrs_.push_back(Nv);
     }
+
     if (Nv->name().length() > 0)
-      varCtx.push(Nv);
+      varCtx_.push(Nv);
     return Nv;
   }
 
   // Exit the lexical scope of orig.
   void exitScope(const Variable &Orig) {
-    varCtx.pop();
+    varCtx_.pop();
   }
 
   void enterCFG(SCFG &Cfg) {}
@@ -338,45 +342,45 @@ public:
 
 protected:
   SExpr* addLetVar(SExpr* E) {
-    if (!currentBB || !E || ThreadSafetyTIL::isTrivial(E))
+    if (!currentBB_ || !E || ThreadSafetyTIL::isTrivial(E))
       return E;
     Variable* Nv = new (Arena) Variable(E);
-    currentInstrs.push_back(Nv);
+    currentInstrs_.push_back(Nv);
     return Nv;
   }
 
   // Start a new basic block, and traverse E.
   void startBB(BasicBlock *BB) {
-    assert(currentBB == nullptr);
-    assert(currentArgs.empty());
-    assert(currentInstrs.empty());
+    assert(currentBB_ == nullptr);
+    assert(currentArgs_.empty());
+    assert(currentInstrs_.empty());
 
-    currentBB = BB;
-    currentCFG->add(BB);
+    currentBB_ = BB;
+    currentCFG_->add(BB);
   }
 
   // Finish the current basic block, terminating it with Term.
   void terminateCurrentBB(SExpr* Term) {
-    assert(currentBB);
-    assert(currentBB->instructions().size() == 0);
+    assert(currentBB_);
+    assert(currentBB_->instructions().size() == 0);
 
-    currentBB->instructions().reserve(currentInstrs.size(), Arena);
-    for (Variable *V : currentInstrs) {
-      currentBB->addInstruction(V);
+    currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
+    for (Variable *V : currentInstrs_) {
+      currentBB_->addInstruction(V);
     }
-    currentBB->setTerminator(Term);
-    currentArgs.clear();
-    currentInstrs.clear();
-    currentBB = nullptr;
+    currentBB_->setTerminator(Term);
+    currentArgs_.clear();
+    currentInstrs_.clear();
+    currentBB_ = nullptr;
   }
 
   // If the current basic block exists, terminate it with a goto to the
   // target continuation.  Result is passed as an argument to the continuation.
   void terminateWithGoto(SExpr* Result, BasicBlock *Target) {
-    assert(currentBB);
+    assert(currentBB_);
     assert(Target->arguments().size() > 0);
 
-    unsigned Idx = Target->addPredecessor(currentBB);
+    unsigned Idx = Target->addPredecessor(currentBB_);
     Variable *V = Target->arguments()[0];
     if (Phi *Ph = dyn_cast<Phi>(V->definition())) {
       Ph->values()[Idx] = Result;
@@ -387,15 +391,16 @@ protected:
   }
 
   CFGReducer(MemRegionRef A)
-     : CFGReducerBase(A), currentCFG(nullptr), currentBB(nullptr) {}
+     : CFGReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr) {}
 
 protected:
-  VarContext varCtx;
+  VarContext varCtx_;
+  DenseMap<Variable*, Variable*> varMap_;
 
-  SCFG*       currentCFG;                 // the current SCFG
-  BasicBlock* currentBB;                  // the current basic block
-  std::vector<Variable*> currentArgs;     // arguments in currentBB.
-  std::vector<Variable*> currentInstrs;   // instructions in currentBB.
+  SCFG*       currentCFG_;                 // the current SCFG
+  BasicBlock* currentBB_;                  // the current basic block
+  std::vector<Variable*> currentArgs_;     // arguments in currentBB.
+  std::vector<Variable*> currentInstrs_;   // instructions in currentBB.
 };
 
 
