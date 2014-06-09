@@ -1427,6 +1427,9 @@ public:
   const BasicBlock *parent() const { return Parent; }
   BasicBlock *parent() { return Parent; }
 
+  const BasicBlock *immediateDominator() const { return ImmediateDominator; }
+  BasicBlock *immediateDominator() { return ImmediateDominator; }
+
   const VarArray &arguments() const { return Args; }
   VarArray &arguments() { return Args; }
 
@@ -1440,7 +1443,8 @@ public:
   SExpr *terminator() { return Terminator.get(); }
 
   void setBlockID(unsigned i)   { BlockID = i; }
-  void setParent(BasicBlock *P) { Parent = P;  }
+  void setParent(BasicBlock *P) { Parent = P; }
+  void setImmediateDominator(BasicBlock *BB) { ImmediateDominator = BB; }
   void setTerminator(SExpr *E)  { Terminator.reset(E); }
 
   // Add a new argument.  V must define a phi-node.
@@ -1515,6 +1519,7 @@ private:
 
   SCFG       *CFGPtr;       // The CFG that contains this block.
   unsigned   BlockID;       // unique id for this BB in the containing CFG
+  BasicBlock *ImmediateDominator; // The immediately dominating block;
   BasicBlock *Parent;       // The parent block is the enclosing lexical scope.
                             // The parent dominates this block.
   BlockArray Predecessors;  // Predecessor blocks in the CFG.
@@ -1571,6 +1576,38 @@ public:
     BB->CFGPtr = this;
     Blocks.reserveCheck(1, Arena);
     Blocks.push_back(BB);
+  }
+
+  void computeNormalForm() {
+    for (auto i : Blocks)
+      i->setBlockID(0);
+    unsigned BlockID = Blocks.size();
+    // Visit the exit block first to make sure that it goes last.
+    Exit->setBlockID(--BlockID);
+    Blocks[BlockID] = Exit;
+    computeNormalForm(Entry, BlockID);
+  }
+
+  void computeNormalForm(BasicBlock *Block, unsigned &BlockID);
+
+  // Compute dominators assumes that the CFG is in normal form.
+  void computeDominators() {
+    Blocks[0]->setImmediateDominator(nullptr);
+    for (size_t i = 1, e = Blocks.size(); i != e; ++i)
+      computeDominator(Blocks[i]);
+  }
+
+  void computeDominator(BasicBlock *Block) {
+    BasicBlock *Candidate = Block->predecessors()[0];
+    for (size_t i = 1, e = Block->predecessors().size(); i < e; ++i) {
+      BasicBlock *Other = Block->predecessors()[i];
+      while (Candidate != Other)
+        if (Candidate->blockID() > Other->blockID())
+          Candidate = Candidate->immediateDominator();
+        else
+          Other = Other->immediateDominator();
+    }
+    Block->setImmediateDominator(Candidate);
   }
 
   void setEntry(BasicBlock *BB) { Entry = BB; }

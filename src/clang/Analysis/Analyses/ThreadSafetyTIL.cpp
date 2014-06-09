@@ -47,7 +47,6 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
   return "";
 }
 
-
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
@@ -86,6 +85,21 @@ void SCFG::renumberVars() {
   }
 }
 
+void SCFG::computeNormalForm(BasicBlock *Block, unsigned &BlockID) {
+  if (Block->blockID())
+    return;
+  switch (Block->terminator()->opcode()) {
+  case COP_Goto:
+    computeNormalForm(cast<Goto>(Block->terminator())->targetBlock(), BlockID);
+    break;
+  case COP_Branch:
+    computeNormalForm(cast<Branch>(Block->terminator())->thenBlock(), BlockID);
+    computeNormalForm(cast<Branch>(Block->terminator())->elseBlock(), BlockID);
+    break;
+  }
+  Block->setBlockID(--BlockID);
+  Blocks[BlockID] = Block;
+}
 
 
 

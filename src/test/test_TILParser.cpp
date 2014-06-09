@@ -37,7 +37,6 @@ void printSExpr(til::SExpr* e) {
   TILPrinter::print(e, std::cout);
 }
 
-
 int main(int argc, const char** argv) {
   DefaultLexer lexer;
   TILParser tilParser(&lexer);
@@ -57,7 +56,7 @@ int main(int argc, const char** argv) {
 
   fclose(file);
 
-  if (argc == 0)
+  if (argc <= 1)
     return 0;
 
   // Read the ohmu file.
@@ -93,6 +92,8 @@ int main(int argc, const char** argv) {
     printSExpr(e);
     std::cout << "\nCFG:\n";
     SCFG* cfg = CFGLoweringPass::convertSExprToCFG(e, tilParser.arena());
+    cfg->computeNormalForm();
+    cfg->computeDominators();
     printSExpr(cfg);
   }
   delete v;
