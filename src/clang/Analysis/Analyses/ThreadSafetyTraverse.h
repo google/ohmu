@@ -72,6 +72,8 @@ public:
       return self()->traverse##X(cast<X>(E), Ctx);
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
+    default:
+      return self()->reduceNull();
     }
   }
 

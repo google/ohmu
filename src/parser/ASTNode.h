@@ -197,7 +197,6 @@ private:
   std::string opName_;
 };
 
-
 // Construct with a specified arity.
 template <unsigned NElems>
 class ConstructN : public Construct {

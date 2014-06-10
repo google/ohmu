@@ -391,9 +391,9 @@ public:
   unsigned getBlockID() const { return BlockID; }
 
   void setName(StringRef S) { Name = S; }
-  void setID(unsigned Bid, unsigned I) {
-    BlockID = static_cast<unsigned short>(Bid);
-    Id = static_cast<unsigned short>(I);
+  void setID(int BID, int VID) {
+    BlockID = static_cast<unsigned short>(BID);
+    Id = static_cast<unsigned short>(VID);
   }
   void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
   void setDefinition(SExpr *E);
@@ -419,8 +419,8 @@ private:
   SExprRef  Definition;            // The TIL type or definition
   const clang::ValueDecl *Cvdecl;  // The clang declaration for this variable.
 
-  unsigned short BlockID;
-  unsigned short Id;
+  int BlockID;
+  int Id;
   mutable unsigned NumUses;
 };
 
@@ -1479,7 +1479,7 @@ public:
   }
 
   // Set id numbers for variables.
-  void renumberVars();
+  int renumberVars(int id);
 
   template <class V>
   typename V::R_BasicBlock traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1518,7 +1518,7 @@ private:
   MemRegionRef Arena;
 
   SCFG       *CFGPtr;       // The CFG that contains this block.
-  unsigned   BlockID;       // unique id for this BB in the containing CFG
+  int        BlockID;       // unique id for this BB in the containing CFG
   BasicBlock *ImmediateDominator; // The immediately dominating block;
   BasicBlock *Parent;       // The parent block is the enclosing lexical scope.
                             // The parent dominates this block.
@@ -1586,6 +1586,7 @@ public:
     Exit->setBlockID(--BlockID);
     Blocks[BlockID] = Exit;
     computeNormalForm(Entry, BlockID);
+    renumberVars();
   }
 
   void computeNormalForm(BasicBlock *Block, unsigned &BlockID);

@@ -69,20 +69,18 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
   }
 }
 
-void BasicBlock::renumberVars() {
-  unsigned VID = 0;
-  for (Variable *V : Args) {
-    V->setID(BlockID, VID++);
-  }
-  for (Variable *V : Instrs) {
-    V->setID(BlockID, VID++);
-  }
+int BasicBlock::renumberVars(int ID) {
+  for (Variable *V : Args)
+    V->setID(BlockID, ID++);
+  for (Variable *V : Instrs)
+    V->setID(BlockID, ID++);
+  return ID;
 }
 
 void SCFG::renumberVars() {
-  for (BasicBlock *B : Blocks) {
-    B->renumberVars();
-  }
+  int id = 0;
+  for (BasicBlock *B : Blocks)
+    id = B->renumberVars(id);
 }
 
 void SCFG::computeNormalForm(BasicBlock *Block, unsigned &BlockID) {

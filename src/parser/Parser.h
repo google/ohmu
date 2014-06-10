@@ -348,7 +348,7 @@ public:
       : resultKind_(PRS_TokenStr), isList_(false), result_(tok)
   { }
   // Create a user defined AST Node; kinds specifies the kind of node.
-  ParseResult(unsigned short kind, void* node)
+  ParseResult(KindType kind, void* node)
       : resultKind_(kind), isList_(false), result_(node) {
     assert(kind >= PRS_UserDefined && "Invalid kind");
   }

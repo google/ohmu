@@ -8,6 +8,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+  add_definitions(/wd4200) # nonstandard extension used : zero-sized array in struct/union
   add_definitions(/wd4201)
   add_definitions(/wd4291)
 #  add_definitions(/W4 /WX)
