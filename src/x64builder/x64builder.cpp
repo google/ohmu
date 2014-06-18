@@ -22,6 +22,11 @@
 #include <algorithm>
 #include <cassert>
 
+//enum ConditionCode {
+//	O, NO, B, NAE = B, C = B, NB, AE = NB, NC = NB, Z, E = Z, NZ, NE = NZ, BE, NA = BE, NBE, A = NBE,
+//	S, NS, P, PE = P, NP, PO = NP, L, NGE = L, NL, GE = NL, LE, NG = LE, NLE, G = NLE
+//};
+
 namespace {
 typedef unsigned char byte;
 using std::string;
@@ -300,60 +305,94 @@ int operator |(RegCode a, int b) { assert((unsigned)b <= 0xff); return a.code <<
 } // namespace {
 
 int main() {
-  char buffer[4096];
-  size_t num_bytes;
+  //char buffer[4096];
+  //size_t num_bytes;
+  FILE* template_cpp = fopen("template.cpp", "rb");
   FILE* instr_h = fopen("instr.h", "rb");
-  FILE* args_h = fopen("args.h", "rb");
   FILE* f = fopen("x64builder.h", "wb");
-  if (!instr_h || !args_h || !f) {
-    if (instr_h) fclose(instr_h); else fprintf(stderr, "failed to open instr.h\n");
-    if (args_h) fclose(args_h); else fprintf(stderr, "failed to open args.h\n");
-    if (f) fclose(f); else fprintf(stderr, "failed to open x64builder.h\n");
+  if (!instr_h || !template_cpp || !f) {
+    if (instr_h) fclose(instr_h); else fprintf(stderr, "Failed to open instr.h\n");
+    if (template_cpp) fclose(template_cpp); else fprintf(stderr, "Failed to open template.cpp\n");
+    if (f) fclose(f); else fprintf(stderr, "Failed to open x64builder.h\n");
     return 1;
   }
+
+  // Read template.cpp
+  fseek(template_cpp, 0, SEEK_END);
+  auto template_size = ftell(template_cpp);
+  fseek(template_cpp, 0, SEEK_SET);
+  auto template_data = new char[template_size];
+  if (fread(template_data, 1, template_size, template_cpp) != template_size) { fprintf(stderr, "Failed to read all of template.cpp in one call to fread.\n"); return 1; }
+  if (fclose(template_cpp)) { fprintf(stderr, "Failed to properly close template.cpp.\n"); return 1; }
+
+  // Read instr.h
   fseek(instr_h, 0, SEEK_END);
   auto instr_size = ftell(instr_h);
   fseek(instr_h, 0, SEEK_SET);
   auto instr_data = new char[instr_size];
-  fread(instr_data, 1, instr_size, instr_h);
-  fseek(args_h, 0, SEEK_END);
-  auto args_size = ftell(args_h);
-  fseek(args_h, 0, SEEK_SET);
-  auto args_data = new char[args_size];
-  fread(args_data, 1, args_size, args_h);
+  if (fread(instr_data, 1, instr_size, instr_h) != instr_size) { fprintf(stderr, "Failed to read all of instr.h in one call to fread.\n"); return 1; }
+  if (fclose(instr_h)) { fprintf(stderr, "Failed to properly close instr.h.\n"); return 1; }
+
+  static const char INSTR_KEY[] = "#include \"instr.h\"";
+  static const char TABLE_KEY[] = "//#include \"tables.h\"";
+  static const char OPS_KEY[] = "//#include \"ops.h\"";
+  auto insert_instr_h = strstr(template_data, INSTR_KEY);
+  auto insert_table_h = strstr(template_data, TABLE_KEY);
+  auto insert_ops_h = strstr(template_data, OPS_KEY);
+  if (!insert_instr_h) { fprintf(stderr, "Failed to find insertion point '#include \"instr.h\"' in template.cpp.\n"); return 1; }
+  if (!insert_table_h) { fprintf(stderr, "Failed to find insertion point '//#include \"tables.h\"' in template.cpp.\n"); return 1; }
+  if (!insert_ops_h) { fprintf(stderr, "Failed to find insertion point '//#include \"ops.h\"' in template.cpp.\n"); return 1; }
+
+  size_t num_bytes = insert_instr_h - template_data;
+  if (fwrite(template_data, 1, num_bytes, f) != num_bytes) { fprintf(stderr, "fwrite failed to write all bytes in one go. [0]\n"); return 1; }
+  if (fwrite(instr_data, 1, instr_size, f) != instr_size) { fprintf(stderr, "fwrite failed to write all bytes in one go. [1]\n"); return 1; }
+  num_bytes = insert_table_h - (insert_instr_h + sizeof(INSTR_KEY));
+  if (fwrite(insert_instr_h + sizeof(INSTR_KEY), 1, num_bytes, f) != num_bytes) { fprintf(stderr, "fwrite failed to write all bytes in one go. [2]\n"); return 1; }
+
   fprintf(f, "\nstatic const unsigned long long SET_SEGMENT[4] = {\n");
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetSegment(DEFAULT_SEGMENT).instr);
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetSegment(DEFAULT_SEGMENT).instr);
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetSegment(FS).instr);
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetSegment(GS).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_ADDRESSOVERRIDE[2] = {\n");
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetAddressSizeOverride(DEFAULT_ADDRESS_SIZE).instr);
-  fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetAddressSizeOverride(ADDRESS_SIZE_OVERRIDE).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_REG[24] = {\n");
-  for (int r = 0; r < 24; r++)
-    fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetReg(r).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_R[24] = {\n");
-  for (int r = 0; r < 24; r++)
-    fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetR(r).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_OPCODEREG[24] = {\n");
-  for (int r = 0; r < 24; r++)
-    fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetO(r).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_VVVV[16] = {\n");
-  for (int r = 0; r < 16; r++)
-    fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetVVVV(r).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_SCALE[4] = {\n");
-  for (int s = 0; s < 4; s++)
-    fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetScale(s).instr);
-  fprintf(f, "};\n\nstatic const unsigned long long SET_RIP =\n    0x%016llxull;\n", InstrBuilder().SetRIP().instr);
-  fprintf(f, "\nstatic const unsigned long long SET_BASEINDEX[16][17] = {\n");
+  fprintf(f, "  0x%016llxull,", InstrBuilder().SetSegment(DEFAULT_SEGMENT).instr);
+  fprintf(f, " 0x%016llxull,", InstrBuilder().SetSegment(DEFAULT_SEGMENT).instr);
+  fprintf(f, " 0x%016llxull,", InstrBuilder().SetSegment(FS).instr);
+  fprintf(f, " 0x%016llxull,", InstrBuilder().SetSegment(GS).instr);
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_ADDRESSOVERRIDE[2] = {\n");
+  fprintf(f, "  0x%016llxull,", InstrBuilder().SetAddressSizeOverride(DEFAULT_ADDRESS_SIZE).instr);
+  fprintf(f, " 0x%016llxull,", InstrBuilder().SetAddressSizeOverride(ADDRESS_SIZE_OVERRIDE).instr);
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_REG[24] = {");
+  for (int r = 0; r < 24; r++) {
+    if (!(r%4)) fprintf(f, "\n ");
+    fprintf(f, " 0x%016llxull,", InstrBuilder().SetReg(r).instr);
+  }
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_R[24] = {");
+  for (int r = 0; r < 24; r++) {
+    if (!(r%4)) fprintf(f, "\n ");
+    fprintf(f, " 0x%016llxull,", InstrBuilder().SetR(r).instr);
+  }
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_OPCODEREG[24] = {");
+  for (int r = 0; r < 24; r++) {
+    if (!(r%4)) fprintf(f, "\n ");
+    fprintf(f, " 0x%016llxull,", InstrBuilder().SetO(r).instr);
+  }
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_VVVV[16] = {");
+  for (int r = 0; r < 16; r++) {
+    if (!(r%4)) fprintf(f, "\n ");
+    fprintf(f, " 0x%016llxull,", InstrBuilder().SetVVVV(r).instr);
+  }
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_SCALE[4] = {");
+  for (int s = 0; s < 4; s++) {
+    if (!(s%4)) fprintf(f, "\n ");
+    fprintf(f, " 0x%016llxull,", InstrBuilder().SetScale(s).instr);
+  }
+  fprintf(f, "\n};\n\nstatic const unsigned long long SET_RIP =\n  0x%016llxull;\n", InstrBuilder().SetRIP().instr);
+  fprintf(f, "\nstatic const unsigned long long SET_BASEINDEX[16][17] = {");
   for (int i = 0; i < 16; i++)
-    for (int b = 0; b < 17; b++)
-      fprintf(f, "    0x%016llxull,\n", InstrBuilder().SetBI(b, i).instr);
-  fprintf(f, "};\n\n");
-  while ((num_bytes = fread(buffer, 1, sizeof(buffer), instr_h)) > 0)
-    fwrite(buffer, 1, num_bytes, f);
-  while ((num_bytes = fread(buffer, 1, sizeof(buffer), args_h)) > 0)
-    fwrite(buffer, 1, num_bytes, f);
+    for (int b = 0; b < 17; b++) {
+    if (!(b%4)) fprintf(f, "\n ");
+      fprintf(f, " 0x%016llxull,", InstrBuilder().SetBI(b, i).instr);
+    }
+  fprintf(f, "\n};\n");
+
+  num_bytes = insert_ops_h - (insert_table_h + sizeof(TABLE_KEY));
+  if (fwrite(insert_table_h + sizeof(TABLE_KEY), 1, num_bytes, f) != num_bytes) { fprintf(stderr, "fwrite failed to write all bytes in one go. [3]\n"); return 1; }
 
   static const struct { const char* name; int code; } CC_TABLE[] = {
     { "O", 0 }, { "NO", 1 }, { "B", 2 }, { "NAE", 2 }, { "C", 2 }, { "NB", 3 }, { "AE", 3 }, { "NC", 3 },
@@ -470,8 +509,10 @@ int main() {
 
   std::sort(Call::list.begin(), Call::list.end());
   for (auto i = Call::list.begin(); i != Call::list.end(); ++i)
-    fprintf(f, "%s", i->c_str());  fprintf(f, "};\n\n");
-  fclose(instr_h);
-  fclose(args_h);
-  fclose(f);
+    fprintf(f, "%s", i->c_str());
+
+  num_bytes = template_size - (insert_ops_h + sizeof(OPS_KEY) - template_data);
+  if (fwrite(insert_ops_h + sizeof(INSTR_KEY), 1, num_bytes, f) != num_bytes) { fprintf(stderr, "fwrite failed to write all bytes in one go. [4]\n"); return 1; }
+
+  if (fclose(f)) { fprintf(stderr, "Failed to close output file.\n"); return 1; }
 }
