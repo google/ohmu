@@ -83,6 +83,14 @@ public:
     assert(i < Size && "Array index out of bounds.");
     return Data[i];
   }
+  T &back() {
+    assert(Size && "No elements in the array.");
+    return Data[Size - 1];
+  }
+  const T &back() const {
+    assert(Size && "No elements in the array.");
+    return Data[Size - 1];
+  }
 
   iterator begin() { return Data; }
   iterator end() { return Data + Size; }

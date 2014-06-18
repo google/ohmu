@@ -700,7 +700,7 @@ protected:
       }
     }
     if (V->kind() == Variable::VK_LetBB)
-      SS << V->name() << V->getBlockID() << "_" << V->getID();
+      SS << V->name() << V->getBlock()->blockID() << "_" << V->getID();
     else
       SS << V->name() << V->getID();
   }

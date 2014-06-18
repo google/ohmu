@@ -71,9 +71,9 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
 
 int BasicBlock::renumberVars(int ID) {
   for (Variable *V : Args)
-    V->setID(BlockID, ID++);
+    V->setID(this, ID++);
   for (Variable *V : Instrs)
-    V->setID(BlockID, ID++);
+    V->setID(this, ID++);
   return ID;
 }
 
@@ -83,23 +83,232 @@ void SCFG::renumberVars() {
     id = B->renumberVars(id);
 }
 
-void SCFG::computeNormalForm(BasicBlock *Block, unsigned &BlockID) {
-  if (Block->blockID())
+// Computes the distance to the exit node for each node in the hierarchy.  This
+// is used to guarantee that that topological walk always places the exit block
+// last.
+static void computeDistanceToExit(BasicBlock *Block, int Distance) {
+  if (Block->DistanceToExit && Block->DistanceToExit <= Distance)
     return;
-  switch (Block->terminator()->opcode()) {
-  case COP_Goto:
-    computeNormalForm(cast<Goto>(Block->terminator())->targetBlock(), BlockID);
-    break;
-  case COP_Branch:
-    computeNormalForm(cast<Branch>(Block->terminator())->thenBlock(), BlockID);
-    computeNormalForm(cast<Branch>(Block->terminator())->elseBlock(), BlockID);
-    break;
-  }
-  Block->setBlockID(--BlockID);
-  Blocks[BlockID] = Block;
+  Block->DistanceToExit = Distance;
+  for (auto Pred : Block->predecessors())
+    computeDistanceToExit(Pred, Distance + 1);
 }
 
+// Performs a topological walk of the CFG and produces a sort.  The sort is
+// stored in SortNodes on the basic blocks.  These nodes store the topological
+// index, the node's parent and the size of the topological subtree rooted at
+// that node.  BlockID is the next avaliable id to grab during the post-order
+// walk.  It's threaded as a return value.
+static int topologicalWalk(BasicBlock *Parent, BasicBlock *Block, int BlockID) {
+  // If the subtree size is not 0, we've already visited this node.
+  if (Block->SortNode.SizeOfSubTree)
+    return BlockID;
+  // Via differencing, LastID is used to calculate the size of the subtree
+  // rooted here.
+  int LastID = BlockID;
+  if (Block->terminator()) {
+    // Walk our children, only if we've got a terminator.
+    switch (Block->terminator()->opcode()) {
+    case COP_Goto:
+      BlockID = topologicalWalk(
+          Block, cast<Goto>(Block->terminator())->targetBlock(), BlockID);
+      break;
+    case COP_Branch:
+      // FIXME: sort these based on DistanceToExit...
+      BlockID = topologicalWalk(
+          Block, cast<Branch>(Block->terminator())->elseBlock(), BlockID);
+      BlockID = topologicalWalk(
+          Block, cast<Branch>(Block->terminator())->thenBlock(), BlockID);
+      break;
+    }
+  }
+  // Initialize the SortNode with the information we calcluated here.
+  Block->SortNode.NodeID = --BlockID;
+  Block->SortNode.SizeOfSubTree = LastID - BlockID;
+  Block->SortNode.Parent = Parent;
+  return BlockID;
+}
 
+// Computes the immediate dominator of the current block.  Assumes that all of
+// its predecessors have already computed their dominators.  This is achieved by
+// topologically sorting the nodes and visiting them in order.
+static void computeDominator(BasicBlock *Block) {
+  // Predecessors is always non-empty because computeDominator isn't called on
+  // the entry block.
+  BasicBlock::BlockArray &Predecessors = Block->predecessors();
+  BasicBlock *Candidate = Block->SortNode.Parent;
+  for (auto Other : Predecessors)
+    while (Candidate != Other)
+      if (Candidate->SortNode.NodeID > Other->SortNode.NodeID) {
+        Candidate->DominatorNode.SizeOfSubTree -= Block->SortNode.SizeOfSubTree;
+        Candidate = Candidate->DominatorNode.Parent;
+      } else
+        Other = Other->DominatorNode.Parent;
+  // Initialize everything except the NodeID in the DominatorNode.  The BlockID
+  // is initalized on a separate pass.
+  Block->DominatorNode.SizeOfSubTree = Block->SortNode.SizeOfSubTree;
+  Block->DominatorNode.Parent = Candidate;
+}
+
+// Computes dominators for all blocks in a CFG, assumes that the blocks have
+// been topologically sorted.
+static void computeDominators(SCFG::BlockArray &Blocks) {
+  // Copy the entry block sort node (Entry has no dominators).
+  Blocks[0]->DominatorNode = Blocks[0]->SortNode;
+  // Compute the dominators for all blocks, in topological order.
+  for (size_t i = 1, e = Blocks.size(); i != e; ++i)
+    computeDominator(Blocks[i]);
+  // Allocate NodeIDs for all blocks.
+  for (size_t i = 1, e = Blocks.size(); i != e; ++i) {
+    // The NodeID allocate here is correct but will be altered by its children
+    // and need to be fixed up.
+    Blocks[i]->DominatorNode.NodeID =
+        Blocks[i]->DominatorNode.Parent->DominatorNode.NodeID + 1;
+    Blocks[i]->DominatorNode.Parent->DominatorNode.NodeID +=
+        Blocks[i]->DominatorNode.SizeOfSubTree;
+  }
+  // Fixup the NodeIDs.
+  for (auto Block : Blocks)
+    Block->DominatorNode.NodeID -= Block->DominatorNode.SizeOfSubTree - 1;
+}
+
+static void computeDistanceToEntry(BasicBlock *Block, int Distance) {
+  if (Block->DistanceToEntry && Block->DistanceToEntry <= Distance)
+    return;
+  Block->DistanceToEntry = Distance;
+  if (Block->terminator()) {
+    switch (Block->terminator()->opcode()) {
+    case COP_Goto:
+      computeDistanceToEntry(cast<Goto>(Block->terminator())->targetBlock(), Distance + 1);
+      break;
+    case COP_Branch:
+      computeDistanceToEntry(cast<Branch>(Block->terminator())->elseBlock(), Distance + 1);
+      computeDistanceToEntry(cast<Branch>(Block->terminator())->thenBlock(), Distance + 1);
+      break;
+    }
+  }
+}
+
+static int topologicalPostWalk(BasicBlock *Parent, BasicBlock *Block, int BlockPostID) {
+  if (Block->PostSortNode.SizeOfSubTree)
+    return BlockPostID;
+  int LastID = BlockPostID;
+  for (auto Pred : Block->predecessors())
+    // sort these based on DistanceToEntry...
+    BlockPostID = topologicalPostWalk(Block, Pred, BlockPostID);
+  Block->PostSortNode.NodeID = --BlockPostID;
+  Block->PostSortNode.SizeOfSubTree = LastID - BlockPostID;
+  Block->PostSortNode.Parent = Parent;
+  return BlockPostID;
+}
+
+static void computePostDominator(BasicBlock *Block) {
+  // Terminator is always defined because computePostDominator isn't called on the exit block.
+  BasicBlock *Candidate = Block->PostSortNode.Parent;
+  switch (Block->terminator()->opcode()) {
+  case COP_Branch: {
+    BasicBlock *ThenBlock = cast<Branch>(Block->terminator())->thenBlock();
+    BasicBlock *ElseBlock = cast<Branch>(Block->terminator())->elseBlock();
+    BasicBlock *Other = ThenBlock == Candidate ? ElseBlock : ThenBlock;
+    while (Candidate != Other)
+      if (Candidate->PostSortNode.NodeID > Other->PostSortNode.NodeID) {
+        Candidate->PostDominatorNode.SizeOfSubTree -= Block->PostSortNode.SizeOfSubTree;
+        Candidate = Candidate->PostDominatorNode.Parent;
+      } else
+        Other = Other->PostDominatorNode.Parent;
+    break;
+  }
+  case COP_Goto:
+    break;
+  }
+  Block->PostDominatorNode.SizeOfSubTree = Block->PostSortNode.SizeOfSubTree;
+  Block->PostDominatorNode.Parent = Candidate;
+}
+
+static void computePostDominators(SCFG::BlockArray &Blocks) {
+  Blocks[0]->PostDominatorNode = Blocks[0]->PostSortNode;
+    computePostDominator(Blocks[1]);
+  for (size_t i = 1, e = Blocks.size(); i != e; ++i)
+    computePostDominator(Blocks[i]);
+  for (size_t i = 1, e = Blocks.size(); i != e; ++i) {
+    Blocks[i]->PostDominatorNode.NodeID = Blocks[i]->PostDominatorNode.Parent->PostDominatorNode.NodeID + 1;
+    Blocks[i]->PostDominatorNode.Parent->PostDominatorNode.NodeID += Blocks[i]->PostDominatorNode.SizeOfSubTree;
+  }
+  for (auto Block : Blocks)
+    Block->PostDominatorNode.NodeID -= Block->PostDominatorNode.SizeOfSubTree - 1;
+}
+
+static void sortBlocksByID(SCFG::BlockArray &Blocks, BasicBlock *BB) {
+  if (Blocks[BB->blockID()])
+    return;
+  Blocks[BB->blockID()] = BB;
+  for (auto Pred : BB->predecessors())
+    sortBlocksByID(Blocks, Pred);
+}
+
+void SCFG::computeNormalForm() {
+  topologicalWalk(nullptr, Entry, (int)Blocks.size());
+  for (auto &Block : Blocks) {
+    Block->setBlockID(Block->SortNode.NodeID);
+    Block = nullptr;
+  }
+  sortBlocksByID(Blocks, Exit);
+  computeDominators(Blocks);
+
+  topologicalPostWalk(nullptr, Exit, (int)Blocks.size());
+  for (auto &Block : Blocks) {
+    Block->setBlockID(Block->PostSortNode.NodeID);
+    Block = nullptr;
+  }
+  sortBlocksByID(Blocks, Exit);
+  computePostDominators(Blocks);
+  for (auto &Block : Blocks) {
+    Block->setBlockID(Block->SortNode.NodeID);
+    Block = nullptr;
+  }
+  sortBlocksByID(Blocks, Exit);
+
+  //renumberVars();
+  for (auto Block : Blocks) {
+    printf("%2d %2d %2d   ", Block->SortNode.NodeID, Block->SortNode.SizeOfSubTree, Block->SortNode.Parent ? Block->SortNode.Parent->SortNode.NodeID : -1);
+    printf("%2d %2d %2d   ", Block->DominatorNode.NodeID, Block->DominatorNode.SizeOfSubTree, Block->DominatorNode.Parent ? Block->DominatorNode.Parent->SortNode.NodeID : -1);
+    printf("%2d %2d %2d   ", Block->PostSortNode.NodeID, Block->PostSortNode.SizeOfSubTree, Block->PostSortNode.Parent ? Block->PostSortNode.Parent->PostSortNode.NodeID : -1);
+    printf("%2d %2d %2d\n" , Block->PostDominatorNode.NodeID, Block->PostDominatorNode.SizeOfSubTree, Block->PostDominatorNode.Parent ? Block->PostDominatorNode.Parent->PostSortNode.NodeID : -1);
+  }
+}
+
+#if 0
+// Compute dominators assumes that the CFG is in normal form.
+void SCFG::computeDominators() {
+  Blocks[0]->setImmediateDominator(nullptr);
+  for (size_t i = 1, e = Blocks.size(); i != e; ++i)
+    computeImmediateDominator(Blocks[i]);
+}
+
+static int computePostDominatorSequence(BasicBlock *Block) {
+  auto PostDominator = Block->immediatePostDominator();
+  if (!Block->MinPostDominator && PostDominator) {
+    Block->MinPostDominator = 1 + computePostDominatorSequence(PostDominator);
+    PostDominator->MinPostDominator += Block->MaxPostDominator;
+  }
+  return Block->MinPostDominator;
+}
+
+// Compute post dominators assumes that the CFG is in normal form.
+void SCFG::computePostDominators() {
+  Blocks[Blocks.size() - 1]->setImmediatePostDominator(nullptr);
+  // FIXME: validate that this is correct (or not) in the presence of cycles and the fact that the tree is in topological order.
+  Blocks[Blocks.size() - 1]->MaxPostDominator = 1;
+  for (size_t i = Blocks.size() - 2, e = Blocks.size(); i < e; --i) // uses unsigned underflow
+    computePostDominator(Blocks[i]);
+    for (auto Block : Blocks)
+      computePostDominatorSequence(Block);
+  for (auto Block : Blocks) {
+    Block->MinPostDominator -= Block->MaxPostDominator - 1;
+    Block->MaxPostDominator += Block->MinPostDominator - 1;
+  }
+}
+#endif
 
 // If E is a variable, then trace back through any aliases or redundant
 // Phi nodes to find the canonical definition.

@@ -76,11 +76,13 @@ enum TIL_UnaryOpcode : unsigned char {
 };
 
 enum TIL_BinaryOpcode : unsigned char {
+  BOP_Add,          //  +
+  BOP_Sub,          //  -
   BOP_Mul,          //  *
   BOP_Div,          //  /
   BOP_Rem,          //  %
-  BOP_Add,          //  +
-  BOP_Sub,          //  -
+  //BOP_Min,          //  <?
+  //BOP_Max,          //  >?
   BOP_Shl,          //  <<
   BOP_Shr,          //  >>
   BOP_BitAnd,       //  &
@@ -90,8 +92,8 @@ enum TIL_BinaryOpcode : unsigned char {
   BOP_Neq,          //  !=
   BOP_Lt,           //  <
   BOP_Leq,          //  <=
-  BOP_LogicAnd,     //  &&
-  BOP_LogicOr       //  ||
+  BOP_LogicAnd,     //  && FIXME: change this note to specify if this implies short-circuit
+  BOP_LogicOr       //  || FIXME: change this note to specify if this implies short-circuit
 };
 
 enum TIL_CastOpcode : unsigned char {
@@ -106,7 +108,7 @@ const TIL_Opcode       COP_Min  = COP_Future;
 const TIL_Opcode       COP_Max  = COP_Branch;
 const TIL_UnaryOpcode  UOP_Min  = UOP_Minus;
 const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
-const TIL_BinaryOpcode BOP_Min  = BOP_Mul;
+const TIL_BinaryOpcode BOP_Min  = BOP_Add;
 const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
 const TIL_CastOpcode   CAST_Min = CAST_none;
 const TIL_CastOpcode   CAST_Max = CAST_toInt;
@@ -251,6 +253,8 @@ inline ValueType ValueType::getValueType<void*>() {
 class SExpr {
 public:
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
+  int id() const { return ID; }
+  void setId(int id) { ID = id; }
 
   // Subclasses of SExpr must define the following:
   //
@@ -277,12 +281,13 @@ public:
   void operator delete(void *) LLVM_DELETED_FUNCTION;
 
 protected:
-  SExpr(TIL_Opcode Op) : Opcode(Op), Reserved(0), Flags(0) {}
-  SExpr(const SExpr &E) : Opcode(E.Opcode), Reserved(0), Flags(E.Flags) {}
+  SExpr(TIL_Opcode Op) : Opcode(Op), Reserved(0), Flags(0), ID(0) {}
+  SExpr(const SExpr &E) : Opcode(E.Opcode), Reserved(0), Flags(E.Flags), ID(0){}
 
   const unsigned char Opcode;
   unsigned char Reserved;
   unsigned short Flags;
+  int ID;
 
 private:
   SExpr() LLVM_DELETED_FUNCTION;
@@ -387,13 +392,13 @@ public:
   void attachVar() const { ++NumUses; }
   void detachVar() const { assert(NumUses > 0); --NumUses; }
 
-  unsigned getID() const { return Id; }
-  unsigned getBlockID() const { return BlockID; }
+  int getID() const { return Id; }
+  BasicBlock *getBlock() const { return Block; }
 
   void setName(StringRef S) { Name = S; }
-  void setID(int BID, int VID) {
-    BlockID = static_cast<unsigned short>(BID);
-    Id = static_cast<unsigned short>(VID);
+  void setID(BasicBlock *B, int VID) {
+    Block = B;
+    Id = VID;
   }
   void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
   void setDefinition(SExpr *E);
@@ -419,7 +424,7 @@ private:
   SExprRef  Definition;            // The TIL type or definition
   const clang::ValueDecl *Cvdecl;  // The clang declaration for this variable.
 
-  int BlockID;
+  BasicBlock *Block;
   int Id;
   mutable unsigned NumUses;
 };
@@ -529,19 +534,19 @@ inline void SExprRef::reset(SExpr *P) {
 
 inline Variable::Variable(StringRef s, SExpr *D)
     : SExpr(COP_Variable), Name(s), Definition(D), Cvdecl(nullptr),
-      BlockID(0), Id(0), NumUses(0) {
+      Block(0), Id(0), NumUses(0) {
   Flags = VK_Let;
 }
 
 inline Variable::Variable(SExpr *D, const clang::ValueDecl *Cvd)
     : SExpr(COP_Variable), Name(Cvd ? Cvd->getName() : "_x"),
-      Definition(D), Cvdecl(Cvd), BlockID(0), Id(0), NumUses(0) {
+      Definition(D), Cvdecl(Cvd), Block(0), Id(0), NumUses(0) {
   Flags = VK_Let;
 }
 
 inline Variable::Variable(const Variable &Vd, SExpr *D) // rewrite constructor
     : SExpr(Vd), Name(Vd.Name), Definition(D), Cvdecl(Vd.Cvdecl),
-      BlockID(0), Id(0), NumUses(0) {
+      Block(0), Id(0), NumUses(0) {
   Flags = Vd.kind();
 }
 
@@ -1406,29 +1411,34 @@ public:
   typedef SimpleArray<Variable*>   VarArray;
   typedef SimpleArray<BasicBlock*> BlockArray;
 
+  struct TopologyNode {
+    int NodeID;
+    int SizeOfSubTree; // Includes this node.
+    BasicBlock *Parent;
+    TopologyNode() : NodeID(0), SizeOfSubTree(0), Parent(0) {}
+    bool IsParentOf(const TopologyNode& OtherNode) {
+      return OtherNode.NodeID < NodeID + SizeOfSubTree && OtherNode.NodeID > NodeID;
+    }
+  };
+
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
 
-  explicit BasicBlock(MemRegionRef A, BasicBlock* P = nullptr)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        Parent(P), Terminator(nullptr)
-  { }
+  explicit BasicBlock(MemRegionRef A, BasicBlock *P = nullptr)
+      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0), Parent(P),
+      Terminator(nullptr), DistanceToEntry(0), DistanceToExit(0), VX64BlockStart(0), VX64BlockEnd(0), Marker(0) {}
   BasicBlock(BasicBlock &B, VarArray &&As, VarArray &&Is, SExpr *T)
       : SExpr(COP_BasicBlock), Arena(B.Arena), CFGPtr(nullptr), BlockID(0),
         Parent(nullptr), Args(std::move(As)), Instrs(std::move(Is)),
-        Terminator(T)
-  { }
+        Terminator(T), DistanceToEntry(0), DistanceToExit(0), VX64BlockStart(0), VX64BlockEnd(0), Marker(0) {}
 
-  unsigned blockID() const { return BlockID; }
-  unsigned numPredecessors() const { return Predecessors.size(); }
+  int blockID() const { return BlockID; }
+  size_t numPredecessors() const { return Predecessors.size(); }
 
   const SCFG* cfg() const { return CFGPtr; }
   SCFG* cfg() { return CFGPtr; }
 
   const BasicBlock *parent() const { return Parent; }
   BasicBlock *parent() { return Parent; }
-
-  const BasicBlock *immediateDominator() const { return ImmediateDominator; }
-  BasicBlock *immediateDominator() { return ImmediateDominator; }
 
   const VarArray &arguments() const { return Args; }
   VarArray &arguments() { return Args; }
@@ -1442,10 +1452,31 @@ public:
   const SExpr *terminator() const { return Terminator.get(); }
   SExpr *terminator() { return Terminator.get(); }
 
-  void setBlockID(unsigned i)   { BlockID = i; }
+  void setBlockID(int i) { BlockID = i; }
   void setParent(BasicBlock *P) { Parent = P; }
-  void setImmediateDominator(BasicBlock *BB) { ImmediateDominator = BB; }
   void setTerminator(SExpr *E)  { Terminator.reset(E); }
+
+  TopologyNode SortNode;
+  TopologyNode PostSortNode;
+  TopologyNode DominatorNode;
+  TopologyNode PostDominatorNode;
+  int DistanceToEntry;
+  int DistanceToExit;
+  int VX64BlockStart;
+  int VX64BlockEnd;
+  int Marker;
+
+  bool Dominates(const BasicBlock &other) {
+    return DominatorNode.NodeID <= other.DominatorNode.NodeID &&
+           other.DominatorNode.NodeID <
+               DominatorNode.NodeID + DominatorNode.SizeOfSubTree;
+  }
+
+  bool PostDominates(const BasicBlock &other) {
+    return PostDominatorNode.NodeID <= other.PostDominatorNode.NodeID &&
+           other.PostDominatorNode.NodeID <
+               PostDominatorNode.NodeID + PostDominatorNode.SizeOfSubTree;
+  }
 
   // Add a new argument.  V must define a phi-node.
   void addArgument(Variable *V) {
@@ -1518,8 +1549,7 @@ private:
   MemRegionRef Arena;
 
   SCFG       *CFGPtr;       // The CFG that contains this block.
-  int        BlockID;       // unique id for this BB in the containing CFG
-  BasicBlock *ImmediateDominator; // The immediately dominating block;
+  int        BlockID;       // unique id for this BB in the containing CFG, IDs are in topological order
   BasicBlock *Parent;       // The parent block is the enclosing lexical scope.
                             // The parent dominates this block.
   BlockArray Predecessors;  // Predecessor blocks in the CFG.
@@ -1578,38 +1608,7 @@ public:
     Blocks.push_back(BB);
   }
 
-  void computeNormalForm() {
-    for (auto i : Blocks)
-      i->setBlockID(0);
-    unsigned BlockID = Blocks.size();
-    // Visit the exit block first to make sure that it goes last.
-    Exit->setBlockID(--BlockID);
-    Blocks[BlockID] = Exit;
-    computeNormalForm(Entry, BlockID);
-    renumberVars();
-  }
-
-  void computeNormalForm(BasicBlock *Block, unsigned &BlockID);
-
-  // Compute dominators assumes that the CFG is in normal form.
-  void computeDominators() {
-    Blocks[0]->setImmediateDominator(nullptr);
-    for (size_t i = 1, e = Blocks.size(); i != e; ++i)
-      computeDominator(Blocks[i]);
-  }
-
-  void computeDominator(BasicBlock *Block) {
-    BasicBlock *Candidate = Block->predecessors()[0];
-    for (size_t i = 1, e = Block->predecessors().size(); i < e; ++i) {
-      BasicBlock *Other = Block->predecessors()[i];
-      while (Candidate != Other)
-        if (Candidate->blockID() > Other->blockID())
-          Candidate = Candidate->immediateDominator();
-        else
-          Other = Other->immediateDominator();
-    }
-    Block->setImmediateDominator(Candidate);
-  }
+  void computeNormalForm();
 
   void setEntry(BasicBlock *BB) { Entry = BB; }
   void setExit(BasicBlock *BB)  { Exit = BB;  }
