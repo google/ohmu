@@ -287,7 +287,7 @@ extern "C" unsigned char _BitScanForward(unsigned long * Index, unsigned long Ma
 
 static int log2(unsigned x) {
   unsigned long a;
-  _BitScanForward(&a, (unsigned long)x);
+  _BitScanReverse(&a, (unsigned long)x);
   return (int)a;
 }
 
@@ -600,6 +600,7 @@ namespace Try3 {
 
 struct Event {
   enum Kind {
+    HEADER,
     LIVE_RANGE,
     DUPLICATE_LIVE_RANGE,
     INT_LITERAL,
@@ -611,23 +612,17 @@ struct Event {
   enum OpCode { NOP, JMP, BRANCH, ADD, MUL, CMP_EQ, CMP_LT, CMP_LE };
  
   Kind kind;
+  unsigned copySet;
   union {
     struct {
       int offsetToOrigin; // instruction
       int pressure;
-      unsigned registerSet;
+      unsigned registerSet; //< TODO: rename me
       unsigned clobberedSet;
-      unsigned copySet;
     } liveRange;
     int offsetToTarget;
-    struct {
-      int value;
-      unsigned copySet;
-    } intLiteral;
-    struct {
-      OpCode opcode;
-      unsigned copySet;
-    } instruction;
+    int intLiteral;
+    OpCode opcode;
     struct {
       int offsetToTarget;
       int key;
@@ -635,15 +630,16 @@ struct Event {
   };
   Event& setLiveRange(int offsetToOrigin) {
     kind = LIVE_RANGE;
+    copySet = 0;
     liveRange.offsetToOrigin = offsetToOrigin;
     liveRange.pressure = 0;
     liveRange.registerSet = 0;
     liveRange.clobberedSet = 0;
-    liveRange.copySet = 0;
     return *this;
   }
   Event& setOffsetToTarget(Kind kind, int offsetToTarget) {
     this->kind = kind;
+    copySet = 0;
     this->offsetToTarget = offsetToTarget;
     return *this;
   }
@@ -652,14 +648,14 @@ struct Event {
   }
   Event& setIntLiteral(int value) {
     kind = INT_LITERAL;
-    intLiteral.value = value;
-    intLiteral.copySet = 0;
+    copySet = 0;
+    intLiteral = value;
     return *this;
   }
   Event& setInstruction(OpCode opcode) {
     kind = INSTRUCTION;
-    instruction.opcode = opcode;
-    instruction.copySet = 0;
+    copySet = 0;
+    this->opcode = opcode;
     return *this;
   }
   Event& setWalkBack(int offsetToTarget) {
@@ -670,8 +666,13 @@ struct Event {
   }
   Event& setPhiLink(int offsetToTarget, int key) {
     kind = PHI_LINK;
+    copySet = 0;
     phiLink.offsetToTarget = offsetToTarget;
     phiLink.key = key;
+    return *this;
+  }
+  Event& setHeader() {
+    kind = HEADER;
     return *this;
   }
   void print(Event* events);
@@ -681,17 +682,20 @@ struct Event {
 void Event::print(Event* events) {
   auto offset = this - events;
   switch (kind) {
+  case Event::HEADER:
+    printf("HEADER");
+    break;
   case Event::LIVE_RANGE:
-    printf("%d -> %d : %d : {%x} -> {%x}", offset + liveRange.offsetToOrigin, offset, liveRange.pressure, liveRange.registerSet, liveRange.copySet);
+    printf("%d -> %d : %d : {%x} -> {%x}", offset + liveRange.offsetToOrigin, offset, liveRange.pressure, liveRange.registerSet, copySet);
     break;
   case Event::DUPLICATE_LIVE_RANGE:
     printf("COPY %d", offset + offsetToTarget);
     break;
   case Event::INT_LITERAL:
-    printf("%d {%x}", intLiteral.value, intLiteral.copySet);
+    printf("%d {%x}", intLiteral, copySet);
     break;
   case Event::INSTRUCTION:
-    switch (instruction.opcode) {
+    switch (opcode) {
     case Event::NOP: printf("0"); break;
     case Event::JMP: printf("JMP"); break;
     case Event::BRANCH: printf("BRANCH"); break;
@@ -701,7 +705,7 @@ void Event::print(Event* events) {
     case Event::CMP_LT: printf("<"); break;
     case Event::CMP_LE: printf("<="); break;
     };
-    printf(" {%x}", instruction.copySet);
+    printf(" {%x}", copySet);
     break;
   case Event::WALK_BACK:
     printf("Walk back to %d", offset + offsetToTarget);
@@ -716,39 +720,62 @@ void Event::print(Event* events) {
 }
 
 static const char* getRegName(unsigned registerSet) {
-  static const char* regNames[] = { "EAX", "EDX", "EBX", "ECX", "ESP", "EBP", "ESI", "EDI" };
+  static const char* regNames[] = { "EAX", "EDX", "EBX", "ECX", "ESP", "EBP", "ESI", "EDI", "R9", "R10", "R11", "R12", "R13", "R14", "R15" };
   //printf(">> %d : %d\n", registerSet, Try2::log2(registerSet));
   return regNames[Try2::log2(registerSet)];
 }
 
+static void printLiveRange(Event* event) {
+  unsigned copySet = event->copySet;
+  while (copySet) {
+    unsigned copyReg = copySet & -copySet;
+    printf("MOV %s %s", getRegName(copyReg), getRegName(event->liveRange.registerSet));
+    copySet &= ~copyReg;
+  }
+}
+
 static void printCommutable(Event* event, const char* name) {
-  unsigned copySet = event->instruction.copySet;
+  unsigned copySet = event->copySet;
   unsigned reg0 = event[-2].liveRange.registerSet;
-  unsigned reg1 = event[-1].kind == Event::LIVE_RANGE ? event[-1].liveRange.registerSet : event[-2].liveRange.registerSet;
+  unsigned reg1 = event[-1].kind == Event::DUPLICATE_LIVE_RANGE ? event[-2].liveRange.registerSet : event[-1].liveRange.registerSet;
   if (!(reg0 & copySet) && (reg1 & copySet))
     std::swap(reg0, reg1);
+  if (!(copySet & (reg0 | reg1))) {
+    printf("MOV %s %s\n    ", getRegName(copySet & -copySet), getRegName(reg0));
+    reg0 = copySet & -copySet;
+  }
   copySet &= ~reg0;
-  copySet |= event[-1].liveRange.copySet;
   printf("%s %s %s", name, getRegName(reg0), getRegName(reg1));
   while (copySet) {
     unsigned copyReg = copySet & -copySet;
     printf("\n    MOV %s %s", getRegName(copyReg), getRegName(reg0));
     copySet &= ~copyReg;
   }
-  if (event[-1].kind == Event::LIVE_RANGE) {
-    copySet = event[-1].liveRange.copySet;
-    while (copySet) {
-      unsigned copyReg = copySet & -copySet;
-      printf("\n    MOV %s %s", getRegName(copyReg), getRegName(reg1));
-      copySet &= ~copyReg;
-    }
-  }
 }
 
 void Event::printASM(Event* events) {
+  if (kind == Event::INT_LITERAL) {
+    unsigned copySet = this->copySet;
+    while (copySet) {
+      unsigned copyReg = copySet & -copySet;
+      printf("MOV %s %d", getRegName(copyReg), intLiteral);
+      copySet &= ~copyReg;
+    }
+    return;
+  }
+  if (kind == Event::LIVE_RANGE) {
+    unsigned copySet = this->copySet;
+    copySet &= ~this->liveRange.registerSet;
+    while (copySet) {
+      unsigned copyReg = copySet & -copySet;
+      printf("\n    MOV %s %s", getRegName(copyReg), getRegName(liveRange.registerSet));
+      copySet &= ~copyReg;
+    }
+    return;
+  }
   if (kind != Event::INSTRUCTION)
     return;
-  switch (instruction.opcode) {
+  switch (opcode) {
   case Event::JMP: printf("JMP"); break;
   case Event::BRANCH: printf("BRANCH"); break;
   case Event::ADD: printCommutable(this, "ADD"); break;
@@ -785,7 +812,11 @@ struct RegisterAllocator {
 
 RegisterAllocator::RegisterAllocator(SCFG* cfg) {
   BasicBlock* previousBlock = nullptr;
+  // The header exists to live at location 0.  ID 0 is uses as uninitialized so nothing
+  // may reference something at offset 0.
+  events.push_back(Event().setHeader());
   for (auto block : *cfg) {
+    printf("Block!!\n");
     int blockHeaderIndex = getNewID();
     if (block->DominatorNode.Parent) {
       int targetOffset = block->DominatorNode.Parent->VX64BlockEnd - blockHeaderIndex;
@@ -809,8 +840,9 @@ RegisterAllocator::RegisterAllocator(SCFG* cfg) {
     emitTerminator(block);
     block->VX64BlockEnd = getLastID();
     previousBlock = block;
+    //return;
   }
-
+  //return;
   // Compute pressure generated by the pairs.
   for (auto& event : events) {
     if (event.kind != Event::LIVE_RANGE)
@@ -825,7 +857,7 @@ RegisterAllocator::RegisterAllocator(SCFG* cfg) {
   for (auto ptr : ptrs) {
     unsigned sourceCopySet = 0;
     auto registerSet = ~determineClobberSet(ptr, sourceCopySet);
-    unsigned destCopySet = ptr->liveRange.copySet;
+    unsigned destCopySet = ptr->copySet;
 #if 1
     printf(">> %x %x %x", registerSet, sourceCopySet, destCopySet);
     if (registerSet & sourceCopySet & destCopySet) {
@@ -882,7 +914,7 @@ unsigned RegisterAllocator::determineClobberSet(Event* event, unsigned& sourceCo
     }
     if (i->kind == Event::LIVE_RANGE) {
       if (i + i->liveRange.offsetToOrigin == e) {
-        sourceCopySet = i->liveRange.copySet;
+        sourceCopySet = i->copySet;
         break;
       }
       clobberSet |= i->liveRange.registerSet;
@@ -894,10 +926,10 @@ unsigned RegisterAllocator::determineClobberSet(Event* event, unsigned& sourceCo
 void RegisterAllocator::determineCopy(Event* event, unsigned registerSet) {
   switch (event->kind) {
   case Event::INSTRUCTION:
-    event->instruction.copySet |= registerSet;
+    event->copySet |= registerSet;
     break;
   case Event::INT_LITERAL:
-    event->intLiteral.copySet |= registerSet;
+    event->copySet |= registerSet;
     break;
   case Event::PHI_LINK:
     int key = event->phiLink.key;
@@ -924,7 +956,7 @@ void RegisterAllocator::notifySelection(Event* event) {
     }
     if (i->kind == Event::LIVE_RANGE) {
       if (i + i->liveRange.offsetToOrigin == e) {
-        i->liveRange.copySet |= registerSet;
+        i->copySet |= registerSet;
         return;
       }
       i->liveRange.clobberedSet |= registerSet;
@@ -933,15 +965,22 @@ void RegisterAllocator::notifySelection(Event* event) {
   determineCopy(event + event->liveRange.offsetToOrigin, registerSet);
 }
 
+static const char* g_tabs[] = { "", "  ", "    ", "      ", "        ", "          " };
+static int g_tab = 0;
+
 void RegisterAllocator::emitLiteral(Literal* literal) {
   switch (literal->valueType().Base) {
-  case ValueType::BT_Int: events.push_back(Event().setIntLiteral(literal->as<int>().value())); break;
+  case ValueType::BT_Int:
+    events.push_back(Event().setIntLiteral(literal->as<int>().value()));
+    printf("%semitting int literal (%d) %p\n", g_tabs[g_tab], events.back().intLiteral, literal);
+    break;
   default:
     assert(false);
   }
 }
 
 void RegisterAllocator::emitBinaryOp(BasicBlock* basicBlock, BinaryOp* binaryOp) {
+  printf("%semitting binary op %p\n", g_tabs[g_tab], binaryOp);
   Event::OpCode opcode = Event::NOP;
   switch (binaryOp->binaryOpcode()) {
   case BOP_Add: opcode = Event::ADD; break;
@@ -964,13 +1003,18 @@ void RegisterAllocator::emitBinaryOp(BasicBlock* basicBlock, BinaryOp* binaryOp)
 }
 
 void RegisterAllocator::emitExpression(BasicBlock* basicBlock, SExpr* expr) {
-  if (expr->id())
+  if (expr->id()) {
+    printf("%salready emitted expression (%d) %p\n", g_tabs[g_tab], expr->id(), expr);
     return;
+  }
+  printf("%semitting expression (%d) %p\n", g_tabs[g_tab], getNewID(), expr);
+  g_tab++;
   switch (expr->opcode()) {
   case COP_Literal: emitLiteral(cast<Literal>(expr)); break;
   case COP_Variable: emitExpression(basicBlock, cast<Variable>(expr)->definition()); break;
   case COP_BinaryOp: emitBinaryOp(basicBlock, cast<BinaryOp>(expr)); break;
   }
+  g_tab--;
   expr->setId(getLastID());
 }
 
@@ -1027,8 +1071,8 @@ void RegisterAllocator::print() {
 void RegisterAllocator::printASM() {
   int i = 0;
   for (auto& event : events) {
-    if (event.kind != Event::INSTRUCTION)
-      continue;
+    //if (event.kind != Event::INSTRUCTION && event.kind != Event::INT_LITERAL)
+    //  continue;
     printf("%-2d: ", i++);
     event.printASM(events.data());
     printf("\n");
