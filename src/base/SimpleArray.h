@@ -93,10 +93,13 @@ public:
   }
 
   iterator begin() { return Data; }
-  iterator end() { return Data + Size; }
+  iterator end()   { return Data + Size; }
+
+  const_iterator begin() const { return Data; }
+  const_iterator end()   const { return Data + Size; }
 
   const_iterator cbegin() const { return Data; }
-  const_iterator cend() const { return Data + Size; }
+  const_iterator cend()   const { return Data + Size; }
 
   void push_back(const T &Elem) {
     assert(Size < Capacity);

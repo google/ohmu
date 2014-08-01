@@ -153,21 +153,25 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return nullptr;
     return prs[i].getToken();
   };
+  /*
   auto tokList = [=](unsigned i) -> std::vector< Token* >* {
     if (!prs[i].isTokenList() || i >= arity)
       return nullptr;
     return prs[i].getTokenList();
   };
+  */
   auto sexpr = [=](unsigned i) -> SExpr* {
     if (!prs[i].isSingle(TILP_SExpr) || i >= arity)
       return nullptr;
     return prs[i].getNode<SExpr>(TILP_SExpr);
   };
+  /*
   auto sexprList = [=](unsigned i) -> std::vector< SExpr* >* {
     if (!prs[i].isList(TILP_SExpr) || i >= arity)
       return nullptr;
     return prs[i].getList<SExpr>(TILP_SExpr);
   };
+  */
 
   switch (op) {
     case TCOP_LitNull: {

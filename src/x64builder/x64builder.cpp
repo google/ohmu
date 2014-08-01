@@ -16,11 +16,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "instr.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cstring>
 #include <stdio.h>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <cassert>
+
 
 //enum ConditionCode {
 //	O, NO, B, NAE = B, C = B, NB, AE = NB, NC = NB, Z, E = Z, NZ, NE = NZ, BE, NA = BE, NBE, A = NBE,

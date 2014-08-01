@@ -47,12 +47,13 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
   return "";
 }
 
+
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
   Predecessors.push_back(Pred);
-  for (Variable *V : Args) {
-    if (Phi* Ph = dyn_cast<Phi>(V->definition())) {
+  for (SExpr *E : Args) {
+    if (Phi* Ph = dyn_cast<Phi>(E)) {
       Ph->values().reserveCheck(1, Arena);
       Ph->values().push_back(nullptr);
     }
@@ -60,46 +61,135 @@ unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   return Idx;
 }
 
+
 void BasicBlock::reservePredecessors(unsigned NumPreds) {
   Predecessors.reserve(NumPreds, Arena);
-  for (Variable *V : Args) {
-    if (Phi* Ph = dyn_cast<Phi>(V->definition())) {
+  for (SExpr *E : Args) {
+    if (Phi* Ph = dyn_cast<Phi>(E)) {
       Ph->values().reserve(NumPreds, Arena);
     }
   }
 }
 
+
+// If E is a variable, then trace back through any aliases or redundant
+// Phi nodes to find the canonical definition.
+const SExpr *getCanonicalVal(const SExpr *E) {
+  while (auto *V = dyn_cast<Variable>(E)) {
+    const SExpr *D;
+    do {
+      if (V->kind() != Variable::VK_Let)
+        return V;
+      D = V->definition();
+      auto *V2 = dyn_cast<Variable>(D);
+      if (V2)
+        V = V2;
+      else
+        break;
+    } while (true);
+
+    if (ThreadSafetyTIL::isTrivial(D))
+      return D;
+
+    if (const Phi *Ph = dyn_cast<Phi>(D)) {
+      if (Ph->status() == Phi::PH_SingleVal) {
+        E = Ph->values()[0];
+        continue;
+      }
+    }
+    return V;
+  }
+  return E;
+}
+
+
+
+// If E is a variable, then trace back through any aliases or redundant
+// Phi nodes to find the canonical definition.
+// The non-const version will simplify incomplete Phi nodes.
+SExpr *simplifyToCanonicalVal(SExpr *E) {
+  while (auto *V = dyn_cast<Variable>(E)) {
+    SExpr *D;
+    do {
+      if (V->kind() != Variable::VK_Let)
+        return V;
+      D = V->definition();
+      auto *V2 = dyn_cast<Variable>(D);
+      if (V2)
+        V = V2;
+      else
+        break;
+    } while (true);
+
+    if (ThreadSafetyTIL::isTrivial(D))
+      return D;
+
+    if (Phi *Ph = dyn_cast<Phi>(D)) {
+      if (Ph->status() == Phi::PH_Incomplete)
+        simplifyIncompleteArg(V, Ph);
+
+      if (Ph->status() == Phi::PH_SingleVal) {
+        E = Ph->values()[0];
+        continue;
+      }
+    }
+    return V;
+  }
+  return E;
+}
+
+
+
+// Trace the arguments of an incomplete Phi node to see if they have the same
+// canonical definition.  If so, mark the Phi node as redundant.
+// getCanonicalVal() will recursively call simplifyIncompletePhi().
+void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
+  assert(Ph && Ph->status() == Phi::PH_Incomplete);
+
+  // eliminate infinite recursion -- assume that this node is not redundant.
+  Ph->setStatus(Phi::PH_MultiVal);
+
+  SExpr *E0 = simplifyToCanonicalVal(Ph->values()[0]);
+  for (unsigned i=1, n=Ph->values().size(); i<n; ++i) {
+    SExpr *Ei = simplifyToCanonicalVal(Ph->values()[i]);
+    if (Ei == V)
+      continue;  // Recursive reference to itself.  Don't count.
+    if (Ei != E0) {
+      return;    // Status is already set to MultiVal.
+    }
+  }
+  Ph->setStatus(Phi::PH_SingleVal);
+  // Eliminate Redundant Phi node.
+  V->setDefinition(Ph->values()[0]);
+}
+
+
+
 int BasicBlock::renumberVars(int ID) {
-  for (Variable *V : Args)
-    V->setID(this, ID++);
-  for (Variable *V : Instrs)
-    V->setID(this, ID++);
+  for (auto *E : Args)
+    E->setID(this, ID++);
+  for (auto *E : Instrs)
+    E->setID(this, ID++);
+  if (Terminator.get())
+    Terminator->setID(this, ID++);
   return ID;
 }
 
+
 void SCFG::renumberVars() {
-  int id = 0;
-  for (BasicBlock *B : Blocks)
-    id = B->renumberVars(id);
+  int ID = 0;
+  for (auto *B : Blocks)
+    ID = B->renumberVars(ID);
 }
 
-// Computes the distance to the exit node for each node in the hierarchy.  This
-// is used to guarantee that that topological walk always places the exit block
-// last.
-static void computeDistanceToExit(BasicBlock *Block, int Distance) {
-  if (Block->DistanceToExit && Block->DistanceToExit <= Distance)
-    return;
-  Block->DistanceToExit = Distance;
-  for (auto Pred : Block->predecessors())
-    computeDistanceToExit(Pred, Distance + 1);
-}
+
 
 // Performs a topological walk of the CFG and produces a sort.  The sort is
 // stored in SortNodes on the basic blocks.  These nodes store the topological
 // index, the node's parent and the size of the topological subtree rooted at
 // that node.  BlockID is the next avaliable id to grab during the post-order
 // walk.  It's threaded as a return value.
-static int topologicalWalk(BasicBlock *Parent, BasicBlock *Block, int BlockID) {
+static int topologicalWalk(BasicBlock *Parent, BasicBlock *Block, int ID) {
   // If the subtree size is not 0, we've already visited this node.
   if (Block->SortNode.SizeOfSubTree)
     return BlockID;
@@ -109,16 +199,19 @@ static int topologicalWalk(BasicBlock *Parent, BasicBlock *Block, int BlockID) {
   if (Block->terminator()) {
     // Walk our children, only if we've got a terminator.
     switch (Block->terminator()->opcode()) {
-    case COP_Goto:
-      BlockID = topologicalWalk(
-          Block, cast<Goto>(Block->terminator())->targetBlock(), BlockID);
+    case COP_Goto: {
+      auto *Gt = cast<Goto>(Block->terminator())
+      BlockID = topologicalWalk(Block, Gt->targetBlock(), BlockID);
       break;
-    case COP_Branch:
+    }
+    case COP_Branch: {
+      auto *Br = cast<Brach>(Block->terminator());
       // FIXME: sort these based on DistanceToExit...
-      BlockID = topologicalWalk(
-          Block, cast<Branch>(Block->terminator())->elseBlock(), BlockID);
-      BlockID = topologicalWalk(
-          Block, cast<Branch>(Block->terminator())->thenBlock(), BlockID);
+      BlockID = topologicalWalk(Block, Br->elseBlock(), BlockID);
+      BlockID = topologicalWalk(Block, Br->thenBlock(), BlockID);
+      break;
+    }
+    default:
       break;
     }
   }
@@ -128,6 +221,22 @@ static int topologicalWalk(BasicBlock *Parent, BasicBlock *Block, int BlockID) {
   Block->SortNode.Parent = Parent;
   return BlockID;
 }
+
+
+
+void SCFG::topologicalSort() {
+  for (Block *BB :
+
+  topologicalWalk(
+}
+
+
+
+
+
+
+/*
+
 
 // Computes the immediate dominator of the current block.  Assumes that all of
 // its predecessors have already computed their dominators.  This is achieved by
@@ -149,6 +258,7 @@ static void computeDominator(BasicBlock *Block) {
   Block->DominatorNode.SizeOfSubTree = Block->SortNode.SizeOfSubTree;
   Block->DominatorNode.Parent = Candidate;
 }
+
 
 // Computes dominators for all blocks in a CFG, assumes that the blocks have
 // been topologically sorted.
@@ -172,22 +282,6 @@ static void computeDominators(SCFG::BlockArray &Blocks) {
     Block->DominatorNode.NodeID -= Block->DominatorNode.SizeOfSubTree - 1;
 }
 
-static void computeDistanceToEntry(BasicBlock *Block, int Distance) {
-  if (Block->DistanceToEntry && Block->DistanceToEntry <= Distance)
-    return;
-  Block->DistanceToEntry = Distance;
-  if (Block->terminator()) {
-    switch (Block->terminator()->opcode()) {
-    case COP_Goto:
-      computeDistanceToEntry(cast<Goto>(Block->terminator())->targetBlock(), Distance + 1);
-      break;
-    case COP_Branch:
-      computeDistanceToEntry(cast<Branch>(Block->terminator())->elseBlock(), Distance + 1);
-      computeDistanceToEntry(cast<Branch>(Block->terminator())->thenBlock(), Distance + 1);
-      break;
-    }
-  }
-}
 
 static int topologicalPostWalk(BasicBlock *Parent, BasicBlock *Block, int BlockPostID) {
   if (Block->PostSortNode.SizeOfSubTree)
@@ -201,6 +295,7 @@ static int topologicalPostWalk(BasicBlock *Parent, BasicBlock *Block, int BlockP
   Block->PostSortNode.Parent = Parent;
   return BlockPostID;
 }
+
 
 static void computePostDominator(BasicBlock *Block) {
   // Terminator is always defined because computePostDominator isn't called on the exit block.
@@ -220,10 +315,13 @@ static void computePostDominator(BasicBlock *Block) {
   }
   case COP_Goto:
     break;
+  default:
+    break;
   }
   Block->PostDominatorNode.SizeOfSubTree = Block->PostSortNode.SizeOfSubTree;
   Block->PostDominatorNode.Parent = Candidate;
 }
+
 
 static void computePostDominators(SCFG::BlockArray &Blocks) {
   Blocks[0]->PostDominatorNode = Blocks[0]->PostSortNode;
@@ -237,6 +335,7 @@ static void computePostDominators(SCFG::BlockArray &Blocks) {
   for (auto Block : Blocks)
     Block->PostDominatorNode.NodeID -= Block->PostDominatorNode.SizeOfSubTree - 1;
 }
+
 
 static void sortBlocksByID(SCFG::BlockArray &Blocks, BasicBlock *BB) {
   if (Blocks[BB->blockID()])
@@ -277,96 +376,7 @@ void SCFG::computeNormalForm() {
   }
 }
 
-#if 0
-// Compute dominators assumes that the CFG is in normal form.
-void SCFG::computeDominators() {
-  Blocks[0]->setImmediateDominator(nullptr);
-  for (size_t i = 1, e = Blocks.size(); i != e; ++i)
-    computeImmediateDominator(Blocks[i]);
-}
-
-static int computePostDominatorSequence(BasicBlock *Block) {
-  auto PostDominator = Block->immediatePostDominator();
-  if (!Block->MinPostDominator && PostDominator) {
-    Block->MinPostDominator = 1 + computePostDominatorSequence(PostDominator);
-    PostDominator->MinPostDominator += Block->MaxPostDominator;
-  }
-  return Block->MinPostDominator;
-}
-
-// Compute post dominators assumes that the CFG is in normal form.
-void SCFG::computePostDominators() {
-  Blocks[Blocks.size() - 1]->setImmediatePostDominator(nullptr);
-  // FIXME: validate that this is correct (or not) in the presence of cycles and the fact that the tree is in topological order.
-  Blocks[Blocks.size() - 1]->MaxPostDominator = 1;
-  for (size_t i = Blocks.size() - 2, e = Blocks.size(); i < e; --i) // uses unsigned underflow
-    computePostDominator(Blocks[i]);
-    for (auto Block : Blocks)
-      computePostDominatorSequence(Block);
-  for (auto Block : Blocks) {
-    Block->MinPostDominator -= Block->MaxPostDominator - 1;
-    Block->MaxPostDominator += Block->MinPostDominator - 1;
-  }
-}
-#endif
-
-// If E is a variable, then trace back through any aliases or redundant
-// Phi nodes to find the canonical definition.
-SExpr *getCanonicalVal(SExpr *E) {
-  while (auto *V = dyn_cast<Variable>(E)) {
-    SExpr *D;
-    do {
-      if (V->kind() != Variable::VK_Let)
-        return V;
-      D = V->definition();
-      auto *V2 = dyn_cast<Variable>(D);
-      if (V2)
-        V = V2;
-      else
-        break;
-    } while (true);
-
-    if (ThreadSafetyTIL::isTrivial(D))
-      return D;
-
-    if (Phi *Ph = dyn_cast<Phi>(D)) {
-      if (Ph->status() == Phi::PH_Incomplete)
-        simplifyIncompleteArg(V, Ph);
-
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        continue;
-      }
-    }
-    return V;
-  }
-  return E;
-}
-
-
-// Trace the arguments of an incomplete Phi node to see if they have the same
-// canonical definition.  If so, mark the Phi node as redundant.
-// getCanonicalVal() will recursively call simplifyIncompletePhi().
-void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
-  assert(Ph && Ph->status() == Phi::PH_Incomplete);
-
-  // eliminate infinite recursion -- assume that this node is not redundant.
-  Ph->setStatus(Phi::PH_MultiVal);
-
-  SExpr *E0 = getCanonicalVal(Ph->values()[0]);
-  for (unsigned i=1, n=Ph->values().size(); i<n; ++i) {
-    SExpr *Ei = getCanonicalVal(Ph->values()[i]);
-    if (Ei == V)
-      continue;  // Recursive reference to itself.  Don't count.
-    if (Ei != E0) {
-      return;    // Status is already set to MultiVal.
-    }
-  }
-  Ph->setStatus(Phi::PH_SingleVal);
-  // Eliminate Redundant Phi node.
-  V->setDefinition(Ph->values()[0]);
-}
-
+*/
 
 }  // end namespace til
 }  // end namespace threadSafety

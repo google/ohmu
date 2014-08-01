@@ -227,10 +227,10 @@ public:
   R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> &Bbs) {
     return new (Arena) SCFG(Orig, std::move(Bbs.Elems));
   }
-  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<Variable *> &As,
-                                Container<Variable *> &Is, R_SExpr T) {
-    return new (Arena) BasicBlock(Orig, std::move(As.Elems),
-                                        std::move(Is.Elems), T);
+  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<R_SExpr> &As,
+                                Container<R_SExpr> &Is, R_SExpr T) {
+    return new (Arena) BasicBlock(Orig, Arena, std::move(As.Elems),
+                                               std::move(Is.Elems), T);
   }
   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return addLetVar(new (Arena) Phi(Orig, std::move(As.Elems)));
@@ -309,16 +309,7 @@ public:
 
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
-    Variable *Nv;
-    if (currentInstrs_.size() > 0 && currentInstrs_.back() == E0) {
-      Nv = static_cast<Variable*>(E0);
-      Nv->setName(Orig.name());
-    } else {
-      Nv = new (Arena) Variable(Orig, E0);
-      if (currentBB_ && Nv->kind() == Variable::VK_Let)
-        currentInstrs_.push_back(Nv);
-    }
-
+    Variable *Nv = new (Arena) Variable(Orig, E0);
     if (Nv->name().length() > 0)
       varCtx_.push(Nv);
     return Nv;
@@ -342,11 +333,9 @@ public:
 
 protected:
   SExpr* addLetVar(SExpr* E) {
-    if (!currentBB_ || !E || ThreadSafetyTIL::isTrivial(E))
-      return E;
-    Variable* Nv = new (Arena) Variable(E);
-    currentInstrs_.push_back(Nv);
-    return Nv;
+    if (E && currentBB_ && !ThreadSafetyTIL::isTrivial(E))
+    currentInstrs_.push_back(E);
+    return E;
   }
 
   // Start a new basic block, and traverse E.
@@ -365,8 +354,8 @@ protected:
     assert(currentBB_->instructions().size() == 0);
 
     currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
-    for (Variable *V : currentInstrs_) {
-      currentBB_->addInstruction(V);
+    for (auto *E : currentInstrs_) {
+      currentBB_->addInstruction(E);
     }
     currentBB_->setTerminator(Term);
     currentArgs_.clear();
@@ -381,8 +370,8 @@ protected:
     assert(Target->arguments().size() > 0);
 
     unsigned Idx = Target->addPredecessor(currentBB_);
-    Variable *V = Target->arguments()[0];
-    if (Phi *Ph = dyn_cast<Phi>(V->definition())) {
+    SExpr *E = Target->arguments()[0];
+    if (Phi *Ph = dyn_cast<Phi>(E)) {
       Ph->values()[Idx] = Result;
     }
 
@@ -397,10 +386,10 @@ protected:
   VarContext varCtx_;
   DenseMap<Variable*, Variable*> varMap_;
 
-  SCFG*       currentCFG_;                 // the current SCFG
-  BasicBlock* currentBB_;                  // the current basic block
-  std::vector<Variable*> currentArgs_;     // arguments in currentBB.
-  std::vector<Variable*> currentInstrs_;   // instructions in currentBB.
+  SCFG*       currentCFG_;              // the current SCFG
+  BasicBlock* currentBB_;               // the current basic block
+  std::vector<SExpr*> currentArgs_;     // arguments in currentBB.
+  std::vector<SExpr*> currentInstrs_;   // instructions in currentBB.
 };
 
 

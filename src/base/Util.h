@@ -101,6 +101,9 @@ public:
   unsigned    length() const { return len_; }
   const char* c_str()  const { return str_; }
 
+  unsigned    size()   const { return len_; }
+  const char* data()   const { return str_; }
+
   std::string str() const {
     if (!str_) return std::string();
     return std::string(str_, len_);
@@ -152,11 +155,10 @@ inline StringRef copyStringRef(char* mem, StringRef s) {
 }
 
 
-inline std::ostream& operator<<(std::ostream& ss, const StringRef& str) {
+inline std::ostream& operator<<(std::ostream& ss, const StringRef str) {
   ss << str.c_str();
   return ss;
 }
-
 
 
 class PointerHash {

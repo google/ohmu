@@ -46,6 +46,7 @@ class ValueDecl {
 public:
   StringRef getName() const { return name_; }
   std::string getNameAsString() const { return name_.str(); }
+  std::string getQualifiedNameAsString() const { return name_.str(); }
 
 private:
   StringRef name_;
