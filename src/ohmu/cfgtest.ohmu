@@ -10,6 +10,12 @@ let c = b*b + a*b + 1;
 c;
 
 let a = 1;
+let b = 2;
+let c = 3;
+let d = (if (b == c) then b*a else c*a);
+a+b+d;
+
+let a = 1;
 let b = a+a;
 let c = b*b + a*b + 1;
 let d = (if (b == c) then b*a else c*a) + 12;
