@@ -467,7 +467,7 @@ protected:
       self()->printNull(SS);
       return;
     }
-    if (Sub && E->block()) {
+    if (Sub && E->block() && E->opcode() != COP_Variable) {
       SS << "_x" << E->id();
       return;
     }
@@ -600,18 +600,11 @@ protected:
     SS << E->clangDecl()->getNameAsString();
   }
 
-  void printVariable(const Variable *V, StreamType &SS, bool IsVarDecl = false) {
-    if (!IsVarDecl && Cleanup) {
-      const SExpr* E = getCanonicalVal(V);
-      if (E != V) {
-        printSExpr(E, SS, Prec_Atom);
-        return;
-      }
-    }
+  void printVariable(const Variable *V, StreamType &SS, bool IsVarDecl=false) {
     if (CStyle && V->kind() == Variable::VK_SFun)
       SS << "this";
     else
-      SS << V->name();
+      SS << V->name() << V->id();
   }
 
   void printFunction(const Function *E, StreamType &SS, unsigned sugared = 0) {
@@ -787,12 +780,17 @@ protected:
 
 
   void printBBInstr(const SExpr *E, StreamType &SS) {
-    if (E->opcode() != COP_Store) {
-      SS << "let ";
-      SS << "_x" << E->id();
-      SS << " = ";
+    bool Sub = false;
+    if (E->opcode() == COP_Variable) {
+      auto *V = cast<Variable>(E);
+      SS << "let " << V->name() << V->id() << " = ";
+      E = V->definition();
+      Sub = true;
     }
-    self()->printSExpr(E, SS, Prec_MAX, false);
+    else if (E->opcode() != COP_Store) {
+      SS << "let _x" << E->id() << " = ";
+    }
+    self()->printSExpr(E, SS, Prec_MAX, Sub);
     SS << ";";
     newline(SS);
   }

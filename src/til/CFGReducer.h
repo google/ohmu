@@ -45,23 +45,16 @@ public:
   SExpr* lookup(StringRef S) {
     for (unsigned i=0,n=Vars.size(); i < n; ++i) {
       Variable* V = Vars[n-i-1];
-      if (V->name() == S)
+      if (V->name() == S) {
         return V;
+      }
     }
     return nullptr;
   }
 
-  void push(Variable *V) {
-    Vars.push_back(V);
-  }
-
-  void pop() {
-    Vars.pop_back();
-  }
-
-  VarContext* clone() {
-    return new VarContext(Vars);
-  }
+  void        push(Variable *V) { Vars.push_back(V); }
+  void        pop()             { Vars.pop_back(); }
+  VarContext* clone()           { return new VarContext(Vars); }
 
 private:
   VarContext(const std::vector<Variable*>& Vs) : Vars(Vs) { }
@@ -128,7 +121,7 @@ public:
     currentCFG_ = new (Arena) SCFG(Arena, 0);
     currentBB_ = currentCFG_->entry();
     traverse(E, Context(TRV_Normal, currentCFG_->exit()));
-    currentCFG_->renumberVars();
+    currentCFG_->computeNormalForm();
     return currentCFG_;
   }
 
@@ -269,15 +262,15 @@ public:
     SExpr* Nc = this->self()->traverse(E->condition(), subExprCtx(Ctx));
 
     // Create new basic blocks for then and else.
-    BasicBlock *Ntb = new (Arena) BasicBlock(Arena, currentBB_);
-    BasicBlock *Neb = new (Arena) BasicBlock(Arena, currentBB_);
+    BasicBlock *Ntb = new (Arena) BasicBlock(Arena);
+    BasicBlock *Neb = new (Arena) BasicBlock(Arena);
 
     // Create a continuation if we don't already have one.
     BasicBlock *Ncb = Ctx.Continuation;
-    Variable *NcbArg = nullptr;
+    Phi *NcbArg = nullptr;
     if (!Ncb) {
-      Ncb = new (Arena) BasicBlock(Arena, currentBB_);
-      NcbArg = new (Arena) Variable(new (Arena) Phi());
+      Ncb = new (Arena) BasicBlock(Arena);
+      NcbArg = new (Arena) Phi();
       Ncb->addArgument(NcbArg);
     }
 
@@ -310,14 +303,22 @@ public:
   // Create a new variable from orig, and push it onto the lexical scope.
   Variable *enterScope(Variable &Orig, R_SExpr E0) {
     Variable *Nv = new (Arena) Variable(Orig, E0);
-    if (Nv->name().length() > 0)
+    if (Orig.name().length() > 0) {
       varCtx_.push(Nv);
+      if (currentBB_) {
+        if (currentInstrs_.size() > 0 && currentInstrs_.back() == E0)
+          currentInstrs_.back() = Nv;
+        else
+          currentInstrs_.push_back(Nv);
+      }
+    }
     return Nv;
   }
 
   // Exit the lexical scope of orig.
   void exitScope(const Variable &Orig) {
-    varCtx_.pop();
+    if (Orig.name().length() > 0)
+      varCtx_.pop();
   }
 
   void enterCFG(SCFG &Cfg) {}
@@ -384,7 +385,7 @@ protected:
 
 protected:
   VarContext varCtx_;
-  DenseMap<Variable*, Variable*> varMap_;
+  DenseMap<SExpr*, SExpr*> varMap_;
 
   SCFG*       currentCFG_;              // the current SCFG
   BasicBlock* currentBB_;               // the current basic block

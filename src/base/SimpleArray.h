@@ -106,6 +106,12 @@ public:
     Data[Size++] = Elem;
   }
 
+  // drop last n elements from array
+  void drop(unsigned n = 0) {
+    assert(Size > n);
+    Size -= n;
+  }
+
   void setValues(unsigned Sz, const T& C) {
     assert(Sz <= Capacity);
     Size = Sz;

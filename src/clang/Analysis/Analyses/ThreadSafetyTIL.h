@@ -279,21 +279,22 @@ public:
   // with REQUIRES_EH=1.
   void operator delete(void *) LLVM_DELETED_FUNCTION;
 
-  int         id()    const { return ID; }
+  int         id()    const { return SExprID; }
   BasicBlock* block() const { return Block; }
 
-  void setID(BasicBlock *B, int id) { Block = B; ID = id; }
+  void setID(BasicBlock *B, int id) { Block = B; SExprID = id; }
 
 protected:
   SExpr(TIL_Opcode Op)
-    : Opcode(Op), Reserved(0), Flags(0), ID(0), Block(nullptr) {}
+    : Opcode(Op), Reserved(0), Flags(0), SExprID(0), Block(nullptr) {}
   SExpr(const SExpr &E)
-    : Opcode(E.Opcode), Reserved(0), Flags(E.Flags), ID(0), Block(nullptr) {}
+    : Opcode(E.Opcode), Reserved(0), Flags(E.Flags), SExprID(0),
+      Block(nullptr) {}
 
   const unsigned char Opcode;
   unsigned char Reserved;
   unsigned short Flags;
-  int ID;
+  int SExprID;
   BasicBlock* Block;
 
 private:
@@ -437,10 +438,11 @@ public:
   Future() :
     SExpr(COP_Future), Status(FS_pending), Result(nullptr), Location(nullptr)
   {}
+
 private:
   virtual ~Future() LLVM_DELETED_FUNCTION;
-public:
 
+public:
   // Registers the location in the AST where this future is stored.
   // Forcing the future will automatically update the AST.
   static inline void registerLocation(SExprRef *Member) {
@@ -1430,26 +1432,31 @@ public:
   struct TopologyNode {
     int NodeID;
     int SizeOfSubTree;    // Includes this node, so must be > 1.
+    int Depth;            // Depth of this node in the tree.
     BasicBlock *Parent;   // Pointer to parent.
 
-    TopologyNode() : NodeID(0), SizeOfSubTree(0), Parent(0) {}
+    TopologyNode() : NodeID(0), SizeOfSubTree(0), Depth(0), Parent(nullptr) {}
 
-    bool IsParentOf(const TopologyNode& OtherNode) {
-      return OtherNode.NodeID < NodeID + SizeOfSubTree &&
-             OtherNode.NodeID > NodeID;
+    bool isParentOf(const TopologyNode& OtherNode) {
+      return OtherNode.NodeID > NodeID &&
+             OtherNode.NodeID < NodeID + SizeOfSubTree;
+    }
+
+    bool isParentOfOrEqual(const TopologyNode& OtherNode) {
+      return OtherNode.NodeID >= NodeID &&
+             OtherNode.NodeID < NodeID + SizeOfSubTree;
     }
   };
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
 
-  explicit BasicBlock(MemRegionRef A, BasicBlock *P = nullptr)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0), Parent(P),
+  explicit BasicBlock(MemRegionRef A)
+      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
         Terminator(nullptr) {}
   BasicBlock(BasicBlock &B, MemRegionRef A, InstrArray &&As, InstrArray &&Is,
              SExpr *T)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        Parent(nullptr), Args(std::move(As)), Instrs(std::move(Is)),
-        Terminator(T) {}
+        Args(std::move(As)), Instrs(std::move(Is)), Terminator(T) {}
 
   int blockID() const { return BlockID; }
   size_t numPredecessors() const { return Predecessors.size(); }
@@ -1457,8 +1464,8 @@ public:
   const SCFG* cfg() const { return CFGPtr; }
   SCFG* cfg() { return CFGPtr; }
 
-  const BasicBlock *parent() const { return Parent; }
-  BasicBlock *parent() { return Parent; }
+  const BasicBlock *parent() const { return DominatorNode.Parent; }
+  BasicBlock *parent() { return DominatorNode.Parent; }
 
   const InstrArray &arguments() const { return Args; }
   InstrArray &arguments() { return Args; }
@@ -1472,20 +1479,14 @@ public:
   const SExpr *terminator() const { return Terminator.get(); }
   SExpr *terminator() { return Terminator.get(); }
 
-  void setBlockID(int i) { BlockID = i; }
-  void setParent(BasicBlock *P) { Parent = P; }
-  void setTerminator(SExpr *E)  { Terminator.reset(E); }
+  void setTerminator(SExpr *E) { Terminator.reset(E); }
 
-  bool Dominates(const BasicBlock &other) {
-    return DominatorNode.NodeID <= other.DominatorNode.NodeID &&
-           other.DominatorNode.NodeID <
-               DominatorNode.NodeID + DominatorNode.SizeOfSubTree;
+  bool Dominates(const BasicBlock &Other) {
+    return DominatorNode.isParentOfOrEqual(Other.DominatorNode);
   }
 
-  bool PostDominates(const BasicBlock &other) {
-    return PostDominatorNode.NodeID <= other.PostDominatorNode.NodeID &&
-           other.PostDominatorNode.NodeID <
-               PostDominatorNode.NodeID + PostDominatorNode.SizeOfSubTree;
+  bool PostDominates(const BasicBlock &Other) {
+    return PostDominatorNode.isParentOfOrEqual(Other.PostDominatorNode);
   }
 
   // Add a new argument.  V must define a phi-node.
@@ -1516,10 +1517,6 @@ public:
     auto I = std::find(Predecessors.cbegin(), Predecessors.cend(), BB);
     return std::distance(Predecessors.cbegin(), I);
   }
-
-
-  int renumberVars(int id);
-  void topologicalSort();
 
   template <class V>
   typename V::R_BasicBlock traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1554,12 +1551,15 @@ public:
 private:
   friend class SCFG;
 
+  int  renumberVars(int id);  // assign unique ids to all variables
+  int  topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID);
+  void computeDominator();
+
+private:
   MemRegionRef Arena;       // The arena used to allocate this block.
   SCFG         *CFGPtr;     // The CFG that contains this block.
-  int          BlockID;     // unique id for this BB in the containing CFG,
-                            // IDs are in topological order
-  BasicBlock *Parent;       // The parent block is the enclosing lexical scope.
-                            // The parent dominates this block.
+  int          BlockID;     // unique id for this BB in the containing CFG.
+                            // IDs are in topological order.
   BlockArray Predecessors;  // Predecessor blocks in the CFG.
   InstrArray Args;          // Phi nodes.  One argument per predecessor.
   InstrArray Instrs;        // Instructions.
@@ -1584,9 +1584,9 @@ public:
   SCFG(MemRegionRef A, unsigned Nblocks)
     : SExpr(COP_SCFG), Arena(A), Blocks(A, Nblocks),
       Entry(nullptr), Exit(nullptr) {
-    Entry = new (A) BasicBlock(A, nullptr);
-    Exit  = new (A) BasicBlock(A, Entry);
-    auto *V = new (A) Variable(new (A) Phi());
+    Entry = new (A) BasicBlock(A);
+    Exit  = new (A) BasicBlock(A);
+    auto *V = new (A) Phi();
     Exit->addArgument(V);
     add(Entry);
     add(Exit);
@@ -1612,8 +1612,7 @@ public:
   BasicBlock *exit() { return Exit; }
 
   inline void add(BasicBlock *BB) {
-    assert(BB->CFGPtr == nullptr || BB->CFGPtr == this);
-    BB->setBlockID(Blocks.size());
+    assert(BB->CFGPtr == nullptr);
     BB->CFGPtr = this;
     Blocks.reserveCheck(1, Arena);
     Blocks.push_back(BB);
@@ -1623,9 +1622,6 @@ public:
   void setExit(BasicBlock *BB)  { Exit = BB;  }
 
   void computeNormalForm();
-
-  // Set varable ids in all blocks.
-  void renumberVars();
 
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1641,9 +1637,14 @@ public:
 
   template <class C>
   typename C::CType compare(const SCFG *E, C &Cmp) const {
-    // TODO -- implement CFG comparisons
+    // TODO: implement CFG comparisons
     return Cmp.comparePointers(this, E);
   }
+
+private:
+  void renumberVars();       // assign unique ids to all instructions
+  void topologicalSort();    // renumber basic blocks in topological order
+  void computeDominators();
 
 private:
   MemRegionRef Arena;
@@ -1675,7 +1676,7 @@ public:
 
   template <class C>
   typename C::CType compare(const Goto *E, C &Cmp) const {
-    // TODO -- implement CFG comparisons
+    // TODO: implement CFG comparisons
     return Cmp.comparePointers(this, E);
   }
 
@@ -1721,7 +1722,7 @@ public:
 
   template <class C>
   typename C::CType compare(const Branch *E, C &Cmp) const {
-    // TODO -- implement CFG comparisons
+    // TODO: implement CFG comparisons
     return Cmp.comparePointers(this, E);
   }
 
