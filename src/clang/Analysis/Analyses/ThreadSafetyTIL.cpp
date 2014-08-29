@@ -161,8 +161,7 @@ int BasicBlock::renumberVars(int ID) {
     E->setID(this, ID++);
   for (auto *E : Instrs)
     E->setID(this, ID++);
-  if (Terminator.get())
-    Terminator->setID(this, ID++);
+  TermInstr->setID(this, ID++);
   return ID;
 }
 

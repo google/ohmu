@@ -145,6 +145,34 @@ private:
 };
 
 
+template<class T>
+class ArrayRef {
+public:
+  typedef T* iterator;
+  typedef const T* const_iterator;
+
+  ArrayRef(T* dat, size_t sz) : data_(dat), len_(sz) { }
+
+  size_t size() const { return len_; }
+  T& operator[](size_t i) { return data_[i]; }
+  const T& operator[](size_t i) const { return data_[i]; }
+
+  iterator begin() { return data_; }
+  const_iterator begin() const { return begin(); }
+  const_iterator cbegin() const { return begin(); }
+
+  iterator end() { return data_ + len_; }
+  const_iterator end() const { return end(); }
+  const_iterator cend() const { return end(); }
+
+private:
+  T* data_;
+  size_t len_;
+};
+
+
+
+
 // Copies s to mem, and returns a StringRef of mem.
 // Mem must have space for at least s.length()+1 bytes of data.
 inline StringRef copyStringRef(char* mem, StringRef s) {

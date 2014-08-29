@@ -223,7 +223,8 @@ public:
   R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<R_SExpr> &As,
                                 Container<R_SExpr> &Is, R_SExpr T) {
     return new (Arena) BasicBlock(Orig, Arena, std::move(As.Elems),
-                                               std::move(Is.Elems), T);
+                                               std::move(Is.Elems),
+                                               dyn_cast<Terminator>(T));
   }
   R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
     return addLetVar(new (Arena) Phi(Orig, std::move(As.Elems)));
@@ -233,6 +234,9 @@ public:
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
     return new (Arena) Branch(O, C, B0, B1, 0, 0);
+  }
+  R_SExpr reduceReturn(Return &O, R_SExpr E) {
+    return new (Arena) Return(O, E);
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
@@ -277,7 +281,7 @@ public:
     // Terminate current basic block with a branch
     unsigned IdxT = Ntb->addPredecessor(currentBB_);
     unsigned IdxE = Neb->addPredecessor(currentBB_);
-    SExpr *Nt = new (Arena) Branch(Nc, Ntb, Neb, IdxT, IdxE);
+    auto *Nt = new (Arena) Branch(Nc, Ntb, Neb, IdxT, IdxE);
     terminateCurrentBB(Nt);
 
     // Rewrite then and else in new blocks
@@ -350,7 +354,7 @@ protected:
   }
 
   // Finish the current basic block, terminating it with Term.
-  void terminateCurrentBB(SExpr* Term) {
+  void terminateCurrentBB(Terminator* Term) {
     assert(currentBB_);
     assert(currentBB_->instructions().size() == 0);
 
@@ -376,7 +380,7 @@ protected:
       Ph->values()[Idx] = Result;
     }
 
-    SExpr *Term = new (Arena) Goto(Target, Idx);
+    auto *Term = new (Arena) Goto(Target, Idx);
     terminateCurrentBB(Term);
   }
 

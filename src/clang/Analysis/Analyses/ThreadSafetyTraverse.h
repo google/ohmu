@@ -236,6 +236,9 @@ public:
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
     return C;
   }
+  R_SExpr reduceReturn(Return &O, R_SExpr E) {
+    return E;
+  }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
     return true;
@@ -442,6 +445,7 @@ protected:
       case COP_Phi:        return Prec_Atom;
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
+      case COP_Return:     return Prec_Other;
 
       case COP_Identifier: return Prec_Atom;
       case COP_IfThenElse: return Prec_Other;
@@ -843,6 +847,11 @@ protected:
     printBlockLabel(SS, E->thenBlock(), E->thenIndex());
     SS << " ";
     printBlockLabel(SS, E->elseBlock(), E->elseIndex());
+  }
+
+  void printReturn(const Return *E, StreamType &SS) {
+    SS << "return ";
+    self()->printSExpr(E->returnValue(), SS, Prec_Other);
   }
 
   void printIdentifier(const Identifier *E, StreamType &SS) {
