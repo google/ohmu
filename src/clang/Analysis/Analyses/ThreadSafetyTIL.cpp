@@ -170,6 +170,7 @@ void SCFG::renumberVars() {
   int ID = 0;
   for (auto *B : Blocks)
     ID = B->renumberVars(ID);
+  NumInstructions = ID;
 }
 
 
@@ -212,8 +213,7 @@ int BasicBlock::topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID) {
 
 
 void SCFG::topologicalSort() {
-  if (!Entry || Blocks.size() == 0)
-    return;
+  assert(valid());
 
   for (BasicBlock *B : Blocks)
     B->BlockID = 0;
@@ -271,6 +271,8 @@ void BasicBlock::computeDominator() {
 // Computes dominators for all blocks in a CFG.  Assumes that the blocks have
 // been topologically sorted.
 void SCFG::computeDominators() {
+  assert(valid());
+
   // Walk in topological order to calculate dominators.
   for (auto *B : Blocks)
     B->computeDominator();
@@ -304,6 +306,7 @@ void SCFG::computeNormalForm() {
   topologicalSort();
   renumberVars();
   computeDominators();
+  Normal = true;
 }
 
 

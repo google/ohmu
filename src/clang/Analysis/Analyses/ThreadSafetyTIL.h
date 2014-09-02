@@ -1734,7 +1734,7 @@ public:
 private:
   friend class SCFG;
 
-  int  renumberVars(int id);  // assign unique ids to all variables
+  int  renumberVars(int id);  // assign unique ids to all instructions
   int  topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
 
@@ -1766,7 +1766,7 @@ public:
 
   SCFG(MemRegionRef A, unsigned Nblocks)
     : SExpr(COP_SCFG), Arena(A), Blocks(A, Nblocks),
-      Entry(nullptr), Exit(nullptr) {
+      Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) {
     Entry = new (A) BasicBlock(A);
     Exit  = new (A) BasicBlock(A);
     auto *V = new (A) Phi();
@@ -1777,9 +1777,17 @@ public:
   }
   SCFG(const SCFG &Cfg, BlockArray &&Ba) // steals memory from Ba
       : SExpr(COP_SCFG), Arena(Cfg.Arena), Blocks(std::move(Ba)),
-        Entry(nullptr), Exit(nullptr) {
+        Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) {
     // TODO: set entry and exit!
   }
+
+  /// Return true if this CFG is valid.
+  bool valid() const { return Entry && Exit && Blocks.size() > 0; }
+
+  /// Return true if this CFG has been normalized.
+  /// After normalization, blocks are in topological order, and block and
+  /// instruction IDs have been assigned.
+  bool normal() const { return Normal; }
 
   iterator begin() { return Blocks.begin(); }
   iterator end() { return Blocks.end(); }
@@ -1794,6 +1802,11 @@ public:
   BasicBlock *entry() { return Entry; }
   const BasicBlock *exit() const { return Exit; }
   BasicBlock *exit() { return Exit; }
+
+  /// Return the total number of instructions in the CFG.
+  /// This is useful for building instruction side-tables;
+  /// A call to SExpr::id() will return a number less than numInstructions().
+  int numInstructions() { return NumInstructions; }
 
   inline void add(BasicBlock *BB) {
     assert(BB->CFGPtr == nullptr);
@@ -1835,6 +1848,8 @@ private:
   BlockArray   Blocks;
   BasicBlock   *Entry;
   BasicBlock   *Exit;
+  int          NumInstructions;
+  bool         Normal;
 };
 
 
