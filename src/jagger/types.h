@@ -1,4 +1,4 @@
-//===- event.cpp -----------------------------------------------*- C++ --*-===//
+//===- types.h -------------------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,64 +24,93 @@ struct Block;
 struct Instruction;
 struct Use;
 
-struct Block {
-  int id;
-  int numDominatedBlocks;
-  Instruction* firstInstr;
-  Instruction* lastInstr;
-  Block* dominator;
-  Block* postDominator;
-
-  bool dominates(const Block& block) {
-    return block.id < id + numDominatedBlocks && block.id > id;
-  }
+struct Opcode {
+  const char name[16];
+  bool hasResult;
+  bool hasArg0;
+  bool hasArg1;
+  bool isJump;
+  bool isIntLiteral;
+  unsigned reg;
+  unsigned arg0reg;
+  unsigned arg1reg;
 };
 
 struct Instruction {
-  struct Options {
-    unsigned args;
-  };
+  Instruction() {}
+  Instruction(const Block* block, const Opcode* opcode,
+              const Instruction* arg0 = nullptr,
+              const Instruction* arg1 = nullptr)
+      : block(block),
+        opcode(opcode),
+        key(0),
+        arg0(arg0),
+        arg1(arg1),
+        invalidRegs(0),
+        preferredRegs(0),
+        reg(0),
+        pressure(0) {}
 
-  enum OpCode {
-    NOP,
-    RET,
-    JUMP,
-    BRANCH,
-    INT_LITERAL,
-    PHI,
-    ECHO, // could be NOP?
-    COPY,
-    ADD,
-    MUL,
-    CMP_EQ,
-    CMP_LT,
-    CMP_LE,
-  } opcode;
-  Block* block;
-  int key;
-  int arg0; // also int literal
-  int arg1; // jump target
+  void print(int index);
+
+  const Block* block;
+  const Opcode* opcode;
+  const Instruction* key;
+  const Instruction* arg0; // also literal
+  const Instruction* arg1; // jump target
   unsigned invalidRegs;
   unsigned preferredRegs;
   unsigned reg;
   int pressure;
-
-  Instruction& init(OpCode opcode, int arg0 = 0, int arg1 = 0) {
-    this->opcode = opcode;
-    this->arg0 = arg0;
-    this->arg1 = arg1;
-    invalidRegs = preferredRegs = reg = pressure = 0;
-    return *this;
-  }
-  Instruction& init(int value) {
-    return init(INT_LITERAL, value);
-  }
-
-  void print(int index);
 };
 
+extern Instruction countedMarker;
 
-void print(Instruction* blocks);
+struct Block {
+  Block* parent;
+  Instruction* instrs;
+  size_t numInstrs;
+};
+
+//struct Procedure {
+//  Block* getFirstBlock() const {
+//    return (Block*)((char*)this + firstBlockOffset);
+//  }
+//  Block* getLastBlock() const {
+//    return (Block*)((char*)this + lastBlockOffset);
+//  }
+//  Procedure& setFirstBlock(Block* instr) {
+//    firstBlockOffset = (int)((char*)instr - (char*)this);
+//    return *this;
+//  }
+//  Procedure& setLastBlock(Block* instr) {
+//    lastBlockOffset = (int)((char*)instr - (char*)this);
+//    return *this;
+//  }
+//
+//  int firstBlockOffset;
+//  int lastBlockOffset;
+//};
+
+struct Opcodes {
+  Opcode nop;
+  Opcode jump;
+  Opcode branch;
+  Opcode intValue;
+  Opcode ret;
+  Opcode echo;
+  Opcode copy;
+  Opcode phi;
+  Opcode add;
+  Opcode mul;
+  Opcode cmpeq;
+  Opcode cmplt;
+  Opcode cmple;
+};
+
+extern const Opcodes globalOpcodes;
+
+void print(Instruction* instrs, size_t numInstrs);
 
 #if 0
 union Event;

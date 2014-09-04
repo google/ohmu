@@ -173,41 +173,56 @@ void SCFG::renumberVars() {
   NumInstructions = ID;
 }
 
-
+//void BasicBlock::computeDominator2() {
+//  DominatorNode.SizeOfSubTree = 1;
+//  for (auto B : Predecessors)
+//    if (DominatorNode.SizeOfSubTree)
+//      B->computeDominator2()
+//}
+//
+//void SCFG::computeDominators2() {
+//  Exit->computeDominator2();
+//}
 
 // Performs a topological walk of the CFG,
 // as a reverse post-order depth-first traversal.
 int BasicBlock::topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID) {
-  // If the subtree size is not 0, we've already visited this node.
-  if (BlockID > 0)
-    return ID;
-
-  // FIXME: use post-dominator information to sort nodes.
-  if (terminator()) {
-    switch (terminator()->opcode()) {
-    case COP_Goto: {
-      auto *Gt = cast<Goto>(terminator());
-      ID = Gt->targetBlock()->topologicalWalk(Blocks, ID);
+  if (Visited) return ID;
+  Visited = 1;
+  switch (terminator()->opcode()) {
+    case COP_Goto:
+      ID = cast<Goto>(terminator())->targetBlock()->topologicalWalk(Blocks, ID);
       break;
-    }
-    case COP_Branch: {
-      auto *Br = cast<Branch>(terminator());
-      ID = Br->elseBlock()->topologicalWalk(Blocks, ID);
-      ID = Br->thenBlock()->topologicalWalk(Blocks, ID);
+    case COP_Branch:
+      ID = cast<Branch>(terminator())->elseBlock()->topologicalWalk(Blocks, ID);
+      ID = cast<Branch>(terminator())->thenBlock()->topologicalWalk(Blocks, ID);
       break;
-    }
+    case COP_Return:
+      break;
     default:
-      break;
-    }
+      assert(false);
   }
-
   assert(ID > 0);
-
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
-  ID = ID-1;
-  BlockID = ID;
-  Blocks[ID] = this;
+  Blocks[BlockID = --ID] = this;
+  return ID;
+}
+
+// Performs a topological walk of the CFG,
+// as a reverse post-order depth-first traversal.
+// Assumes that there are no critical edges.
+int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+  if (!Visited) return ID;
+  Visited = 0;
+  if (DominatorNode.Parent)
+    ID = DominatorNode.Parent->topologicalFinalSort(Blocks, ID);
+  for (auto *Pred : Predecessors)
+    ID = Pred->topologicalFinalSort(Blocks, ID);
+  assert(ID < Blocks.size());
+  // set ID and update block array in place.
+  // We may lose pointers to unreachable blocks.
+  Blocks[BlockID = ID++] = this;
   return ID;
 }
 
@@ -215,8 +230,9 @@ int BasicBlock::topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID) {
 void SCFG::topologicalSort() {
   assert(valid());
 
+  // TODO: this shouldn't be necessary
   for (BasicBlock *B : Blocks)
-    B->BlockID = 0;
+    B->Visited = 0;
 
   int BID = Entry->topologicalWalk(Blocks, Blocks.size());
 
@@ -237,36 +253,68 @@ void SCFG::topologicalSort() {
 // its predecessors have already computed their dominators.  This is achieved
 // by topologically sorting the nodes and visiting them in order.
 void BasicBlock::computeDominator() {
-  // Find the first non-back edge predecessor
   BasicBlock *Candidate = nullptr;
-  for (auto *Pred : Predecessors) {
-    if (Pred->BlockID < BlockID) {
-      Candidate = Pred;
-      break;
-    }
-  }
-  if (!Candidate)
-    return;
-
   // Walk backwards from each predecessor to find the common dominator node.
-  for (auto* Pred : Predecessors) {
+  for (auto *Pred : Predecessors) {
     // Skip back-edges
-    if (Pred->BlockID > BlockID)
+    if (Pred->BlockID >= BlockID) continue;
+    // If we don't yet have a candidate for dominator yet, take this one.
+    if (Candidate == nullptr) {
+      Candidate = Pred;
       continue;
-
-    auto* PredDom = Pred;
-    while (PredDom != Candidate) {
-      if (Candidate->DominatorNode.Depth > PredDom->DominatorNode.Depth)
+    }
+    // Walk the alternate and current candidate back to find a common ancestor.
+    auto *Alternate = Pred;
+    while (Alternate != Candidate) {
+      if (Candidate->BlockID > Alternate->BlockID)
         Candidate = Candidate->DominatorNode.Parent;
       else
-        PredDom = PredDom->DominatorNode.Parent;
+        Alternate = Alternate->DominatorNode.Parent;
     }
   }
-
   DominatorNode.Parent = Candidate;
-  DominatorNode.Depth  = Candidate->DominatorNode.Depth + 1;
+  DominatorNode.SizeOfSubTree = 1;
 }
 
+void BasicBlock::computePostDominator() {
+#if 0
+  BasicBlock *Candidate = nullptr;
+  // Walk backwards from each predecessor to find the common dominator node.
+  SimpleArray<BasicBlock*> Successors;
+  switch (TermInstr->opcode()) {
+  COP_Goto:
+    PostDominatorNode.Parent = cast<Goto>(TermInstr)->targetBlock();
+    PostDominatorNode.SizeOfSubTree = 1;
+    return;
+  COP_Branch:
+    BasicBlock *Successors[] = {cast<Branch>(TermInstr)->thenBlock(),
+                                cast<Branch>(TermInstr)->elseBlock()};
+    for (auto Succ = &Successors[0], E = &Successors[2]; Succ != E; ++Succ) {
+      // Skip back-edges
+      if ((*Succ)->BlockID <= BlockID) continue;
+      // If we don't yet have a candidate for dominator yet, take this one.
+      if (Candidate == nullptr) {
+        Candidate = (*Succ);
+        continue;
+      }
+      // Walk the alternate and current candidate back to find a common ancestor.
+      auto *Alternate = (*Succ);
+      while (Alternate != Candidate) {
+        if (Candidate->BlockID < Alternate->BlockID)
+          Candidate = Candidate->PostDominatorNode.Parent;
+        else
+          Alternate = Alternate->PostDominatorNode.Parent;
+      }
+    }
+    PostDominatorNode.Parent = Candidate;
+    PostDominatorNode.SizeOfSubTree = 1;
+    return;
+    default:
+      assert(false);
+      return;
+  }
+#endif
+}
 
 // Computes dominators for all blocks in a CFG.  Assumes that the blocks have
 // been topologically sorted.
@@ -302,10 +350,30 @@ void SCFG::computeDominators() {
 }
 
 
+#include <conio.h>
 void SCFG::computeNormalForm() {
-  topologicalSort();
-  renumberVars();
-  computeDominators();
+  int array[] = {0, 1, 2, 3, 4};
+  SimpleArray<int> test(array, 5, 5);
+  for (auto i : test)
+    printf("%d ", i);
+  printf("\n");
+  for (auto i : SimpleArray<int>::ReverseAdaptor(test))
+    printf("%d ", i);
+  printf("\n");
+  _getch();
+#if 0
+  Entry->topologicalWalk(Blocks, Blocks.size());
+  for (auto *Block : Blocks) Block->computeDominator();
+  Exit->topologicalFinalSort(Blocks, 0);
+  for (auto **B = Blocks.end() - 1, **E = Blocks.begin(); B >= E; --B) {
+    (*B)->computePostDominator();
+    (*B)->DominatorNode.Parent->DominatorNode.SizeOfSubTree +=
+        (*B)->DominatorNode.SizeOfSubTree;
+  }
+#endif
+  //topologicalSort();
+  //renumberVars();
+  //computeDominators();
   Normal = true;
 }
 

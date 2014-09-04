@@ -254,6 +254,8 @@ class BasicBlock;
 class SExpr {
 public:
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
+  void* getBackendID() const { return backendID; }
+  void setBackendID(void* id) { backendID = id; }
 
   // Subclasses of SExpr must define the following:
   //
@@ -302,6 +304,7 @@ protected:
   unsigned short Flags;
   int SExprID;
   BasicBlock* Block;
+  void* backendID;
 
 private:
   SExpr() LLVM_DELETED_FUNCTION;
@@ -1605,10 +1608,9 @@ public:
   struct TopologyNode {
     int NodeID;
     int SizeOfSubTree;    // Includes this node, so must be > 1.
-    int Depth;            // Depth of this node in the tree.
     BasicBlock *Parent;   // Pointer to parent.
 
-    TopologyNode() : NodeID(0), SizeOfSubTree(0), Depth(0), Parent(nullptr) {}
+    TopologyNode() : NodeID(0), SizeOfSubTree(0), Parent(nullptr) {}
 
     bool isParentOf(const TopologyNode& OtherNode) {
       return OtherNode.NodeID > NodeID &&
@@ -1625,10 +1627,10 @@ public:
 
   explicit BasicBlock(MemRegionRef A)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        TermInstr(nullptr) {}
+        Visited(0), TermInstr(nullptr) {}
   BasicBlock(BasicBlock &B, MemRegionRef A, InstrArray &&As, InstrArray &&Is,
              Terminator *T)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
+      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),Visited(0),
         Args(std::move(As)), Instrs(std::move(Is)), TermInstr(T) {}
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
@@ -1736,13 +1738,18 @@ private:
 
   int  renumberVars(int id);  // assign unique ids to all instructions
   int  topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID);
+  int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
+  void computePostDominator();
+  void computeDominator2();
 
 private:
-  MemRegionRef Arena;       // The arena used to allocate this block.
-  SCFG         *CFGPtr;     // The CFG that contains this block.
-  int          BlockID;     // unique id for this BB in the containing CFG.
-                            // IDs are in topological order.
+  MemRegionRef Arena;        // The arena used to allocate this block.
+  SCFG         *CFGPtr;      // The CFG that contains this block.
+  int          BlockID : 31; // unique id for this BB in the containing CFG.
+                             // IDs are in topological order.
+  int          Visited : 1;  // Bit to determine if a block has been visited
+                             // during a traversal.
   BlockArray  Predecessors;  // Predecessor blocks in the CFG.
   InstrArray  Args;          // Phi nodes.  One argument per predecessor.
   InstrArray  Instrs;        // Instructions.
@@ -1819,6 +1826,7 @@ public:
   void setExit(BasicBlock *BB)  { Exit = BB;  }
 
   void computeNormalForm();
+  size_t numBlocks() const { return Blocks.size(); }
 
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1842,6 +1850,7 @@ private:
   void renumberVars();       // assign unique ids to all instructions
   void topologicalSort();    // renumber basic blocks in topological order
   void computeDominators();
+  void computeDominators2();
 
 private:
   MemRegionRef Arena;

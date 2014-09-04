@@ -129,6 +129,34 @@ public:
     return J - Osz;
   }
 
+  // An adaptor to reverse a simple array
+  class ReverseAdaptor {
+   public:
+    ReverseAdaptor(SimpleArray &Array) : Array(Array) {}
+    // A reverse iterator used by the reverse adaptor
+    class Iterator {
+     public:
+      Iterator(T *Data) : Data(Data) {}
+      T &operator*() { return *Data; }
+      const T &operator*() const { return *Data; }
+      Iterator &operator++() {
+        --Data;
+        return *this;
+      }
+      bool operator!=(Iterator Other) { return Data != Other.Data; }
+
+     private:
+      T *Data;
+    };
+    Iterator begin() { return Array.end() - 1; }
+    Iterator end() { return Array.begin() - 1; }
+    const Iterator begin() const { return Array.end() - 1; }
+    const Iterator end() const { return Array.begin() - 1; }
+
+   private:
+    SimpleArray &Array;
+  };
+
 private:
   // std::max is annoying here, because it requires a reference,
   // thus forcing InitialCapacity to be initialized outside the .h file.
@@ -142,7 +170,6 @@ private:
   size_t Size;
   size_t Capacity;
 };
-
 
 }  // end namespace ohmu
 
