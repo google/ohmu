@@ -877,7 +877,8 @@ void InstructionStream::printWalks() {
 
 void encode(SCFG* cfg, char* output) {
   InstructionStream stream;
-  stream.encode(&cfg, 1);
+  //stream.encode(&cfg, 1);
+
   //print(stream.instrs.data(), stream.instrs.size());
   //stream.printWalks();
   //X64Builder builder;

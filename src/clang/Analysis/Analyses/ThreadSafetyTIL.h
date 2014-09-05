@@ -1606,10 +1606,6 @@ public:
   // ID in the tree according to a depth-first search.  Tree traversals are
   // always up, towards the parents.
   struct TopologyNode {
-    int NodeID;
-    int SizeOfSubTree;    // Includes this node, so must be > 1.
-    BasicBlock *Parent;   // Pointer to parent.
-
     TopologyNode() : NodeID(0), SizeOfSubTree(0), Parent(nullptr) {}
 
     bool isParentOf(const TopologyNode& OtherNode) {
@@ -1621,6 +1617,36 @@ public:
       return OtherNode.NodeID >= NodeID &&
              OtherNode.NodeID < NodeID + SizeOfSubTree;
     }
+
+    void addSizeToDominator() {
+      if (Parent) Parent->DominatorNode.SizeOfSubTree += SizeOfSubTree;
+    }
+
+    void assignDominatorID() {
+      if (!Parent) {
+        NodeID = SizeOfSubTree - 1;
+        return;
+      }
+      NodeID = Parent->DominatorNode.NodeID;
+      Parent->DominatorNode.NodeID -= SizeOfSubTree;
+    }
+
+    void addSizeToPostDominator() {
+      if (Parent) Parent->PostDominatorNode.SizeOfSubTree += SizeOfSubTree;
+    }
+
+    void assignPostDominatorID() {
+      if (!Parent) {
+        NodeID = SizeOfSubTree - 1;
+        return;
+      }
+      NodeID = Parent->PostDominatorNode.NodeID;
+      Parent->PostDominatorNode.NodeID -= SizeOfSubTree;
+    }
+
+    int NodeID;
+    int SizeOfSubTree;    // Includes this node, so must be > 1.
+    BasicBlock *Parent;   // Pointer to parent.
   };
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
@@ -1848,9 +1874,6 @@ public:
 
 private:
   void renumberVars();       // assign unique ids to all instructions
-  void topologicalSort();    // renumber basic blocks in topological order
-  void computeDominators();
-  void computeDominators2();
 
 private:
   MemRegionRef Arena;

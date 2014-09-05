@@ -157,6 +157,9 @@ public:
     SimpleArray &Array;
   };
 
+  const ReverseAdaptor reverse() const { return const ReverseAdaptor(*this); }
+  ReverseAdaptor reverse() { return ReverseAdaptor(*this); }
+
 private:
   // std::max is annoying here, because it requires a reference,
   // thus forcing InitialCapacity to be initialized outside the .h file.
