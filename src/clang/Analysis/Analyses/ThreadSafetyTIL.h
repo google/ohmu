@@ -1622,6 +1622,10 @@ public:
       if (Parent) Parent->DominatorNode.SizeOfSubTree += SizeOfSubTree;
     }
 
+    void addSizeToPostDominator() {
+      if (Parent) Parent->PostDominatorNode.SizeOfSubTree += SizeOfSubTree;
+    }
+
     void assignDominatorID() {
       if (!Parent) {
         NodeID = SizeOfSubTree - 1;
@@ -1629,10 +1633,6 @@ public:
       }
       NodeID = Parent->DominatorNode.NodeID;
       Parent->DominatorNode.NodeID -= SizeOfSubTree;
-    }
-
-    void addSizeToPostDominator() {
-      if (Parent) Parent->PostDominatorNode.SizeOfSubTree += SizeOfSubTree;
     }
 
     void assignPostDominatorID() {
@@ -1763,7 +1763,7 @@ private:
   friend class SCFG;
 
   int  renumberVars(int id);  // assign unique ids to all instructions
-  int  topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID);
+  int  topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
   void computePostDominator();

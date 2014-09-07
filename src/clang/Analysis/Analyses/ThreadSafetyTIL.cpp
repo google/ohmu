@@ -154,6 +154,7 @@ void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
   V->setDefinition(Ph->values()[0]);
 }
 
+// Renumbers the arguments and instructions to have unique, sequential IDs.
 int BasicBlock::renumberVars(int ID) {
   for (auto *Arg : Args)
     Arg->setID(this, ID++);
@@ -163,24 +164,34 @@ int BasicBlock::renumberVars(int ID) {
   return ID;
 }
 
-// Performs a topological walk of the CFG,
-// as a reverse post-order depth-first traversal.
-int BasicBlock::topologicalWalk(SimpleArray<BasicBlock*>& Blocks, int ID) {
+// Serializes the CFG's blocks using a reverse post-order depth-first traversal
+// starting from the entry block.
+int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (Visited) return ID;
   Visited = 1;
   for (auto *Block : successors())
-    ID = Block->topologicalWalk(Blocks, ID);
-  assert(ID > 0);
+    ID = Block->topologicalSort(Blocks, ID);
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
+  assert(ID > 0);
   Blocks[BlockID = --ID] = this;
   return ID;
 }
 
-// Performs a topological walk of the CFG,
-// as a reverse post-order depth-first traversal.
-// Assumes that there are no critical edges.
+// Serializes the CFG's blocks using a reverse post-order depth-first traversal
+// starting from the exit block and following back-edges.  This travrsal
+// explicitly serializes the dominator before any predecessors.  If the
+// assumptions are met, this serialization will guarantee that all blocks are
+// serialized after their dominator and before their post-dominator.
+// Assumes that there are no critical edges.  This sort is assumed to occur as
+// part of a multi-phase cleanup in which a standard topoligical sort has
+// already been performed and dominators have been computed.  It also assumes
+// that the entry block is reachable from the exit block and that no blocks are
+// accessable via traversal of back-edges from the exit block that weren't
+// accessable via edges from the entry block.
 int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+  // Visited is assumed to have been set by the topologicalSort.  This pass
+  // assumes !Visited means that we've visited this node before.
   if (!Visited) return ID;
   Visited = 0;
   if (DominatorNode.Parent)
@@ -188,8 +199,6 @@ int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   for (auto *Pred : Predecessors)
     ID = Pred->topologicalFinalSort(Blocks, ID);
   assert(ID < Blocks.size());
-  // set ID and update block array in place.
-  // We may lose pointers to unreachable blocks.
   Blocks[BlockID = ID++] = this;
   return ID;
 }
@@ -221,13 +230,17 @@ void BasicBlock::computeDominator() {
   DominatorNode.SizeOfSubTree = 1;
 }
 
+// Computes the immediate post-dominator of the current block.  Assumes that all
+// of its successors have already computed their post-dominators.  This is
+// achieved by topologically sorting the nodes and visiting them in reverse
+// order.
 void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
-  // Walk backwards from each predecessor to find the common dominator node.
+  // Walk back from each predecessor to find the common post-dominator node.
   for (auto *Succ : successors()) {
     // Skip back-edges
     if (Succ->BlockID <= BlockID) continue;
-    // If we don't yet have a candidate for dominator yet, take this one.
+    // If we don't yet have a candidate for post-dominator yet, take this one.
     if (Candidate == nullptr) {
       Candidate = Succ;
       continue;
@@ -245,29 +258,44 @@ void BasicBlock::computePostDominator() {
   PostDominatorNode.SizeOfSubTree = 1;
 }
 
+// Normalizes a CFG.  Normalization has a few major components:
+// 1) Removing unreachabe blocks.
+// 2) Computeing dominators and post-dominators
+// 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
-  int NumUnreachableBlocks = Entry->topologicalWalk(Blocks, Blocks.size());
-  // If there were unreachable blocks, then ID will not be zero;
-  // shift everything down, and delete unreachable blocks.
+  // Topologically sort the blocks starting a the entry block.  The sort will
+  // place the sorted blocks in the "Blocks" array from back to front and return
+  // the last index used.
+  int NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
   if (NumUnreachableBlocks > 0) {
+    // If there were unreachable blocks shift everything down, and delete them.
     for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I)
       Blocks[I - NumUnreachableBlocks] = Blocks[I];
     Blocks.drop(NumUnreachableBlocks);
   }
+  // Compute dominators.
   for (auto *Block : Blocks) Block->computeDominator();
+  // Once dominators have been computed, the final sort may be performed.  The
+  // final sort places the blocks in the "Blocks" array in order and returns the
+  // number of blocks added to the array.
   int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
   assert(NumBlocks == Blocks.size());
-  // Renumber the instructions after the final sort.
+  // Renumber the instructions now that we have a final sort.
   int InstrID = 0;
   for (auto *Block : Blocks) InstrID = Block->renumberVars(InstrID);
+  // Compute post-dominators and assign compute the sizes of each node in the
+  // dominator tree.
   for (auto *Block : Blocks.reverse()) {
     Block->computePostDominator();
     Block->DominatorNode.addSizeToDominator();
   }
+  // Compute the sizes of each node in the post-dominator tree and assign IDs in
+  // the dominator tree.
   for (auto *Block : Blocks) {
     Block->DominatorNode.assignDominatorID();
     Block->PostDominatorNode.addSizeToPostDominator();
   }
+  // Assign IDs in the post-dominator tree.
   for (auto *Block : Blocks.reverse())
     Block->PostDominatorNode.assignPostDominatorID();
 }
