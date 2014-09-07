@@ -254,8 +254,8 @@ class BasicBlock;
 class SExpr {
 public:
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
-  void* getBackendID() const { return backendID; }
-  void setBackendID(void* id) { backendID = id; }
+  void* getBackendID() const { return BackendID; }
+  void setBackendID(void* ID) { BackendID = ID; }
 
   // Subclasses of SExpr must define the following:
   //
@@ -304,7 +304,7 @@ protected:
   unsigned short Flags;
   int SExprID;
   BasicBlock* Block;
-  void* backendID;
+  void* BackendID;
 
 private:
   SExpr() LLVM_DELETED_FUNCTION;
@@ -1767,7 +1767,6 @@ private:
   int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
   void computePostDominator();
-  void computeDominator2();
 
 private:
   MemRegionRef Arena;        // The arena used to allocate this block.
