@@ -48,6 +48,14 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+SExpr* Future::force() {
+  Status = FS_evaluating;
+  Result = compute();
+  Status = FS_done;
+  return Result;
+}
+
+
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
@@ -155,7 +163,7 @@ void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
 }
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
-int BasicBlock::renumberVars(int ID) {
+int BasicBlock::renumberInstrs(int ID) {
   for (auto *Arg : Args)
     Arg->setID(this, ID++);
   for (auto *Instr : Instrs)
@@ -164,8 +172,10 @@ int BasicBlock::renumberVars(int ID) {
   return ID;
 }
 
-// Serializes the CFG's blocks using a reverse post-order depth-first traversal
-// starting from the entry block.
+// Sorts the CFGs blocks using a reverse post-order depth-first traversal.
+// Each block will be written into the Blocks array in order, and its BlockID
+// will be set to the index in the array.  Sorting should start from the entry
+// block, and ID should be the total number of blocks.
 int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (Visited) return ID;
   Visited = 1;
@@ -174,21 +184,21 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
-  Blocks[BlockID = --ID] = this;
+  BlockID = --ID;
+  Blocks[BlockID] = this;
   return ID;
 }
 
-// Serializes the CFG's blocks using a reverse post-order depth-first traversal
-// starting from the exit block and following back-edges.  This travrsal
-// explicitly serializes the dominator before any predecessors.  If the
-// assumptions are met, this serialization will guarantee that all blocks are
-// serialized after their dominator and before their post-dominator.
-// Assumes that there are no critical edges.  This sort is assumed to occur as
-// part of a multi-phase cleanup in which a standard topoligical sort has
-// already been performed and dominators have been computed.  It also assumes
-// that the entry block is reachable from the exit block and that no blocks are
-// accessable via traversal of back-edges from the exit block that weren't
-// accessable via edges from the entry block.
+// Performs a reverse topological traversal, starting from the exit block and
+// following back-edges.  The dominator is serialized before any predecessors,
+// which guarantees that all blocks are serialized after their dominator and
+// before their post-dominator (because it's a reverse topological traversal).
+// ID should be initially set to 0.
+//
+// This sort assumes that (1) dominators have been computed, (2) there are no
+// critical edges, and (3) the entry block is reachable from the exit block
+// and no blocks are accessable via traversal of back-edges from the exit that
+// weren't accessable via forward edges from the entry.
 int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   // Visited is assumed to have been set by the topologicalSort.  This pass
   // assumes !Visited means that we've visited this node before.
@@ -199,13 +209,14 @@ int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   for (auto *Pred : Predecessors)
     ID = Pred->topologicalFinalSort(Blocks, ID);
   assert(ID < Blocks.size());
-  Blocks[BlockID = ID++] = this;
+  BlockID = ID++;
+  Blocks[BlockID] = this;
   return ID;
 }
 
 // Computes the immediate dominator of the current block.  Assumes that all of
 // its predecessors have already computed their dominators.  This is achieved
-// by topologically sorting the nodes and visiting them in order.
+// by visiting the nodes in topological order.
 void BasicBlock::computeDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk backwards from each predecessor to find the common dominator node.
@@ -232,8 +243,7 @@ void BasicBlock::computeDominator() {
 
 // Computes the immediate post-dominator of the current block.  Assumes that all
 // of its successors have already computed their post-dominators.  This is
-// achieved by topologically sorting the nodes and visiting them in reverse
-// order.
+// achieved visiting the nodes in reverse topological order.
 void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk back from each predecessor to find the common post-dominator node.
@@ -258,46 +268,81 @@ void BasicBlock::computePostDominator() {
   PostDominatorNode.SizeOfSubTree = 1;
 }
 
+
+// Renumber instructions in all blocks
+void SCFG::renumberInstrs() {
+  int InstrID = 0;
+  for (auto *Block : Blocks)
+    InstrID = Block->renumberInstrs(InstrID);
+}
+
+
+static inline void computeNodeSize(BasicBlock *B,
+                                   BasicBlock::TopologyNode BasicBlock::*TN) {
+  BasicBlock::TopologyNode *N = &(B->*TN);
+  if (N->Parent) {
+    BasicBlock::TopologyNode *P = &(N->Parent->*TN);
+    // Initially set ID relative to the (as yet uncomputed) parent ID
+    N->NodeID = P->SizeOfSubTree;
+    P->SizeOfSubTree += N->SizeOfSubTree;
+  }
+}
+
+static inline void computeNodeID(BasicBlock *B,
+                                 BasicBlock::TopologyNode BasicBlock::*TN) {
+  BasicBlock::TopologyNode *N = &(B->*TN);
+  if (N->Parent) {
+    BasicBlock::TopologyNode *P = &(N->Parent->*TN);
+    N->NodeID += P->NodeID;    // Fix NodeIDs relative to starting node.
+  }
+}
+
+
 // Normalizes a CFG.  Normalization has a few major components:
-// 1) Removing unreachabe blocks.
-// 2) Computeing dominators and post-dominators
+// 1) Removing unreachable blocks.
+// 2) Computing dominators and post-dominators
 // 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
-  // Topologically sort the blocks starting a the entry block.  The sort will
-  // place the sorted blocks in the "Blocks" array from back to front and return
-  // the last index used.
+  // Topologically sort the blocks starting from the entry block.
   int NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
   if (NumUnreachableBlocks > 0) {
     // If there were unreachable blocks shift everything down, and delete them.
-    for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I)
-      Blocks[I - NumUnreachableBlocks] = Blocks[I];
+    for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I) {
+      size_t NI = I - NumUnreachableBlocks;
+      Blocks[NI] = Blocks[I];
+      Blocks[NI]->BlockID = NI;
+      // FIXME: clean up predecessor pointers to unreachable blocks?
+    }
     Blocks.drop(NumUnreachableBlocks);
   }
+
   // Compute dominators.
-  for (auto *Block : Blocks) Block->computeDominator();
-  // Once dominators have been computed, the final sort may be performed.  The
-  // final sort places the blocks in the "Blocks" array in order and returns the
-  // number of blocks added to the array.
+  for (auto *Block : Blocks)
+    Block->computeDominator();
+
+  // Once dominators have been computed, the final sort may be performed.
   int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
   assert(NumBlocks == Blocks.size());
+
   // Renumber the instructions now that we have a final sort.
-  int InstrID = 0;
-  for (auto *Block : Blocks) InstrID = Block->renumberVars(InstrID);
-  // Compute post-dominators and assign compute the sizes of each node in the
+  renumberInstrs();
+
+  // Compute post-dominators and compute the sizes of each node in the
   // dominator tree.
   for (auto *Block : Blocks.reverse()) {
     Block->computePostDominator();
-    Block->DominatorNode.addSizeToDominator();
+    computeNodeSize(Block, &BasicBlock::DominatorNode);
   }
   // Compute the sizes of each node in the post-dominator tree and assign IDs in
   // the dominator tree.
   for (auto *Block : Blocks) {
-    Block->DominatorNode.assignDominatorID();
-    Block->PostDominatorNode.addSizeToPostDominator();
+    computeNodeID(Block, &BasicBlock::DominatorNode);
+    computeNodeSize(Block, &BasicBlock::PostDominatorNode);
   }
   // Assign IDs in the post-dominator tree.
-  for (auto *Block : Blocks.reverse())
-    Block->PostDominatorNode.assignPostDominatorID();
+  for (auto *Block : Blocks.reverse()) {
+    computeNodeID(Block, &BasicBlock::PostDominatorNode);
+  }
 }
 
 }  // end namespace til

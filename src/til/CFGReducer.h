@@ -120,19 +120,15 @@ public:
     assert(currentCFG_ == nullptr && currentBB_ == nullptr);
     currentCFG_ = new (Arena) SCFG(Arena, 0);
     currentBB_ = currentCFG_->entry();
-    traverse(E, Context(TRV_Normal, currentCFG_->exit()));
+    traverseSExpr(E, Context(TRV_Normal, currentCFG_->exit()));
     currentCFG_->computeNormalForm();
     return currentCFG_;
-  }
-
-  R_SExpr traverse(SExprRef &E, R_Ctx Ctx) {
-    return traverse(E.get(), Ctx);
   }
 
   // Lower SExpr, writing intermediate results to the current basic block.
   // If Ctx.Continuation is true, then terminate the basic block, by passing
   // the result to the continuation.
-  R_SExpr traverse(SExpr *E, R_Ctx Ctx) {
+  R_SExpr traverseSExpr(SExpr *E, R_Ctx Ctx) {
     R_SExpr Result = this->self()->traverseByCase(E, Ctx);
     if (!Ctx.Continuation)
       return Result;  // No continuation.  Continue with current basic block.
@@ -141,7 +137,6 @@ public:
     terminateWithGoto(Result, Ctx.Continuation);
     return nullptr;
   }
-
 
   R_SExpr reduceNull() {
     return nullptr;
@@ -233,7 +228,7 @@ public:
     return new (Arena) Goto(Orig, B, 0);
   }
   R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
-    return new (Arena) Branch(O, C, B0, B1, 0, 0);
+    return new (Arena) Branch(O, C, B0, B1);
   }
   R_SExpr reduceReturn(Return &O, R_SExpr E) {
     return new (Arena) Return(O, E);
@@ -263,7 +258,7 @@ public:
       return E->traverse(*this->self(), Ctx);
     }
 
-    SExpr* Nc = this->self()->traverse(E->condition(), subExprCtx(Ctx));
+    SExpr* Nc = this->self()->traverseSExpr(E->condition(), subExprCtx(Ctx));
 
     // Create new basic blocks for then and else.
     BasicBlock *Ntb = new (Arena) BasicBlock(Arena);
@@ -279,17 +274,17 @@ public:
     }
 
     // Terminate current basic block with a branch
-    unsigned IdxT = Ntb->addPredecessor(currentBB_);
-    unsigned IdxE = Neb->addPredecessor(currentBB_);
-    auto *Nt = new (Arena) Branch(Nc, Ntb, Neb, IdxT, IdxE);
+    Ntb->addPredecessor(currentBB_);
+    Neb->addPredecessor(currentBB_);
+    auto *Nt = new (Arena) Branch(Nc, Ntb, Neb);
     terminateCurrentBB(Nt);
 
     // Rewrite then and else in new blocks
     startBB(Ntb);
-    this->self()->traverse(E->thenExpr(), Context(TRV_Normal, Ncb));
+    this->self()->traverseSExpr(E->thenExpr(), Context(TRV_Normal, Ncb));
 
     startBB(Neb);
-    this->self()->traverse(E->elseExpr(), Context(TRV_Normal, Ncb));
+    this->self()->traverseSExpr(E->elseExpr(), Context(TRV_Normal, Ncb));
 
     if (Ctx.Continuation)
       return nullptr;

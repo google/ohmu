@@ -157,7 +157,7 @@ public:
     SimpleArray &Array;
   };
 
-  const ReverseAdaptor reverse() const { return const ReverseAdaptor(*this); }
+  const ReverseAdaptor reverse() const { return ReverseAdaptor(*this); }
   ReverseAdaptor reverse() { return ReverseAdaptor(*this); }
 
 private:

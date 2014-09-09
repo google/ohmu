@@ -58,11 +58,13 @@ public:
   // Traverse an expression -- returning a result of type R_SExpr.
   // Override this method to do something for every expression, regardless
   // of which kind it is.
-  typename R::R_SExpr traverse(SExprRef &E, typename R::R_Ctx Ctx) {
-    return traverse(E.get(), Ctx);
+  // The type T must be a subclass of SExpr.
+  template <class T>
+  typename R::R_SExpr traverse(T* &E, typename R::R_Ctx Ctx) {
+    return traverseSExpr(E, Ctx);
   }
 
-  typename R::R_SExpr traverse(SExpr *E, typename R::R_Ctx Ctx) {
+  typename R::R_SExpr traverseSExpr(SExpr *E, typename R::R_Ctx Ctx) {
     return traverseByCase(E, Ctx);
   }
 
@@ -454,15 +456,17 @@ protected:
     return Prec_MAX;
   }
 
-  void printBlockLabel(StreamType & SS, const BasicBlock *BB, unsigned index) {
+  void printBlockLabel(StreamType & SS, const BasicBlock *BB, int index) {
     if (!BB) {
       SS << "BB_null";
       return;
     }
     SS << "BB_";
     SS << BB->blockID();
-    SS << ":";
-    SS << index;
+    if (index >= 0) {
+      SS << ":";
+      SS << index;
+    }
   }
 
 
@@ -844,9 +848,9 @@ protected:
     SS << "branch (";
     self()->printSExpr(E->condition(), SS, Prec_MAX);
     SS << ") ";
-    printBlockLabel(SS, E->thenBlock(), E->thenIndex());
+    printBlockLabel(SS, E->thenBlock(), -1);
     SS << " ";
-    printBlockLabel(SS, E->elseBlock(), E->elseIndex());
+    printBlockLabel(SS, E->elseBlock(), -1);
   }
 
   void printReturn(const Return *E, StreamType &SS) {
