@@ -44,8 +44,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_THREAD_SAFETY_TIL_H
-#define LLVM_CLANG_THREAD_SAFETY_TIL_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTIL_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTIL_H
 
 // All clang include dependencies for this file must be put in
 // ThreadSafetyUtil.h.
@@ -371,7 +371,7 @@ public:
   VariableKind kind() const { return static_cast<VariableKind>(Flags); }
 
   /// Return the name of the variable, if any.
-  const StringRef name() const { return Name; }
+  StringRef name() const { return Name; }
 
   /// Return the clang declaration for this variable, if any.
   const clang::ValueDecl *clangDecl() const { return Cvdecl; }
@@ -1311,15 +1311,24 @@ public:
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
 
-  Phi() : SExpr(COP_Phi) {}
-  Phi(MemRegionRef A, unsigned Nvals) : SExpr(COP_Phi), Values(A, Nvals) {}
-  Phi(const Phi &P, ValArray &&Vs)    : SExpr(P), Values(std::move(Vs)) {}
+  Phi()
+    : SExpr(COP_Phi), Cvdecl(nullptr) {}
+  Phi(MemRegionRef A, unsigned Nvals)
+    : SExpr(COP_Phi), Values(A, Nvals), Cvdecl(nullptr)  {}
+  Phi(const Phi &P, ValArray &&Vs)
+    : SExpr(P), Values(std::move(Vs)), Cvdecl(nullptr) {}
 
   const ValArray &values() const { return Values; }
   ValArray &values() { return Values; }
 
   Status status() const { return static_cast<Status>(Flags); }
   void setStatus(Status s) { Flags = s; }
+
+  /// Return the clang declaration of the variable for this Phi node, if any.
+  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
+
+  /// Set the clang variable associated with this Phi node.
+  void setClangDecl(const clang::ValueDecl *Cvd) { Cvdecl = Cvd; }
 
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
@@ -1340,6 +1349,7 @@ public:
 
 private:
   ValArray Values;
+  const clang::ValueDecl* Cvdecl;
 };
 
 
@@ -1470,7 +1480,7 @@ public:
 
   /// Return an empty list.
   ArrayRef<BasicBlock*> successors() {
-    return ArrayRef<BasicBlock*>(nullptr, 0);
+    return ArrayRef<BasicBlock*>();
   }
 
   SExpr *returnValue() { return Retval; }
@@ -1498,7 +1508,7 @@ inline ArrayRef<BasicBlock*> Terminator::successors() {
     case COP_Branch: return cast<Branch>(this)->successors();
     case COP_Return: return cast<Return>(this)->successors();
     default:
-      return ArrayRef<BasicBlock*>(nullptr, 0);
+      return ArrayRef<BasicBlock*>();
   }
 }
 
@@ -1899,11 +1909,11 @@ private:
 
 const SExpr *getCanonicalVal(const SExpr *E);
 SExpr* simplifyToCanonicalVal(SExpr *E);
-void simplifyIncompleteArg(Variable *V, til::Phi *Ph);
+void simplifyIncompleteArg(til::Phi *Ph);
 
 
 } // end namespace til
 } // end namespace threadSafety
 } // end namespace clang
 
-#endif // LLVM_CLANG_THREAD_SAFETY_TIL_H
+#endif

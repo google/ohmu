@@ -102,47 +102,40 @@ const SExpr *getCanonicalVal(const SExpr *E) {
 }
 
 
-
 // If E is a variable, then trace back through any aliases or redundant
 // Phi nodes to find the canonical definition.
 // The non-const version will simplify incomplete Phi nodes.
 SExpr *simplifyToCanonicalVal(SExpr *E) {
-  while (auto *V = dyn_cast<Variable>(E)) {
-    SExpr *D;
-    do {
+  while (true) {
+    if (auto *V = dyn_cast<Variable>(E)) {
       if (V->kind() != Variable::VK_Let)
         return V;
-      D = V->definition();
-      auto *V2 = dyn_cast<Variable>(D);
-      if (V2)
-        V = V2;
-      else
-        break;
-    } while (true);
-
-    if (ThreadSafetyTIL::isTrivial(D))
-      return D;
-
-    if (Phi *Ph = dyn_cast<Phi>(D)) {
+      // Eliminate redundant variables, e.g. x = y, or x = 5,
+      // but keep anything more complicated.
+      if (til::ThreadSafetyTIL::isTrivial(V->definition())) {
+        E = V->definition();
+        continue;
+      }
+      return V;
+    }
+    if (auto *Ph = dyn_cast<Phi>(E)) {
       if (Ph->status() == Phi::PH_Incomplete)
-        simplifyIncompleteArg(V, Ph);
-
+        simplifyIncompleteArg(Ph);
+      // Eliminate redundant Phi nodes.
       if (Ph->status() == Phi::PH_SingleVal) {
         E = Ph->values()[0];
         continue;
       }
     }
-    return V;
+    return E;
   }
-  return E;
 }
-
 
 
 // Trace the arguments of an incomplete Phi node to see if they have the same
 // canonical definition.  If so, mark the Phi node as redundant.
 // getCanonicalVal() will recursively call simplifyIncompletePhi().
-void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
+void simplifyIncompleteArg(til::Phi *Ph) {
   assert(Ph && Ph->status() == Phi::PH_Incomplete);
 
   // eliminate infinite recursion -- assume that this node is not redundant.
@@ -151,16 +144,15 @@ void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
   SExpr *E0 = simplifyToCanonicalVal(Ph->values()[0]);
   for (unsigned i=1, n=Ph->values().size(); i<n; ++i) {
     SExpr *Ei = simplifyToCanonicalVal(Ph->values()[i]);
-    if (Ei == V)
+    if (Ei == Ph)
       continue;  // Recursive reference to itself.  Don't count.
     if (Ei != E0) {
       return;    // Status is already set to MultiVal.
     }
   }
   Ph->setStatus(Phi::PH_SingleVal);
-  // Eliminate Redundant Phi node.
-  V->setDefinition(Ph->values()[0]);
 }
+
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
 int BasicBlock::renumberInstrs(int ID) {
@@ -323,6 +315,7 @@ void SCFG::computeNormalForm() {
   // Once dominators have been computed, the final sort may be performed.
   int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
   assert(NumBlocks == Blocks.size());
+  (void) NumBlocks;
 
   // Renumber the instructions now that we have a final sort.
   renumberInstrs();

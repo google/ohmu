@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
-#define LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
 
 #include "ThreadSafetyTIL.h"
 
@@ -58,12 +58,15 @@ public:
   // Traverse an expression -- returning a result of type R_SExpr.
   // Override this method to do something for every expression, regardless
   // of which kind it is.
+  // E is a reference, so this can be use for in-place updates.
   // The type T must be a subclass of SExpr.
   template <class T>
   typename R::R_SExpr traverse(T* &E, typename R::R_Ctx Ctx) {
     return traverseSExpr(E, Ctx);
   }
 
+  // Override this method to do something for every expression.
+  // Does not allow in-place updates.
   typename R::R_SExpr traverseSExpr(SExpr *E, typename R::R_Ctx Ctx) {
     return traverseByCase(E, Ctx);
   }
@@ -76,9 +79,8 @@ public:
       return self()->traverse##X(cast<X>(E), Ctx);
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-    default:
-      return self()->reduceNull();
     }
+    return self()->reduceNull();
   }
 
 // Traverse e, by static dispatch on the type "X" of e.
