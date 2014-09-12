@@ -72,39 +72,49 @@ enum TIL_Opcode {
 
 /// Opcode for unary arithmetic operations.
 enum TIL_UnaryOpcode : unsigned char {
-  UOP_Minus,        //  -
-  UOP_BitNot,       //  ~
-  UOP_LogicNot      //  !
+  UOP_Minus,        ///<  -
+  UOP_BitNot,       ///<  ~
+  UOP_LogicNot      ///<  !
 };
 
 /// Opcode for binary arithmetic operations.
 enum TIL_BinaryOpcode : unsigned char {
-  BOP_Add,          //  +
-  BOP_Sub,          //  -
-  BOP_Mul,          //  *
-  BOP_Div,          //  /
-  BOP_Rem,          //  %
-  BOP_Shl,          //  <<
-  BOP_Shr,          //  >>
-  BOP_BitAnd,       //  &
-  BOP_BitXor,       //  ^
-  BOP_BitOr,        //  |
-  BOP_Eq,           //  ==
-  BOP_Neq,          //  !=
-  BOP_Lt,           //  <
-  BOP_Leq,          //  <=
-  BOP_LogicAnd,     //  &&  (no short-circuit)
-  BOP_LogicOr       //  ||  (no short-circuit)
+  BOP_Add,          ///<  +
+  BOP_Sub,          ///<  -
+  BOP_Mul,          ///<  *
+  BOP_Div,          ///<  /
+  BOP_Rem,          ///<  %
+  BOP_Shl,          ///<  <<
+  BOP_Shr,          ///<  >>
+  BOP_BitAnd,       ///<  &
+  BOP_BitXor,       ///<  ^
+  BOP_BitOr,        ///<  |
+  BOP_Eq,           ///<  ==
+  BOP_Neq,          ///<  !=
+  BOP_Lt,           ///<  <
+  BOP_Leq,          ///<  <=
+  BOP_LogicAnd,     ///<  &&  (no short-circuit)
+  BOP_LogicOr       ///<  ||  (no short-circuit)
 };
 
-/// Opcode for cast operations.
+/// Opcode for cast operations.  (Currently Very Incomplete)
 enum TIL_CastOpcode : unsigned char {
   CAST_none = 0,
-  CAST_extendNum,   // extend precision of numeric type
-  CAST_truncNum,    // truncate precision of numeric type
-  CAST_toFloat,     // convert to floating point type
-  CAST_toInt,       // convert to integer type
-  CAST_objToPtr     // convert smart pointer to pointer  (C++ only)
+  // numeric casts
+  CAST_extendNum,       ///< extend precision of numeric type int->int or fp->fp
+  CAST_truncNum,        ///< truncate precision of numeric type
+  CAST_intToFloat,      ///< convert integer to floating point type
+  CAST_truncToInt,      ///< truncate float f to integer i;  abs(i) <= abs(f)
+  CAST_roundToInt,      ///< convert float to nearest integer
+  // bit casts
+  CAST_toBits,          ///< bitwise cast of pointer or float to integer
+  CAST_bitsToFloat,     ///< bitwise cast of integer to float
+  CAST_unsafeBitsToPtr, ///< cast integer to pointer  (very unsafe!)
+  // pointer casts
+  CAST_downCast,        ///< cast pointer type to pointer subtype   (checked)
+  CAST_unsafeDownCast,  ///< cast pointer type to pointer subtype   (unchecked)
+  CAST_unsafePtrCast,   ///< cast pointer to any other pointer type (unchecked)
+  CAST_objToPtr         ///< convert smart pointer to pointer  (C++ only)
 };
 
 const TIL_Opcode       COP_Min  = COP_Future;
@@ -114,7 +124,7 @@ const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
 const TIL_BinaryOpcode BOP_Min  = BOP_Add;
 const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
 const TIL_CastOpcode   CAST_Min = CAST_none;
-const TIL_CastOpcode   CAST_Max = CAST_toInt;
+const TIL_CastOpcode   CAST_Max = CAST_objToPtr;
 
 /// Return the name of a unary opcode.
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
@@ -306,8 +316,8 @@ protected:
   const unsigned char Opcode;
   unsigned char Reserved;
   unsigned short Flags;
-  unsigned SExprID;
-  BasicBlock* Block;
+  unsigned     SExprID;
+  BasicBlock*  Block;
 
 private:
   SExpr() LLVM_DELETED_FUNCTION;
@@ -315,6 +325,26 @@ private:
   /// SExpr objects must be created in an arena.
   void *operator new(size_t) LLVM_DELETED_FUNCTION;
 };
+
+
+/// Instructions are expressions that can appear in basic blocks
+class Instruction : public SExpr {
+public:
+  static bool classof(const SExpr *E) {
+    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Phi;
+  }
+
+  Instruction(TIL_Opcode Op)
+    : SExpr(Op), ValType(ValueType::getValueType<void>())
+  {}
+  Instruction(const Instruction &E)
+    : SExpr(E), ValType(ValueType::getValueType<void>())
+  {}
+
+private:
+  ValueType ValType;
+};
+
 
 
 // Contains various helper functions for SExprs.
