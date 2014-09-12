@@ -191,6 +191,11 @@ public:
   }
 
   llvm::Value* generateSCFG(SCFG* e) {
+    currentBlocks_.clear();
+    currentBlocks_.resize(e->numBlocks(), nullptr);
+    currentValues_.clear();
+    currentValues_.resize(e->numInstructions(), nullptr);
+
     startTopLevelDefinition();
     for (auto* b : *e) {
       generateBasicBlock(b);

@@ -266,6 +266,7 @@ void SCFG::renumberInstrs() {
   int InstrID = 0;
   for (auto *Block : Blocks)
     InstrID = Block->renumberInstrs(InstrID);
+  NumInstructions = InstrID;
 }
 
 
