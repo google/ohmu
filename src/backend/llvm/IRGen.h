@@ -52,15 +52,6 @@ public:
 
   llvm::Module* module() { return outModule_; }
 
-  void startTopLevelDefinition() {
-    // Create a new function in outModule_
-    std::vector<llvm::Type*> argTypes;
-    llvm::FunctionType *ft =
-      llvm::FunctionType::get(llvm::Type::getVoidTy(ctx()), argTypes, false);
-    currentFunction_ =
-      llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "ohmu_main",
-                             outModule_);
-  }
 
   llvm::Value* generate(SExpr* e) {
     llvm::Value* v;
@@ -84,7 +75,7 @@ public:
     return v;
   }
 
-  llvm::Value* generateFuture   (Future* e)      {
+  llvm::Value* generateFuture(Future* e) {
     return generate(e->result());
   }
 
@@ -101,16 +92,25 @@ public:
   llvm::Value* reduceLiteralT(LiteralT<T>& e) { return nullptr; }
 
   llvm::Value* reduceLiteralT(LiteralT<int32_t>& e) {
-    return llvm::ConstantInt::getSigned(llvm::IntegerType::get(ctx(), 32),
-                                        e.value());
+    llvm::Constant* c =
+      llvm::ConstantInt::getSigned(llvm::Type::getInt32Ty(ctx()), e.value());
+    // return builder_.Insert(c);
+    return c;
   }
 
   llvm::Value* generateLiteral(Literal* e) {
     return e->traverse(*this, TRV_Normal);
   }
 
-  llvm::Value* generateLiteralPtr(LiteralPtr* e) { return nullptr; }
-  llvm::Value* generateVariable  (Variable* e)   { return nullptr; }
+  llvm::Value* generateLiteralPtr(LiteralPtr* e) {
+    return nullptr;
+  }
+
+  llvm::Value* generateVariable(Variable* e) {
+    if (e->kind() == Variable::VK_Let)
+      return generate(e->definition());
+  }
+
   llvm::Value* generateFunction  (Function* e)   { return nullptr; }
   llvm::Value* generateSFunction (SFunction* e)  { return nullptr; }
   llvm::Value* generateCode      (Code* e)       { return nullptr; }
@@ -196,10 +196,21 @@ public:
     currentValues_.clear();
     currentValues_.resize(e->numInstructions(), nullptr);
 
-    startTopLevelDefinition();
+    // Create a new function in outModule_
+    std::vector<llvm::Type*> argTypes;
+    llvm::FunctionType *ft =
+      llvm::FunctionType::get(llvm::Type::getVoidTy(ctx()), argTypes, false);
+    currentFunction_ =
+      llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "ohmu_main",
+                             outModule_);
+
     for (auto* b : *e) {
       generateBasicBlock(b);
     }
+
+    llvm::verifyFunction(*currentFunction_);
+    currentFunction_->dump();
+
     return nullptr;
   }
 
@@ -207,7 +218,7 @@ public:
     auto* lbb = getBasicBlock(e);
     builder_.SetInsertPoint(lbb);
     for (auto* a : e->arguments()) {
-      generatePhi(dyn_cast<Phi>(a));
+      generate(a);
     }
     for (auto* inst : e->instructions()) {
       generate(inst);
@@ -216,10 +227,34 @@ public:
     return nullptr;
   }
 
-  llvm::Value* generatePhi(Phi* e) { return nullptr; }
-  llvm::Value* generateGoto(Goto* e) { return nullptr; }
-  llvm::Value* generateBranch(Branch* e) { return nullptr; }
-  llvm::Value* generateReturn(Return* e) { return nullptr; }
+  llvm::Value* generatePhi(Phi* e) {
+    llvm::Type* ty = llvm::Type::getInt32Ty(ctx());
+    llvm::PHINode* lph = builder_.CreatePHI(ty, e->values().size());
+    BasicBlock* bb = e->block();
+    for (unsigned i = 0; i < bb->numPredecessors(); ++i) {
+      auto* larg = generate(e->values()[i]);
+      auto* lbb = getBasicBlock(bb->predecessors()[i]);
+      lph->addIncoming(larg, lbb);
+    }
+    return lph;
+  }
+
+  llvm::Value* generateGoto(Goto* e) {
+    auto* lbb = getBasicBlock(e->targetBlock());
+    builder_.CreateBr(lbb);
+    return nullptr;
+  }
+
+  llvm::Value* generateBranch(Branch* e) {
+    return nullptr;
+  }
+
+  llvm::Value* generateReturn(Return* e) {
+    auto* rv = generate(e->returnValue());
+    if (!rv)
+      return nullptr;
+    builder_.CreateRet(rv);
+  }
 
   llvm::Value* generateIdentifier(Identifier* e) { return nullptr; }
   llvm::Value* generateIfThenElse(IfThenElse* e) { return nullptr; }
