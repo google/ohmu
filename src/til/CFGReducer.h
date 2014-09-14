@@ -23,6 +23,7 @@
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 #include <vector>
 
