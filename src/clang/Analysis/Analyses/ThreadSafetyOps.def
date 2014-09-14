@@ -36,9 +36,9 @@ TIL_OPCODE_DEF(Project)
 
 
 // Instructions
+TIL_OPCODE_DEF(VarDecl)
 TIL_OPCODE_DEF(Literal)
 TIL_OPCODE_DEF(LiteralPtr)
-TIL_OPCODE_DEF(Variable)
 
 TIL_OPCODE_DEF(Call)
 TIL_OPCODE_DEF(Alloc)

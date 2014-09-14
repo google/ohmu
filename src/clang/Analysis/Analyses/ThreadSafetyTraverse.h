@@ -55,19 +55,8 @@ class Traversal {
 public:
   Self *self() { return static_cast<Self *>(this); }
 
-  // Traverse an expression -- returning a result of type R_SExpr.
-  // Override this method to do something for every expression, regardless
-  // of which kind it is.
-  // E is a reference, so this can be use for in-place updates.
-  // The type T must be a subclass of SExpr.
-  template <class T>
-  typename R::R_SExpr traverse(T* &E, typename R::R_Ctx Ctx) {
-    return traverseSExpr(E, Ctx);
-  }
-
   // Override this method to do something for every expression.
-  // Does not allow in-place updates.
-  typename R::R_SExpr traverseSExpr(SExpr *E, typename R::R_Ctx Ctx) {
+  typename R::R_SExpr traverse(SExpr *E, typename R::R_Ctx Ctx) {
     return traverseByCase(E, Ctx);
   }
 
@@ -184,15 +173,17 @@ public:
   R_SExpr reduceUndefined(Undefined &Orig) { return true; }
   R_SExpr reduceWildcard(Wildcard &Orig) { return true; }
 
+  R_SExpr reduceVarDecl(VarDecl &Orig, R_SExpr E) { return true; }
+
   R_SExpr reduceLiteral(Literal &Orig) { return true; }
   template<class T>
   R_SExpr reduceLiteralT(LiteralT<T> &Orig) { return true; }
   R_SExpr reduceLiteralPtr(Literal &Orig) { return true; }
 
-  R_SExpr reduceFunction(Function &Orig, Variable *Nvd, R_SExpr E0) {
+  R_SExpr reduceFunction(Function &Orig, VarDecl *Nvd, R_SExpr E0) {
     return Nvd && E0;
   }
-  R_SExpr reduceSFunction(SFunction &Orig, Variable *Nvd, R_SExpr E0) {
+  R_SExpr reduceSFunction(SFunction &Orig, VarDecl *Nvd, R_SExpr E0) {
     return Nvd && E0;
   }
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
@@ -250,18 +241,18 @@ public:
   R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
     return C && T && E;
   }
-  R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
+  R_SExpr reduceLet(Let &Orig, VarDecl *Nvd, R_SExpr B) {
     return Nvd && B;
   }
 
-  Variable *enterScope(Variable &Orig, R_SExpr E0) { return &Orig; }
-  void exitScope(const Variable &Orig) {}
+  VarDecl *enterScope(VarDecl &Orig, R_SExpr E0) { return &Orig; }
+  void exitScope(const VarDecl &Orig) {}
   void enterCFG(SCFG &Cfg) {}
   void exitCFG(SCFG &Cfg) {}
   void enterBasicBlock(BasicBlock &BB) {}
   void exitBasicBlock(BasicBlock &BB) {}
 
-  Variable   *reduceVariableRef  (Variable *Ovd)   { return Ovd; }
+  VarDecl    *reduceVariableRef  (VarDecl *Ovd)   { return Ovd; }
   BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }
 
 public:
@@ -321,10 +312,10 @@ public:
   }
 
   // TODO -- handle alpha-renaming of variables
-  void enterScope(const Variable* V1, const Variable* V2) { }
+  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
   void leaveScope() { }
 
-  bool compareVariableRefs(const Variable* V1, const Variable* V2) {
+  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;
   }
 
@@ -361,10 +352,10 @@ public:
   }
 
   // TODO -- handle alpha-renaming of variables
-  void enterScope(const Variable* V1, const Variable* V2) { }
+  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
   void leaveScope() { }
 
-  bool compareVariableRefs(const Variable* V1, const Variable* V2) {
+  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;
   }
 
@@ -423,7 +414,7 @@ protected:
 
       case COP_Literal:    return Prec_Atom;
       case COP_LiteralPtr: return Prec_Atom;
-      case COP_Variable:   return Prec_Atom;
+      case COP_VarDecl:    return Prec_Atom;
       case COP_Function:   return Prec_Decl;
       case COP_SFunction:  return Prec_Decl;
       case COP_Code:       return Prec_Decl;
@@ -477,7 +468,7 @@ protected:
       self()->printNull(SS);
       return;
     }
-    if (Sub && E->block() && E->opcode() != COP_Variable) {
+    if (Sub && E->block() && E->opcode() != COP_VarDecl) {
       SS << "_x" << E->id();
       return;
     }
@@ -610,8 +601,8 @@ protected:
     SS << E->clangDecl()->getNameAsString();
   }
 
-  void printVariable(const Variable *V, StreamType &SS, bool IsVarDecl=false) {
-    if (CStyle && V->kind() == Variable::VK_SFun)
+  void printVarDecl(const VarDecl *V, StreamType &SS) {
+    if (CStyle && V->kind() == VarDecl::VK_SFun)
       SS << "this";
     else
       SS << V->name() << V->id();
@@ -629,7 +620,7 @@ protected:
         SS << ", ";    // Curried functions
         break;
     }
-    self()->printVariable(E->variableDecl(), SS, true);
+    self()->printVarDecl(E->variableDecl(), SS);
     SS << ": ";
     self()->printSExpr(E->variableDecl()->definition(), SS, Prec_MAX);
 
@@ -644,7 +635,7 @@ protected:
 
   void printSFunction(const SFunction *E, StreamType &SS) {
     SS << "@";
-    self()->printVariable(E->variableDecl(), SS, true);
+    self()->printVarDecl(E->variableDecl(), SS);
     SS << " ";
     self()->printSExpr(E->body(), SS, Prec_Decl);
   }
@@ -690,8 +681,8 @@ protected:
     if (CStyle) {
       // Omit the  this->
       if (const SApply *SAP = dyn_cast<SApply>(E->record())) {
-        if (const Variable *V = dyn_cast<Variable>(SAP->sfun())) {
-          if (!SAP->isDelegation() && V->kind() == Variable::VK_SFun) {
+        if (auto *V = dyn_cast<VarDecl>(SAP->sfun())) {
+          if (!SAP->isDelegation() && V->kind() == VarDecl::VK_SFun) {
             SS << E->slotName();
             return;
           }
@@ -791,8 +782,8 @@ protected:
 
   void printBBInstr(const SExpr *E, StreamType &SS) {
     bool Sub = false;
-    if (E->opcode() == COP_Variable) {
-      auto *V = cast<Variable>(E);
+    if (E->opcode() == COP_VarDecl) {
+      auto *V = cast<VarDecl>(E);
       SS << "let " << V->name() << V->id() << " = ";
       E = V->definition();
       Sub = true;
@@ -883,7 +874,7 @@ protected:
 
   void printLet(const Let *E, StreamType &SS) {
     SS << "let ";
-    printVariable(E->variableDecl(), SS, true);
+    printVarDecl(E->variableDecl(), SS);
     SS << " = ";
     printSExpr(E->variableDecl()->definition(), SS, Prec_Decl-1);
     SS << "; ";

@@ -351,7 +351,7 @@ private:
 namespace ThreadSafetyTIL {
   inline bool isTrivial(const SExpr *E) {
     unsigned Op = E->opcode();
-    return Op == COP_Variable || Op == COP_Literal || Op == COP_LiteralPtr;
+    return Op == COP_Literal || Op == COP_LiteralPtr;
   }
 }
 
@@ -361,21 +361,14 @@ class SFunction;
 class Let;
 
 
-/// A named variable, e.g. "x".
-///
-/// There are two distinct places in which a Variable can appear in the AST.
-/// A variable declaration introduces a new variable, and can occur in 3 places:
+/// A declaration for a named variable.
+/// There are three ways to introduce a new variable:
 ///   Let-expressions:           (Let (x = t) u)
 ///   Functions:                 (Function (x : t) u)
 ///   Self-applicable functions  (SFunction (x) t)
-///
-/// If a variable occurs in any other location, it is a reference to an existing
-/// variable declaration -- e.g. 'x' in (x * y + z). To save space, we don't
-/// allocate a separate AST node for variable references; a reference is just a
-/// pointer to the original declaration.
-class Variable : public SExpr {
+class VarDecl : public SExpr {
 public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Variable; }
+  static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
 
   enum VariableKind {
     VK_Let,  ///< Let-variable
@@ -383,16 +376,16 @@ public:
     VK_SFun  ///< SFunction (self) parameter
   };
 
-  Variable(StringRef s, SExpr *D = nullptr)
-      : SExpr(COP_Variable), Name(s), Definition(D), Cvdecl(nullptr) {
+  VarDecl(StringRef s, SExpr *D = nullptr)
+      : SExpr(COP_VarDecl), Name(s), Definition(D), Cvdecl(nullptr) {
     Flags = VK_Let;
   }
-  Variable(SExpr *D, const clang::ValueDecl *Cvd = nullptr)
-      : SExpr(COP_Variable), Name(Cvd ? Cvd->getName() : "_x"),
+  VarDecl(SExpr *D, const clang::ValueDecl *Cvd = nullptr)
+      : SExpr(COP_VarDecl), Name(Cvd ? Cvd->getName() : "_x"),
         Definition(D), Cvdecl(Cvd) {
     Flags = VK_Let;
   }
-  Variable(const Variable &Vd, SExpr *D)  // rewrite constructor
+  VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
       : SExpr(Vd), Name(Vd.Name), Definition(D), Cvdecl(Vd.Cvdecl) {
     Flags = Vd.kind();
   }
@@ -419,13 +412,14 @@ public:
 
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    // This routine is only called for variable references.
-    return Vs.reduceVariableRef(this);
+    auto D = Vs.traverse(Definition, Vs.subExprCtx(Ctx));
+    return Vs.reduceVarDecl(*this, D);
   }
 
   template <class C>
-  typename C::CType compare(const Variable* E, C& Cmp) const {
-    return Cmp.compareVariableRefs(this, E);
+  typename C::CType compare(const VarDecl* E, C& Cmp) const {
+    // Note, we don't compare names, due to alpha-renaming.
+    return Cmp.compare(Definition, E->Definition);
   }
 
 private:
@@ -687,17 +681,17 @@ class Function : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Function; }
 
-  Function(Variable *Vd, SExpr *Bd)
-      : SExpr(COP_Function), VarDecl(Vd), Body(Bd) {
-    Vd->setKind(Variable::VK_Fun);
+  Function(VarDecl *Vd, SExpr *Bd)
+      : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Fun);
   }
-  Function(const Function &F, Variable *Vd, SExpr *Bd) // rewrite constructor
-      : SExpr(F), VarDecl(Vd), Body(Bd) {
-    Vd->setKind(Variable::VK_Fun);
+  Function(const Function &F, VarDecl *Vd, SExpr *Bd) // rewrite constructor
+      : SExpr(F), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Fun);
   }
 
-  Variable *variableDecl()  { return VarDecl; }
-  const Variable *variableDecl() const { return VarDecl; }
+  VarDecl *variableDecl()  { return VDecl; }
+  const VarDecl *variableDecl() const { return VDecl; }
 
   SExpr *body() { return Body; }
   const SExpr *body() const { return Body; }
@@ -705,18 +699,18 @@ public:
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
     // This is a variable declaration, so traverse the definition.
-    auto E0 = Vs.traverse(VarDecl->Definition, Vs.typeCtx(Ctx));
+    auto E0 = Vs.traverse(VDecl->Definition, Vs.typeCtx(Ctx));
     // Tell the rewriter to enter the scope of the function.
-    Variable *Nvd = Vs.enterScope(*VarDecl, E0);
+    VarDecl *Nvd = Vs.enterScope(*VDecl, E0);
     auto E1 = Vs.traverse(Body, Vs.declCtx(Ctx));
-    Vs.exitScope(*VarDecl);
+    Vs.exitScope(*VDecl);
     return Vs.reduceFunction(*this, Nvd, E1);
   }
 
   template <class C>
   typename C::CType compare(const Function* E, C& Cmp) const {
     typename C::CType Ct =
-      Cmp.compare(VarDecl->definition(), E->VarDecl->definition());
+      Cmp.compare(VDecl->definition(), E->VDecl->definition());
     if (Cmp.notTrue(Ct))
       return Ct;
     Cmp.enterScope(variableDecl(), E->variableDecl());
@@ -726,7 +720,7 @@ public:
   }
 
 private:
-  Variable *VarDecl;
+  VarDecl *VDecl;
   SExpr* Body;
 };
 
@@ -738,21 +732,21 @@ class SFunction : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_SFunction; }
 
-  SFunction(Variable *Vd, SExpr *B)
-      : SExpr(COP_SFunction), VarDecl(Vd), Body(B) {
+  SFunction(VarDecl *Vd, SExpr *B)
+      : SExpr(COP_SFunction), VDecl(Vd), Body(B) {
     assert(Vd->Definition == nullptr);
-    Vd->setKind(Variable::VK_SFun);
+    Vd->setKind(VarDecl::VK_SFun);
     Vd->Definition = this;
   }
-  SFunction(const SFunction &F, Variable *Vd, SExpr *B) // rewrite constructor
-      : SExpr(F), VarDecl(Vd), Body(B) {
+  SFunction(const SFunction &F, VarDecl *Vd, SExpr *B) // rewrite constructor
+      : SExpr(F), VDecl(Vd), Body(B) {
     assert(Vd->Definition == nullptr);
-    Vd->setKind(Variable::VK_SFun);
+    Vd->setKind(VarDecl::VK_SFun);
     Vd->Definition = this;
   }
 
-  Variable *variableDecl() { return VarDecl; }
-  const Variable *variableDecl() const { return VarDecl; }
+  VarDecl *variableDecl() { return VDecl; }
+  const VarDecl *variableDecl() const { return VDecl; }
 
   SExpr *body() { return Body; }
   const SExpr *body() const { return Body; }
@@ -762,9 +756,9 @@ public:
     // A self-variable points to the SFunction itself.
     // A rewrite must introduce the variable with a null definition, and update
     // it after 'this' has been rewritten.
-    Variable *Nvd = Vs.enterScope(*VarDecl, nullptr);
+    VarDecl *Nvd = Vs.enterScope(*VDecl, nullptr);
     auto E1 = Vs.traverse(Body, Vs.declCtx(Ctx));
-    Vs.exitScope(*VarDecl);
+    Vs.exitScope(*VDecl);
     // A rewrite operation will call SFun constructor to set Vvd->Definition.
     return Vs.reduceSFunction(*this, Nvd, E1);
   }
@@ -778,7 +772,7 @@ public:
   }
 
 private:
-  Variable *VarDecl;
+  VarDecl *VDecl;
   SExpr* Body;
 };
 
@@ -1894,15 +1888,15 @@ class Let : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }
 
-  Let(Variable *Vd, SExpr *Bd) : SExpr(COP_Let), VarDecl(Vd), Body(Bd) {
-    Vd->setKind(Variable::VK_Let);
+  Let(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Let), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Let);
   }
-  Let(const Let &L, Variable *Vd, SExpr *Bd) : SExpr(L), VarDecl(Vd), Body(Bd) {
-    Vd->setKind(Variable::VK_Let);
+  Let(const Let &L, VarDecl *Vd, SExpr *Bd) : SExpr(L), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Let);
   }
 
-  Variable *variableDecl()  { return VarDecl; }
-  const Variable *variableDecl() const { return VarDecl; }
+  VarDecl *variableDecl()  { return VDecl; }
+  const VarDecl *variableDecl() const { return VDecl; }
 
   SExpr *body() { return Body; }
   const SExpr *body() const { return Body; }
@@ -1910,18 +1904,18 @@ public:
   template <class V>
   typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
     // This is a variable declaration, so traverse the definition.
-    auto E0 = Vs.traverse(VarDecl->Definition, Vs.subExprCtx(Ctx));
+    auto E0 = Vs.traverse(VDecl->Definition, Vs.subExprCtx(Ctx));
     // Tell the rewriter to enter the scope of the let variable.
-    Variable *Nvd = Vs.enterScope(*VarDecl, E0);
+    VarDecl *Nvd = Vs.enterScope(*VDecl, E0);
     auto E1 = Vs.traverse(Body, Ctx);
-    Vs.exitScope(*VarDecl);
+    Vs.exitScope(*VDecl);
     return Vs.reduceLet(*this, Nvd, E1);
   }
 
   template <class C>
   typename C::CType compare(const Let* E, C& Cmp) const {
     typename C::CType Ct =
-      Cmp.compare(VarDecl->definition(), E->VarDecl->definition());
+      Cmp.compare(VDecl->definition(), E->VDecl->definition());
     if (Cmp.notTrue(Ct))
       return Ct;
     Cmp.enterScope(variableDecl(), E->variableDecl());
@@ -1931,7 +1925,7 @@ public:
   }
 
 private:
-  Variable *VarDecl;
+  VarDecl *VDecl;
   SExpr* Body;
 };
 

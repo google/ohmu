@@ -84,8 +84,8 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
 // Phi nodes to find the canonical definition.
 const SExpr *getCanonicalVal(const SExpr *E) {
   while (true) {
-    if (auto *V = dyn_cast<Variable>(E)) {
-      if (V->kind() == Variable::VK_Let) {
+    if (auto *V = dyn_cast<VarDecl>(E)) {
+      if (V->kind() == VarDecl::VK_Let) {
         E = V->definition();
         continue;
       }
@@ -107,8 +107,8 @@ const SExpr *getCanonicalVal(const SExpr *E) {
 // The non-const version will simplify incomplete Phi nodes.
 SExpr *simplifyToCanonicalVal(SExpr *E) {
   while (true) {
-    if (auto *V = dyn_cast<Variable>(E)) {
-      if (V->kind() != Variable::VK_Let)
+    if (auto *V = dyn_cast<VarDecl>(E)) {
+      if (V->kind() != VarDecl::VK_Let)
         return V;
       // Eliminate redundant variables, e.g. x = y, or x = 5,
       // but keep anything more complicated.

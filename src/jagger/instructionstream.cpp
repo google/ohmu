@@ -45,7 +45,7 @@
 // Live ranges:  Each instruction result (SSA value) can have multiple live
 // ranges.  These live ranges can, in general, overlap.  Overlapping must occur
 // at a point when a destructive operation consumes a value in the middle of its
-// live range.  
+// live range.
 
 // Live range splitting/merging: Using the model that each use corresponds to a live
 // range leads to an inefficiency if we use the same argument twice for an
@@ -205,8 +205,8 @@ size_t InstructionStream::countInstrs(SExpr* expr) {
   switch (expr->opcode()) {
     case COP_Literal:
       return 1;
-    case COP_Variable:
-      return countInstrs(cast<Variable>(expr)->definition());
+    case COP_VarDecl:
+      return countInstrs(cast<VarDecl>(expr)->definition());
     case COP_BinaryOp:
       return countInstrs(cast<BinaryOp>(expr)->expr0()) +
              countInstrs(cast<BinaryOp>(expr)->expr1()) + 1;
@@ -242,8 +242,8 @@ Instruction* InstructionStream::emitInstrs(Instruction* nextInstr, Block* block,
     }
   }
 #if 0
-  case COP_Variable:
-    return countInstrs(cast<Variable>(expr)->definition());
+  case COP_VarDecl:
+    return countInstrs(cast<VarDecl>(expr)->definition());
   case COP_BinaryOp:
     return countInstrs(cast<BinaryOp>(expr)->expr0()) +
       countInstrs(cast<BinaryOp>(expr)->expr1()) + 1;
@@ -276,8 +276,8 @@ void InstructionStream::emitPhi(Phi* phi) {
   instrs.push_back(Instruction(
     currentBlock,
     &OpCodes::phi,
-    cast<Variable>(phi->values()[0])->id() - id,
-    cast<Variable>(phi->values()[1])->id() - id));
+    cast<VarDecl>(phi->values()[0])->id() - id,
+    cast<VarDecl>(phi->values()[1])->id() - id));
   phi->setId(id);
 }
 
@@ -316,7 +316,7 @@ int InstructionStream::emitExpression(SExpr* expr) {
     return expr->id();
   switch (expr->opcode()) {
   case COP_Literal: emitLiteral(cast<Literal>(expr)); break;
-  case COP_Variable: emitExpression(cast<Variable>(expr)->definition()); break;
+  case COP_VarDecl: emitExpression(cast<VarDecl>(expr)->definition()); break;
   case COP_BinaryOp: emitBinaryOp(cast<BinaryOp>(expr)); break;
   }
   expr->setId(getLastID());
@@ -487,8 +487,8 @@ int InstructionStream::countInstrs(SExpr* expr) const {
   switch (expr->opcode()) {
     case COP_Literal:
       return 1;
-    case COP_Variable:
-      return countInstrs(cast<Variable>(expr)->definition());
+    case COP_VarDecl:
+      return countInstrs(cast<VarDecl>(expr)->definition());
     case COP_BinaryOp:
       return countInstrs(cast<BinaryOp>(expr)->expr0()) +
              countInstrs(cast<BinaryOp>(expr)->expr1()) + 1;
@@ -545,8 +545,8 @@ void InstructionStream::emitPhi(Phi* phi) {
   instrs.push_back(Instruction(
       currentBlock,
       &OpCodes::phi,
-      cast<Variable>(phi->values()[0])->id() - id,
-      cast<Variable>(phi->values()[1])->id() - id));
+      cast<VarDecl>(phi->values()[0])->id() - id,
+      cast<VarDecl>(phi->values()[1])->id() - id));
   phi->setId(id);
 }
 
@@ -585,7 +585,7 @@ int InstructionStream::emitExpression(SExpr* expr) {
     return expr->id();
   switch (expr->opcode()) {
   case COP_Literal: emitLiteral(cast<Literal>(expr)); break;
-  case COP_Variable: emitExpression(cast<Variable>(expr)->definition()); break;
+  case COP_VarDecl: emitExpression(cast<VarDecl>(expr)->definition()); break;
   case COP_BinaryOp: emitBinaryOp(cast<BinaryOp>(expr)); break;
   }
   expr->setId(getLastID());

@@ -44,7 +44,7 @@ public:
 
   SExpr* lookup(StringRef S) {
     for (unsigned i=0,n=Vars.size(); i < n; ++i) {
-      Variable* V = Vars[n-i-1];
+      VarDecl* V = Vars[n-i-1];
       if (V->name() == S) {
         return V;
       }
@@ -52,14 +52,14 @@ public:
     return nullptr;
   }
 
-  void        push(Variable *V) { Vars.push_back(V); }
-  void        pop()             { Vars.pop_back(); }
-  VarContext* clone()           { return new VarContext(Vars); }
+  void        push(VarDecl *V) { Vars.push_back(V); }
+  void        pop()            { Vars.pop_back(); }
+  VarContext* clone()          { return new VarContext(Vars); }
 
 private:
-  VarContext(const std::vector<Variable*>& Vs) : Vars(Vs) { }
+  VarContext(const std::vector<VarDecl*>& Vs) : Vars(Vs) { }
 
-  std::vector<Variable*> Vars;
+  std::vector<VarDecl*> Vars;
 };
 
 
@@ -150,6 +150,10 @@ public:
     return new (Arena) Wildcard(Orig);
   }
 
+  R_SExpr reduceVarDecl(VarDecl &Orig, R_SExpr E) {
+    return new (Arena) VarDecl(Orig, E);
+  }
+
   R_SExpr reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);
   }
@@ -161,10 +165,10 @@ public:
     return new (Arena) LiteralPtr(Orig);
   }
 
-  R_SExpr reduceFunction(Function &Orig, Variable *Nvd, R_SExpr E0) {
+  R_SExpr reduceFunction(Function &Orig, VarDecl *Nvd, R_SExpr E0) {
     return new (Arena) Function(Orig, Nvd, E0);
   }
-  R_SExpr reduceSFunction(SFunction &Orig, Variable *Nvd, R_SExpr E0) {
+  R_SExpr reduceSFunction(SFunction &Orig, VarDecl *Nvd, R_SExpr E0) {
     return new (Arena) SFunction(Orig, Nvd, E0);
   }
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
@@ -242,7 +246,7 @@ public:
     return new (Arena) Identifier(Orig);
   }
 
-  R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
+  R_SExpr reduceLet(Let &Orig, VarDecl *Nvd, R_SExpr B) {
     if (currentCFG_)
       return B;   // eliminate the let
     else
@@ -300,8 +304,8 @@ public:
 
 
   // Create a new variable from orig, and push it onto the lexical scope.
-  Variable *enterScope(Variable &Orig, R_SExpr E0) {
-    Variable *Nv = new (Arena) Variable(Orig, E0);
+  VarDecl *enterScope(VarDecl &Orig, R_SExpr E0) {
+    VarDecl *Nv = new (Arena) VarDecl(Orig, E0);
     if (Orig.name().length() > 0) {
       varCtx_.push(Nv);
       if (currentBB_) {
@@ -315,7 +319,7 @@ public:
   }
 
   // Exit the lexical scope of orig.
-  void exitScope(const Variable &Orig) {
+  void exitScope(const VarDecl &Orig) {
     if (Orig.name().length() > 0)
       varCtx_.pop();
   }
@@ -326,7 +330,7 @@ public:
   void exitBasicBlock(BasicBlock &BB) {}
 
   // Map Variable references to their rewritten definitions.
-  Variable *reduceVariableRef(Variable *Ovd) { return Ovd; }
+  VarDecl *reduceVariableRef(VarDecl *Ovd) { return Ovd; }
 
   // Map BasicBlock references to their rewritten defs.
   BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }

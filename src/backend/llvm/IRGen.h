@@ -106,9 +106,10 @@ public:
     return nullptr;
   }
 
-  llvm::Value* generateVariable(Variable* e) {
-    if (e->kind() == Variable::VK_Let)
+  llvm::Value* generateVarDecl(VarDecl* e) {
+    if (e->kind() == VarDecl::VK_Let)
       return generate(e->definition());
+    return nullptr;
   }
 
   llvm::Value* generateFunction  (Function* e)   { return nullptr; }
@@ -253,7 +254,7 @@ public:
     auto* rv = generate(e->returnValue());
     if (!rv)
       return nullptr;
-    builder_.CreateRet(rv);
+    return builder_.CreateRet(rv);
   }
 
   llvm::Value* generateIdentifier(Identifier* e) { return nullptr; }
