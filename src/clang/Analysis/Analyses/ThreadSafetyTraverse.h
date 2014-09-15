@@ -24,39 +24,73 @@ namespace threadSafety {
 namespace til {
 
 enum TraversalKind {
-  TRV_Normal,   // argument subexpression (the default)
-  TRV_SubExpr,  // owned subexpression
-  TRV_Ref,      // non-owning reference
-  TRV_Lazy,     // subexpression that requires lazy rewriting (e.g. code)
-  TRV_Type      // type expressions
+  TRV_Normal,   ///< argument subexpression (the default)
+  TRV_SubExpr,  ///< owned subexpression
+  TRV_Lazy,     ///< subexpression that requires lazy rewriting (e.g. code)
+  TRV_Type      ///< type expressions
 };
 
 
-// Defines an interface used to traverse SExprs.  Traversals have been made as
-// generic as possible, and are intended to handle any kind of pass over the
-// AST, e.g. visiters, copying, non-destructive rewriting, destructive
-// (in-place) rewriting, hashing, typing, etc.
-template <class Self, class ContextT, class R>
+/// Traversal defines an interface for traversing SExprs.  Traversals have
+/// been made as generic as possible, and are intended to handle any kind of
+/// pass over the AST, e.g. visiters, copying, non-destructive rewriting,
+/// destructive (in-place) rewriting, hashing, typing, etc.
+///
+/// The Traversal class is responsible for traversing the AST in some order.
+/// The default is a depth first traversal, but other orders are possible,
+/// such as lazy or parallel traversals.  The traversal will process the AST
+/// by invoking methods on a context.
+///
+/// A Context is a pointer (or smart pointer) to a Reducer object, which is
+/// responsible for two separate tasks:
+/// (1) tracking lexical scope via enterX/exitX methods, and
+/// (2) implementing reduceX methods to rewrite the AST.
+///
+/// Lexical scope consists of information such as the types of variables,
+/// the current CFG, etc.  The traversal infrastructure will call enter/exit
+/// methods as it traverses the program to update the scope.  These methods
+/// may clone the context or create a new one.
+///
+/// The reduceX methods are responsible for rewriting terms.  After an SExpr
+/// has been traversed, the traversal results are passed to reduceX(...), which
+/// essentially implements an SExpr builder API.  A normal transform pass will
+/// implement this API to build a rewritten SExpr, but other passes may build
+/// an object of some other type.  In functional programming terms, reduceX
+/// implements a fold operation over the AST.
+///
+/// Because scope and rewriting are somewhat orthogonal, the traversal
+/// infrastructure provides default implementations of the enter/exit methods,
+/// and reduceX methods, in separate classes.  A reducer object should be
+/// constructed via multiple inheritance.
+///
+template <class Self, class ReducerT>
 class Traversal {
 public:
-  typedef ContextT CtxT;
-  typedef MAPTYPE(R, SExpr) R_SExpr;
+  /// The underlying reducer interface, which implements TypeMap.
+  typedef ReducerT RedT;
 
+  /// The context type, which is passed by value.
+  typedef typename ReducerT::ContextT CtxT;
+
+  /// Traversal will reduce SExprs to objects of type R_SExpr.
+  typedef MAPTYPE(RedT, SExpr) R_SExpr;
+
+  /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
-  bool isWeakRef(SExpr *E, TraversalKind K) {
-    return (K == TRV_Ref || (K == TRV_Normal && E->block()));
-  }
-
-  // Override this method to do something for every expression.
+  /// Entry point for traversing an SExpr of unknown type.
+  /// This will dispatch on the type of E, and call traverseX.
   R_SExpr traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
-    // avoid infinite loops.
-    if (isWeakRef(E, K))
-      return self()->reduceNull();
+    // Avoid infinite loops.
+    // E->block() is true if E is an instruction in a basic block.
+    // When traversing the instr from the basic block, then K == TRV_SubExpr.
+    // Indirect references to the instruction will have K == TRV_Normal.
+    if (K == TRV_Normal && E->block())
+      return self()->traverseWeakInstr(E, Ctx);
     return self()->traverseByCase(E, Ctx, K);
   }
 
-  // Helper method to call traverseX(e) on the appropriate type.
+  /// Helper method to call traverseX(e) on the appropriate type.
   R_SExpr traverseByCase(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                   \
@@ -65,39 +99,75 @@ public:
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     }
-    return self()->reduceNull();
+    return Ctx->reduceNull();
   }
 
-// Traverse e, by static dispatch on the type "X" of e.
-// The return type for the reduce depends on X
-// Override these methods to do something for a particular kind of term.
-#define TIL_OPCODE_DEF(X)                                                   \
-  MAPTYPE(R,X) traverse##X(X *e, CtxT Ctx, TraversalKind K = TRV_Normal) {  \
-    return e->traverse(*self(), Ctx);                                       \
+  // Traverse e, by static dispatch on the type "X" of e.
+  // The return type for the reduce depends on X.
+  // Override these methods to control traversal of a particular kind of term.
+#define TIL_OPCODE_DEF(X)                                                     \
+  MAPTYPE(RedT,X) traverse##X(X *e, CtxT Ctx, TraversalKind K = TRV_Normal) { \
+    return e->traverse(*self(), Ctx);                                         \
   }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
+
+  /// Entry point for traversing a weak reference to an SExpr.
+  /// Override this to handle weak (non-owning) references to instructions.
+  MAPTYPE(RedT, SExpr) traverseWeakInstr(SExpr *E, CtxT Ctx) {
+    return Ctx->reduceWeakInstr(E);
+  }
+
+  /// Entry point for traversing a reference to a declared variable.
+  MAPTYPE(RedT, VarDecl) traverseWeakVarDecl(VarDecl *D, CtxT Ctx) {
+    return Ctx->reduceWeakVarDecl(D);
+  }
+
+  /// Entry point for traversing a branch target.
+  MAPTYPE(RedT, BasicBlock) traverseWeakBasicBlock(BasicBlock *B, CtxT Ctx) {
+    return Ctx->reduceWeakBasicBlock(B);
+  }
 };
 
 
-template<class R>
-class SimpleContext {
+/// Implements enter/exit methods for a reducer that doesn't care about scope.
+/// The context is a simple pointer to the reducer object.
+/// This is a mixin class which inherits from R, which should be a ReducerBase.
+template <class Self, class RedT>
+class UnscopedReducer : public RedT {
 public:
-  void enterScope(VarDecl *Orig, MAPTYPE(R, VarDecl) E0) {}
-  void exitScope(VarDecl *Orig) {}
+  typedef Self* ContextT;
 
-  void enterBasicBlock(BasicBlock *BB, MAPTYPE(R, BasicBlock) E0) {}
-  void exitBasicBlock (BasicBlock *BB) {}
+  Self* self() { return static_cast<Self*>(this); }
 
-  void enterCFG(SCFG *Cfg, MAPTYPE(R, SCFG) E0) {}
-  void exitCFG (SCFG *Cfg) {}
+  Self* enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) {
+    return self();
+  }
+  Self* exitScope(VarDecl* Orig) {
+    return self();
+  }
+
+  Self* enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) {
+    return self();
+  }
+  Self* exitBasicBlock(BasicBlock* Orig) {
+    return self();
+  }
+
+  Self* enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Nscfg) {
+    return self();
+  }
+  Self* exitCFG(SCFG* Orig) {
+    return self();
+  }
 };
 
 
-// A visitor reduces everything to a boolean.
-class VisitReducer {
+/// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
+/// SExprs to booleans: it returns true on success, and false on failure.
+class VisitReducerBase {
 public:
-  VisitReducer() {}
+  VisitReducerBase() {}
 
   // A visitor maps all expression types to bool.
   template <class T> struct TypeMap { typedef bool Ty; };
@@ -105,34 +175,34 @@ public:
 public:
   bool reduceNull() { return true; }
 
-  bool reduceLiteral(Literal &Orig) { return true; }
+  bool reduceWeakInstr(SExpr* E)      { return true; }
+  bool reduceWeakVarDecl(SExpr *E)    { return true; }
+  bool reduceWeakBasicBlock(SExpr *E) { return true; }
+
+  bool reduceLiteral(Literal &Orig)       { return true; }
   template<class T>
-  bool reduceLiteralT(LiteralT<T> &Orig) { return true; }
-  bool reduceLiteralPtr(LiteralPtr &Orig)   { return true; }
+  bool reduceLiteralT(LiteralT<T> &Orig)  { return true; }
+  bool reduceLiteralPtr(LiteralPtr &Orig) { return true; }
 
-  bool reduceVarDecl(VarDecl &Orig, bool E) { return true; }
-  bool reduceFunction(Function &Orig, bool E0, bool E1) {
-    return true;
-  }
-  bool reduceSFunction(SFunction &Orig, bool E0, bool E1) {
-    return true;
-  }
-  bool reduceCode(Code &Orig, bool E0, bool E1)     { return true; }
-  bool reduceField(Field &Orig, bool E0, bool E1)   { return true; }
-  bool reduceApply(Apply &Orig, bool E0, bool E1)   { return true; }
-  bool reduceSApply(SApply &Orig, bool E0, bool E1) { return true; }
+  bool reduceVarDecl(VarDecl &Orig, bool E)                 { return true; }
+  bool reduceFunction(Function &Orig, bool E0, bool E1)     { return true; }
+  bool reduceSFunction(SFunction &Orig, bool E0, bool E1)   { return true; }
+  bool reduceCode(Code &Orig, bool E0, bool E1)             { return true; }
+  bool reduceField(Field &Orig, bool E0, bool E1)           { return true; }
+  bool reduceApply(Apply &Orig, bool E0, bool E1)           { return true; }
+  bool reduceSApply(SApply &Orig, bool E0, bool E1)         { return true; }
 
-  bool reduceProject(Project &Orig, bool E0) { return true; }
-  bool reduceCall(Call &Orig, bool E0)       { return true; }
-  bool reduceAlloc(Alloc &Orig, bool E0)     { return true; }
-  bool reduceLoad(Load &Orig, bool E0)       { return true; }
+  bool reduceProject(Project &Orig, bool E0)                { return true; }
+  bool reduceCall(Call &Orig, bool E0)                      { return true; }
+  bool reduceAlloc(Alloc &Orig, bool E0)                    { return true; }
+  bool reduceLoad(Load &Orig, bool E0)                      { return true; }
   bool reduceStore(Store &Orig, bool E0, bool E1)           { return true; }
   bool reduceArrayIndex(ArrayIndex &Orig, bool E0, bool E1) { return true; }
   bool reduceArrayAdd(ArrayAdd &Orig, bool E0, bool E1)     { return true; }
 
-  bool reduceUnaryOp(UnaryOp &Orig, bool E0)            { return true; }
-  bool reduceBinaryOp(BinaryOp &Orig, bool E0, bool E1) { return true; }
-  bool reduceCast(Cast &Orig, bool E0)                  { return true; }
+  bool reduceUnaryOp(UnaryOp &Orig, bool E0)                { return true; }
+  bool reduceBinaryOp(BinaryOp &Orig, bool E0, bool E1)     { return true; }
+  bool reduceCast(Cast &Orig, bool E0)                      { return true; }
 
   bool reducePhiBegin(Phi &Orig) { return true; }
   void reducePhiArg(bool Ph, unsigned i, bool E) { }
@@ -148,14 +218,12 @@ public:
   void reduceBasicBlockTerm (bool BB, bool E)              { }
   bool reduceBasicBlock     (bool BB) { return BB; }
 
-  bool reduceGoto(Goto &Orig, bool B) { return true; }
-  bool reduceBranch(Branch &O, bool C, bool B0, bool B1) {
-    return true;
-  }
-  bool reduceReturn(Return &O, bool E) { return true; }
+  bool reduceGoto(Goto &Orig, bool B)                    { return true; }
+  bool reduceBranch(Branch &O, bool C, bool B0, bool B1) { return true; }
+  bool reduceReturn(Return &O, bool E)                   { return true; }
 
-  bool reduceUndefined(Undefined &Orig) { return true; }
-  bool reduceWildcard(Wildcard &Orig) { return true; }
+  bool reduceUndefined(Undefined &Orig)   { return true; }
+  bool reduceWildcard(Wildcard &Orig)     { return true; }
   bool reduceIdentifier(Identifier &Orig) { return true; }
   bool reduceIfThenElse(IfThenElse &Orig, bool C, bool T, bool E) {
     return true;
@@ -164,35 +232,26 @@ public:
 };
 
 
-template<class Self, class CtxT>
-class Visitor : public Traversal<Self, CtxT, VisitReducer>,
-                public VisitReducer {
+/// Specialize Traversal to abort on failure.
+template<class Self, class ReducerT>
+class VisitTraversal : public Traversal<Self, ReducerT> {
 public:
-  Visitor() : Success(true) { }
+  typedef typename ReducerT::ContextT CtxT;
+
+  VisitTraversal() : Success(true) { }
 
   Self *self() { return static_cast<Self *>(this); }
 
-  // Override traverse to set success, and bail on failure.
+  /// Override traverse to set success, and bail on failure.
   bool traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
-    if (self()->isWeakRef(E,K))
-      return true;
-    Success = Success && self()->traverseByCase(E, Ctx);
-    return Success;
-  }
-
-  static bool visit(SExpr *E) {
-    Self Visitor;
-    CtxT Ctx;
-    return Visitor.traverse(E, Ctx);
+    if (K == TRV_Normal && E->block())
+      return self()->traverseWeakInstr(E, Ctx);
+    return Success = Success && self()->traverseByCase(E, Ctx, K);
   }
 
 private:
   bool Success;
 };
-
-
-class SimpleVisitor : public Visitor< SimpleVisitor,
-                                      SimpleContext<VisitReducer> > { };
 
 
 // Used by CopyReducer.  Most terms map to SExpr*.
@@ -205,19 +264,23 @@ template<> struct DefaultTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
 template<> struct DefaultTypeMap<SCFG>       { typedef SCFG* Ty; };
 
 
-class CopyReducer {
+class CopyReducerBase {
 public:
   // R_SExpr is the result type for a traversal.
   // A copy reducer returns a newly allocated term.
   template <class T> struct TypeMap : public DefaultTypeMap<T> { };
 
-  CopyReducer(MemRegionRef A) : Arena(A) {}
+  CopyReducerBase() {}
+  CopyReducerBase(MemRegionRef A) : Arena(A) { }
 
   void setArena(MemRegionRef A) { Arena = A; }
 
 public:
   SExpr* reduceNull() { return nullptr; }
-  // SExpr* reduceFuture(...)  is never used.
+
+  SExpr* reduceWeakInstr(SExpr* E)                { return nullptr; }
+  VarDecl* reduceWeakVarDecl(VarDecl *E)          { return nullptr; }
+  BasicBlock* reduceWeakBasicBlock(BasicBlock *E) { return nullptr; }
 
   SExpr* reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);
@@ -346,72 +409,43 @@ protected:
 };
 
 
-template<class Self, class CtxT>
-class Rewriter : public Traversal<Self, CtxT, CopyReducer>,
-                 public CopyReducer {
-public:
-  Rewriter(MemRegionRef A) : CopyReducer(A) { }
-
-  Self *self() { return static_cast<Self *>(this); }
-
-  SExpr* traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
-    if (self()->isWeakRef(E,K))
-      return E;
-    return self()->traverseByCase(E, Ctx);
-  }
-
-  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
-    Self RewriterObj(A);
-    CtxT Ctx;
-    return RewriterObj.traverse(E, Ctx);
-  }
-};
-
-
-class SimpleCopier : public Rewriter< SimpleCopier,
-                                      SimpleContext<CopyReducer> > {
-public:
-  SimpleCopier(MemRegionRef A) : Rewriter(A) { }
-};
-
-
 ////////////////////////////////////////
 // traverse methods for all TIL classes.
 ////////////////////////////////////////
 
 
 template <class V>
-MAPTYPE(V, Literal) Literal::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Literal) Literal::traverse(V &Vs, typename V::CtxT Ctx) {
   if (Cexpr)
-    return Vs.reduceLiteral(*this);
+    return Ctx->reduceLiteral(*this);
 
   switch (ValType.Base) {
   case ValueType::BT_Void:
     break;
   case ValueType::BT_Bool:
-    return Vs.reduceLiteralT(as<bool>());
+    return Ctx->reduceLiteralT(as<bool>());
   case ValueType::BT_Int: {
     switch (ValType.Size) {
     case ValueType::ST_8:
       if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int8_t>());
+        return Ctx->reduceLiteralT(as<int8_t>());
       else
-        return Vs.reduceLiteralT(as<uint8_t>());
+        return Ctx->reduceLiteralT(as<uint8_t>());
     case ValueType::ST_16:
       if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int16_t>());
+        return Ctx->reduceLiteralT(as<int16_t>());
       else
-        return Vs.reduceLiteralT(as<uint16_t>());
+        return Ctx->reduceLiteralT(as<uint16_t>());
     case ValueType::ST_32:
       if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int32_t>());
+        return Ctx->reduceLiteralT(as<int32_t>());
       else
-        return Vs.reduceLiteralT(as<uint32_t>());
+        return Ctx->reduceLiteralT(as<uint32_t>());
     case ValueType::ST_64:
       if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int64_t>());
+        return Ctx->reduceLiteralT(as<int64_t>());
       else
-        return Vs.reduceLiteralT(as<uint64_t>());
+        return Ctx->reduceLiteralT(as<uint64_t>());
     default:
       break;
     }
@@ -419,259 +453,259 @@ MAPTYPE(V, Literal) Literal::traverse(V &Vs, typename V::CtxT Ctx) {
   case ValueType::BT_Float: {
     switch (ValType.Size) {
     case ValueType::ST_32:
-      return Vs.reduceLiteralT(as<float>());
+      return Ctx->reduceLiteralT(as<float>());
     case ValueType::ST_64:
-      return Vs.reduceLiteralT(as<double>());
+      return Ctx->reduceLiteralT(as<double>());
     default:
       break;
     }
   }
   case ValueType::BT_String:
-    return Vs.reduceLiteralT(as<StringRef>());
+    return Ctx->reduceLiteralT(as<StringRef>());
   case ValueType::BT_Pointer:
-    return Vs.reduceLiteralT(as<void*>());
+    return Ctx->reduceLiteralT(as<void*>());
   case ValueType::BT_ValueRef:
     break;
   }
-  return Vs.reduceLiteral(*this);
+  return Ctx->reduceLiteral(*this);
 }
 
 template <class V>
-MAPTYPE(V, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::CtxT Ctx) {
-  return Vs.reduceLiteralPtr(*this);
+MAPTYPE(V::RedT, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::CtxT Ctx) {
+  return Ctx->reduceLiteralPtr(*this);
 }
 
 template <class V>
-MAPTYPE(V, VarDecl) VarDecl::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::CtxT Ctx) {
   // Don't traverse the definition of a self-function, since it points
   // back to self.
   if (kind() == VK_SFun) {
-    return Vs.reduceVarDecl(*this, Vs.reduceNull());
+    return Ctx->reduceVarDecl(*this, Ctx->reduceNull());
   }
   auto D = Vs.traverse(Definition, Ctx);
-  return Vs.reduceVarDecl(*this, D);
+  return Ctx->reduceVarDecl(*this, D);
 }
 
 template <class V>
-MAPTYPE(V, Function) Function::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Function) Function::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
   // Tell the rewriter to enter the scope of the function.
-  Ctx.enterScope(VDecl, E0);
+  Ctx = Ctx->enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
-  Ctx.exitScope(VDecl);
-  return Vs.reduceFunction(*this, E0, E1);
+  Ctx = Ctx->exitScope(VDecl);
+  return Ctx->reduceFunction(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V, SFunction) SFunction::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, SFunction) SFunction::traverse(V &Vs, typename V::CtxT Ctx) {
   // Traversing an self-definition is a no-op.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
-  Ctx.enterScope(VDecl, E0);
+  Ctx = Ctx->enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
-  Ctx.exitScope(VDecl);
+  Ctx = Ctx->exitScope(VDecl);
   // The SFun constructor will set E0->Definition to E1.
-  return Vs.reduceSFunction(*this, E0, E1);
+  return Ctx->reduceSFunction(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V, Code) Code::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Code) Code::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nt = Vs.traverse(ReturnType, Ctx, TRV_Type);
   auto Nb = Vs.traverse(Body,       Ctx, TRV_Lazy);
-  return Vs.reduceCode(*this, Nt, Nb);
+  return Ctx->reduceCode(*this, Nt, Nb);
 }
 
 template <class V>
-MAPTYPE(V, Field) Field::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Field) Field::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nr = Vs.traverse(Range, Ctx, TRV_Type);
   auto Nb = Vs.traverse(Body,  Ctx, TRV_Lazy);
-  return Vs.reduceField(*this, Nr, Nb);
+  return Ctx->reduceField(*this, Nr, Nb);
 }
 
 template <class V>
-MAPTYPE(V, Apply) Apply::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Apply) Apply::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nf = Vs.traverse(Fun, Ctx);
   auto Na = Vs.traverse(Arg, Ctx);
-  return Vs.reduceApply(*this, Nf, Na);
+  return Ctx->reduceApply(*this, Nf, Na);
 }
 
 template <class V>
-MAPTYPE(V, SApply) SApply::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, SApply) SApply::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nf = Vs.traverse(Sfun, Ctx);
-  auto Na = Arg ? Vs.traverse(Arg, Ctx) : Vs.reduceNull();
-  return Vs.reduceSApply(*this, Nf, Na);
+  auto Na = Arg ? Vs.traverse(Arg, Ctx) : Ctx->reduceNull();
+  return Ctx->reduceSApply(*this, Nf, Na);
 }
 
 template <class V>
-MAPTYPE(V, Project) Project::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Project) Project::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nr = Vs.traverse(Rec, Ctx);
-  return Vs.reduceProject(*this, Nr);
+  return Ctx->reduceProject(*this, Nr);
 }
 
 template <class V>
-MAPTYPE(V, Call) Call::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Call) Call::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nt = Vs.traverse(Target, Ctx);
-  return Vs.reduceCall(*this, Nt);
+  return Ctx->reduceCall(*this, Nt);
 }
 
 template <class V>
-MAPTYPE(V, Alloc) Alloc::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Alloc) Alloc::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nd = Vs.traverse(Dtype, Ctx, TRV_SubExpr);
-  return Vs.reduceAlloc(*this, Nd);
+  return Ctx->reduceAlloc(*this, Nd);
 }
 
 template <class V>
-MAPTYPE(V, Load) Load::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Load) Load::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Np = Vs.traverse(Ptr, Ctx);
-  return Vs.reduceLoad(*this, Np);
+  return Ctx->reduceLoad(*this, Np);
 }
 
 template <class V>
-MAPTYPE(V, Store) Store::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Store) Store::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Np = Vs.traverse(Dest,   Ctx);
   auto Nv = Vs.traverse(Source, Ctx);
-  return Vs.reduceStore(*this, Np, Nv);
+  return Ctx->reduceStore(*this, Np, Nv);
 }
 
 template <class V>
-MAPTYPE(V, ArrayIndex) ArrayIndex::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, ArrayIndex) ArrayIndex::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Na = Vs.traverse(Array, Ctx);
   auto Ni = Vs.traverse(Index, Ctx);
-  return Vs.reduceArrayIndex(*this, Na, Ni);
+  return Ctx->reduceArrayIndex(*this, Na, Ni);
 }
 
 template <class V>
-MAPTYPE(V, ArrayAdd) ArrayAdd::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, ArrayAdd) ArrayAdd::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Na = Vs.traverse(Array, Ctx);
   auto Ni = Vs.traverse(Index, Ctx);
-  return Vs.reduceArrayAdd(*this, Na, Ni);
+  return Ctx->reduceArrayAdd(*this, Na, Ni);
 }
 
 template <class V>
-MAPTYPE(V, UnaryOp) UnaryOp::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, UnaryOp) UnaryOp::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Ne = Vs.traverse(Expr0, Ctx);
-  return Vs.reduceUnaryOp(*this, Ne);
+  return Ctx->reduceUnaryOp(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V, BinaryOp) BinaryOp::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, BinaryOp) BinaryOp::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Ne0 = Vs.traverse(Expr0, Ctx);
   auto Ne1 = Vs.traverse(Expr1, Ctx);
-  return Vs.reduceBinaryOp(*this, Ne0, Ne1);
+  return Ctx->reduceBinaryOp(*this, Ne0, Ne1);
 }
 
 template <class V>
-MAPTYPE(V, Cast) Cast::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Cast) Cast::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Ne = Vs.traverse(Expr0, Ctx);
-  return Vs.reduceCast(*this, Ne);
+  return Ctx->reduceCast(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V, Phi) Phi::traverse(V &Vs, typename V::CtxT Ctx) {
-  auto Np = Vs.reducePhiBegin(*this);
+MAPTYPE(V::RedT, Phi) Phi::traverse(V &Vs, typename V::CtxT Ctx) {
+  auto Np = Ctx->reducePhiBegin(*this);
   unsigned i = 0;
   for (auto *Va : Values) {
-    Vs.reducePhiArg(Np, i, Vs.traverse(Va, Ctx));
+    Ctx->reducePhiArg(Np, i, Vs.traverse(Va, Ctx));
     ++i;
   }
-  return Vs.reducePhi(Np);
+  return Ctx->reducePhi(Np);
 }
 
 template <class V>
-MAPTYPE(V, Goto) Goto::traverse(V &Vs, typename V::CtxT Ctx) {
-  auto Ntb = Vs.traverseBasicBlock(TargetBlock, Ctx, TRV_Ref);
-  return Vs.reduceGoto(*this, Ntb);
+MAPTYPE(V::RedT, Goto) Goto::traverse(V &Vs, typename V::CtxT Ctx) {
+  auto Ntb = Vs.traverseWeakBasicBlock(TargetBlock, Ctx);
+  return Ctx->reduceGoto(*this, Ntb);
 }
 
 template <class V>
-MAPTYPE(V, Branch) Branch::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Branch) Branch::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nc  = Vs.traverse(Condition, Ctx);
-  auto Ntb = Vs.traverseBasicBlock(Branches[0], Ctx, TRV_Ref);
-  auto Nte = Vs.traverseBasicBlock(Branches[1], Ctx, TRV_Ref);
-  return Vs.reduceBranch(*this, Nc, Ntb, Nte);
+  auto Ntb = Vs.traverseWeakBasicBlock(Branches[0], Ctx);
+  auto Nte = Vs.traverseWeakBasicBlock(Branches[1], Ctx);
+  return Ctx->reduceBranch(*this, Nc, Ntb, Nte);
 }
 
 template <class V>
-MAPTYPE(V, Return) Return::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Return) Return::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Ne = Vs.traverse(Retval, Ctx);
-  return Vs.reduceReturn(*this, Ne);
+  return Ctx->reduceReturn(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V, BasicBlock) BasicBlock::traverse(V &Vs, typename V::CtxT Ctx) {
-  auto Nb = Vs.reduceBasicBlockBegin(*this);
-  Ctx.enterBasicBlock(this, Nb);
+MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::CtxT Ctx) {
+  auto Nb = Ctx->reduceBasicBlockBegin(*this);
+  Ctx = Ctx->enterBasicBlock(this, Nb);
   unsigned i = 0;
   for (auto *A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
-    Vs.reduceBasicBlockArg(Nb, i, Vs.traverse(A, Ctx, TRV_SubExpr));
+    Ctx->reduceBasicBlockArg(Nb, i, Vs.traverse(A, Ctx, TRV_SubExpr));
     ++i;
   }
   i = 0;
   for (auto *I : Instrs) {
     // Use TRV_SubExpr to force traversal of instructions
-    Vs.reduceBasicBlockInstr(Nb, i, Vs.traverse(I, Ctx, TRV_SubExpr));
+    Ctx->reduceBasicBlockInstr(Nb, i, Vs.traverse(I, Ctx, TRV_SubExpr));
     ++i;
   }
-  Vs.reduceBasicBlockTerm(Nb, Vs.traverse(TermInstr, Ctx, TRV_SubExpr));
-  Ctx.exitBasicBlock(this);
+  Ctx->reduceBasicBlockTerm(Nb, Vs.traverse(TermInstr, Ctx, TRV_SubExpr));
+  Ctx = Ctx->exitBasicBlock(this);
 
-  return Vs.reduceBasicBlock(Nb);
+  return Ctx->reduceBasicBlock(Nb);
 }
 
 template <class V>
-MAPTYPE(V, SCFG) SCFG::traverse(V &Vs, typename V::CtxT Ctx) {
-  auto Ns = Vs.reduceSCFGBegin(*this);
-  Ctx.enterCFG(this, Ns);
+MAPTYPE(V::RedT, SCFG) SCFG::traverse(V &Vs, typename V::CtxT Ctx) {
+  auto Ns = Ctx->reduceSCFGBegin(*this);
+  Ctx = Ctx->enterCFG(this, Ns);
 
   unsigned i = 0;
   for (auto *B : Blocks) {
-    Vs.reduceSCFGBlock(Ns, i, Vs.traverseBasicBlock(B, Ctx, TRV_SubExpr));
+    Ctx->reduceSCFGBlock(Ns, i, Vs.traverseBasicBlock(B, Ctx, TRV_SubExpr));
     ++i;
   }
-  Ctx.exitCFG(this);
-  return Vs.reduceSCFG(Ns);
+  Ctx = Ctx->exitCFG(this);
+  return Ctx->reduceSCFG(Ns);
 }
 
 template <class V>
-MAPTYPE(V, Future) Future::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Future) Future::traverse(V &Vs, typename V::CtxT Ctx) {
   assert(Result && "Cannot traverse Future that has not been forced.");
   return Vs.traverse(Result, Ctx);
 }
 
 template <class V>
-MAPTYPE(V, Undefined) Undefined::traverse(V &Vs, typename V::CtxT Ctx) {
-  return Vs.reduceUndefined(*this);
+MAPTYPE(V::RedT, Undefined) Undefined::traverse(V &Vs, typename V::CtxT Ctx) {
+  return Ctx->reduceUndefined(*this);
 }
 
 template <class V>
-MAPTYPE(V, Wildcard) Wildcard::traverse(V &Vs, typename V::CtxT Ctx) {
-  return Vs.reduceWildcard(*this);
+MAPTYPE(V::RedT, Wildcard) Wildcard::traverse(V &Vs, typename V::CtxT Ctx) {
+  return Ctx->reduceWildcard(*this);
 }
 
 template <class V>
-MAPTYPE(V, Identifier)
+MAPTYPE(V::RedT, Identifier)
 Identifier::traverse(V &Vs, typename V::CtxT Ctx) {
-  return Vs.reduceIdentifier(*this);
+  return Ctx->reduceIdentifier(*this);
 }
 
 template <class V>
-MAPTYPE(V, IfThenElse) IfThenElse::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nc = Vs.traverse(Condition, Ctx);
   auto Nt = Vs.traverse(ThenExpr,  Ctx);
   auto Ne = Vs.traverse(ElseExpr,  Ctx);
-  return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
+  return Ctx->reduceIfThenElse(*this, Nc, Nt, Ne);
 }
 
 template <class V>
-MAPTYPE(V, Let) Let::traverse(V &Vs, typename V::CtxT Ctx) {
+MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx);
   // Tell the rewriter to enter the scope of the let variable.
-  Ctx.enterScope(VDecl, E0);
+  Ctx = Ctx->enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx);
-  Ctx.exitScope(VDecl);
-  return Vs.reduceLet(*this, E0, E1);
+  Ctx = Ctx->exitScope(VDecl);
+  return Ctx->reduceLet(*this, E0, E1);
 }
 
 

@@ -15,10 +15,37 @@ namespace threadSafety {
 namespace til {
 
 
+class SimpleVisitReducer
+  : public UnscopedReducer<SimpleVisitReducer, VisitReducerBase> { };
+
+class SimpleVisitor : public VisitTraversal<SimpleVisitor, SimpleVisitReducer> {
+public:
+  static bool doTraversal(SExpr *E) {
+    SimpleVisitor Traverser;
+    SimpleVisitReducer Reducer;
+    return Traverser.traverse(E, &Reducer);
+  }
+};
+
+class SimpleCopyReducer
+  : public UnscopedReducer<SimpleCopyReducer, CopyReducerBase> { };
+
+class SimpleCopier : public Traversal<SimpleCopier, SimpleCopyReducer> {
+public:
+  static SExpr* doTraversal(SExpr *E, MemRegionRef A) {
+    SimpleCopier  Traverser;
+    SimpleCopyReducer Reducer;
+    Reducer.setArena(A);
+    return Traverser.traverse(E, &Reducer);
+  }
+};
+
 void test(SExpr* E, MemRegionRef A) {
-  SimpleVisitor::visit(E);
-  SimpleCopier::rewrite(E, A);
+  SimpleVisitor::doTraversal(E);
+  SimpleCopier::doTraversal(E, A);
 }
+
+
 
 
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op) {

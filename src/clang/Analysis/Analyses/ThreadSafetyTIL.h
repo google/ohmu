@@ -391,7 +391,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, Literal) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Literal) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Literal* E, C& Cmp) const {
@@ -433,7 +433,7 @@ public:
   const clang::ValueDecl *clangDecl() const { return Cvdecl; }
 
   template <class V>
-  MAPTYPE(V, LiteralPtr) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, LiteralPtr) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const LiteralPtr* E, C& Cmp) const {
@@ -495,7 +495,7 @@ public:
   void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
 
   template <class V>
-  MAPTYPE(V, VarDecl) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, VarDecl) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const VarDecl* E, C& Cmp) const {
@@ -538,7 +538,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  MAPTYPE(V, Function) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Function) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Function* E, C& Cmp) const {
@@ -585,7 +585,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  MAPTYPE(V, SFunction) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, SFunction) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SFunction* E, C& Cmp) const {
@@ -617,7 +617,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  MAPTYPE(V, Code) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Code) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Code* E, C& Cmp) const {
@@ -649,7 +649,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  MAPTYPE(V, Field) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Field) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Field* E, C& Cmp) const {
@@ -686,7 +686,7 @@ public:
   const SExpr *arg() const { return Arg; }
 
   template <class V>
-  MAPTYPE(V, Apply) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Apply) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Apply* E, C& Cmp) const {
@@ -720,7 +720,7 @@ public:
   bool isDelegation() const { return Arg != nullptr; }
 
   template <class V>
-  MAPTYPE(V, SApply) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, SApply) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SApply* E, C& Cmp) const {
@@ -770,7 +770,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, Project) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Project) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Project* E, C& Cmp) const {
@@ -802,7 +802,7 @@ public:
   const clang::CallExpr *clangCallExpr() const { return Cexpr; }
 
   template <class V>
-  MAPTYPE(V, Call) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Call) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Call* E, C& Cmp) const {
@@ -834,7 +834,7 @@ public:
   const SExpr *dataType() const { return Dtype; }
 
   template <class V>
-  MAPTYPE(V, Alloc) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Alloc) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Alloc* E, C& Cmp) const {
@@ -861,7 +861,7 @@ public:
   const SExpr *pointer() const { return Ptr; }
 
   template <class V>
-  MAPTYPE(V, Load) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Load) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Load* E, C& Cmp) const {
@@ -889,7 +889,7 @@ public:
   const SExpr *source() const { return Source; }
 
   template <class V>
-  MAPTYPE(V, Store) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Store) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Store* E, C& Cmp) const {
@@ -922,7 +922,7 @@ public:
   const SExpr *index() const { return Index; }
 
   template <class V>
-  MAPTYPE(V, ArrayIndex) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, ArrayIndex) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const ArrayIndex* E, C& Cmp) const {
@@ -956,7 +956,7 @@ public:
   const SExpr *index() const { return Index; }
 
   template <class V>
-  MAPTYPE(V, ArrayAdd) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, ArrayAdd) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const ArrayAdd* E, C& Cmp) const {
@@ -991,7 +991,7 @@ public:
   const SExpr *expr() const { return Expr0; }
 
   template <class V>
-  MAPTYPE(V, UnaryOp) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, UnaryOp) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const UnaryOp* E, C& Cmp) const {
@@ -1033,7 +1033,7 @@ public:
   const SExpr *expr1() const { return Expr1; }
 
   template <class V>
-  MAPTYPE(V, BinaryOp) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, BinaryOp) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const BinaryOp* E, C& Cmp) const {
@@ -1071,7 +1071,7 @@ public:
   const SExpr *expr() const { return Expr0; }
 
   template <class V>
-  MAPTYPE(V, Cast) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Cast) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Cast* E, C& Cmp) const {
@@ -1128,7 +1128,7 @@ public:
   void setClangDecl(const clang::ValueDecl *Cvd) { Cvdecl = Cvd; }
 
   template <class V>
-  MAPTYPE(V, Phi) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Phi) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Phi *E, C &Cmp) const {
@@ -1189,7 +1189,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, Goto) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Goto) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Goto *E, C &Cmp) const {
@@ -1236,7 +1236,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, Branch) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Branch) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Branch *E, C &Cmp) const {
@@ -1268,7 +1268,7 @@ public:
   const SExpr *returnValue() const { return Retval; }
 
   template <class V>
-  MAPTYPE(V, Return) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Return) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Return *E, C &Cmp) const {
@@ -1404,7 +1404,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, BasicBlock) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, BasicBlock) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const BasicBlock *E, C &Cmp) const {
@@ -1510,7 +1510,7 @@ public:
   void computeNormalForm();
 
   template <class V>
-  MAPTYPE(V, SCFG) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, SCFG) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SCFG *E, C &Cmp) const {
@@ -1570,7 +1570,7 @@ public:
   }
 
   template <class V>
-  MAPTYPE(V, Future) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Future) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Future* E, C& Cmp) const {
@@ -1596,7 +1596,7 @@ public:
   Undefined(const Undefined &U) : SExpr(U), Cstmt(U.Cstmt) {}
 
   template <class V>
-  MAPTYPE(V, Undefined) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Undefined) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Undefined* E, C& Cmp) const {
@@ -1617,7 +1617,7 @@ public:
   Wildcard(const Wildcard &W) : SExpr(W) {}
 
   template <class V>
-  MAPTYPE(V, Wildcard) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Wildcard) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Wildcard* E, C& Cmp) const {
@@ -1638,7 +1638,7 @@ public:
   StringRef name() const { return Name; }
 
   template <class V>
-  MAPTYPE(V, Identifier) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Identifier) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Identifier* E, C& Cmp) const {
@@ -1673,7 +1673,7 @@ public:
   const SExpr *elseExpr() const { return ElseExpr; }
 
   template <class V>
-  MAPTYPE(V, IfThenElse) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, IfThenElse) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const IfThenElse* E, C& Cmp) const {
@@ -1713,7 +1713,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  MAPTYPE(V, Let) traverse(V &Vs, typename V::CtxT Ctx);
+  MAPTYPE(V::RedT, Let) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Let* E, C& Cmp) const {

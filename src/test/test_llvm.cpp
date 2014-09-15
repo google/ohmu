@@ -95,7 +95,7 @@ int main(int argc, const char** argv) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
     std::cout << "\nCFG:\n";
-    SCFG* cfg = CFGLoweringPass::convertSExprToCFG(e, tilParser.arena());
+    SCFG* cfg = CFGRewriter::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
 
     irgen.generateSCFG(cfg);
