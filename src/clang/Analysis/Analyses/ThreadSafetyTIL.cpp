@@ -15,6 +15,12 @@ namespace threadSafety {
 namespace til {
 
 
+void test(SExpr* E, MemRegionRef A) {
+  SimpleVisitor::visit(E);
+  SimpleCopier::rewrite(E, A);
+}
+
+
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op) {
   switch (Op) {
     case UOP_Minus:    return "-";

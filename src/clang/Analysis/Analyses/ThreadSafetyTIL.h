@@ -267,6 +267,10 @@ inline ValueType ValueType::getValueType<void*>() {
 class BasicBlock;
 
 
+// Macro for the ugly template return type of SExpr::traverse
+#define MAPTYPE(V, X) typename V::template TypeMap<X>::Ty
+
+
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {
 public:
@@ -361,6 +365,86 @@ class SFunction;
 class Let;
 
 
+template <class T> class LiteralT;
+
+// Base class for literal values.
+class Literal : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
+
+  Literal(const clang::Expr *C)
+     : SExpr(COP_Literal), ValType(ValueType::getValueType<void>()), Cexpr(C)
+  { }
+  Literal(ValueType VT) : SExpr(COP_Literal), ValType(VT), Cexpr(nullptr) {}
+  Literal(const Literal &L) : SExpr(L), ValType(L.ValType), Cexpr(L.Cexpr) {}
+
+  // The clang expression for this literal.
+  const clang::Expr *clangExpr() const { return Cexpr; }
+
+  ValueType valueType() const { return ValType; }
+
+  template<class T> const LiteralT<T>& as() const {
+    return *static_cast<const LiteralT<T>*>(this);
+  }
+  template<class T> LiteralT<T>& as() {
+    return *static_cast<LiteralT<T>*>(this);
+  }
+
+  template <class V>
+  MAPTYPE(V, Literal) traverse(V &Vs, typename V::CtxT Ctx);
+
+  template <class C>
+  typename C::CType compare(const Literal* E, C& Cmp) const {
+    // TODO: defer actual comparison to LiteralT
+    return Cmp.trueResult();
+  }
+
+private:
+  const ValueType ValType;
+  const clang::Expr *Cexpr;
+};
+
+
+// Derived class for literal values, which stores the actual value.
+template<class T>
+class LiteralT : public Literal {
+public:
+  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
+  LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
+
+  T  value() const { return Val;}
+  T& value() { return Val; }
+
+private:
+  T Val;
+};
+
+
+/// A Literal pointer to an object allocated in memory.
+/// At compile time, pointer literals are represented by symbolic names.
+class LiteralPtr : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_LiteralPtr; }
+
+  LiteralPtr(const clang::ValueDecl *D) : SExpr(COP_LiteralPtr), Cvdecl(D) {}
+  LiteralPtr(const LiteralPtr &R) : SExpr(R), Cvdecl(R.Cvdecl) {}
+
+  // The clang declaration for the value that this pointer points to.
+  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
+
+  template <class V>
+  MAPTYPE(V, LiteralPtr) traverse(V &Vs, typename V::CtxT Ctx);
+
+  template <class C>
+  typename C::CType compare(const LiteralPtr* E, C& Cmp) const {
+    return Cmp.comparePointers(Cvdecl, E->Cvdecl);
+  }
+
+private:
+  const clang::ValueDecl *Cvdecl;
+};
+
+
 /// A declaration for a named variable.
 /// There are three ways to introduce a new variable:
 ///   Let-expressions:           (Let (x = t) u)
@@ -411,10 +495,7 @@ public:
   void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto D = Vs.traverse(Definition, Vs.subExprCtx(Ctx));
-    return Vs.reduceVarDecl(*this, D);
-  }
+  MAPTYPE(V, VarDecl) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const VarDecl* E, C& Cmp) const {
@@ -431,246 +512,6 @@ private:
   StringRef Name;                  // The name of the variable.
   SExpr*    Definition;            // The TIL type or definition
   const clang::ValueDecl *Cvdecl;  // The clang declaration for this variable.
-};
-
-
-/// Placeholder for an expression that has not yet been created.
-/// Used to implement lazy copy and rewriting strategies.
-class Future : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
-
-  enum FutureStatus {
-    FS_pending,
-    FS_evaluating,
-    FS_done
-  };
-
-  Future() : SExpr(COP_Future), Status(FS_pending), Result(nullptr) {}
-
-private:
-  virtual ~Future() LLVM_DELETED_FUNCTION;
-
-public:
-  // A lazy rewriting strategy should subclass Future and override this method.
-  virtual SExpr *compute() { return nullptr; }
-
-  // Return the result of this future if it exists, otherwise return null.
-  SExpr *maybeGetResult() const {
-    return Result;
-  }
-
-  // Return the result of this future; forcing it if necessary.
-  SExpr *result() {
-    switch (Status) {
-    case FS_pending:
-      return force();
-    case FS_evaluating:
-      return nullptr; // infinite loop; illegal recursion.
-    case FS_done:
-      return Result;
-    }
-  }
-
-  template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    assert(Result && "Cannot traverse Future that has not been forced.");
-    return Vs.traverse(Result, Ctx);
-  }
-
-  template <class C>
-  typename C::CType compare(const Future* E, C& Cmp) const {
-    if (!Result || !E->Result)
-      return Cmp.comparePointers(this, E);
-    return Cmp.compare(Result, E->Result);
-  }
-
-private:
-  SExpr* force();
-
-  FutureStatus Status;
-  SExpr *Result;
-};
-
-
-/// Placeholder for expressions that cannot be represented in the TIL.
-class Undefined : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Undefined; }
-
-  Undefined(const clang::Stmt *S = nullptr) : SExpr(COP_Undefined), Cstmt(S) {}
-  Undefined(const Undefined &U) : SExpr(U), Cstmt(U.Cstmt) {}
-
-  template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    return Vs.reduceUndefined(*this);
-  }
-
-  template <class C>
-  typename C::CType compare(const Undefined* E, C& Cmp) const {
-    return Cmp.trueResult();
-  }
-
-private:
-  const clang::Stmt *Cstmt;
-};
-
-
-/// Placeholder for a wildcard that matches any other expression.
-class Wildcard : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Wildcard; }
-
-  Wildcard() : SExpr(COP_Wildcard) {}
-  Wildcard(const Wildcard &W) : SExpr(W) {}
-
-  template <class V> typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    return Vs.reduceWildcard(*this);
-  }
-
-  template <class C>
-  typename C::CType compare(const Wildcard* E, C& Cmp) const {
-    return Cmp.trueResult();
-  }
-};
-
-
-template <class T> class LiteralT;
-
-// Base class for literal values.
-class Literal : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
-
-  Literal(const clang::Expr *C)
-     : SExpr(COP_Literal), ValType(ValueType::getValueType<void>()), Cexpr(C)
-  { }
-  Literal(ValueType VT) : SExpr(COP_Literal), ValType(VT), Cexpr(nullptr) {}
-  Literal(const Literal &L) : SExpr(L), ValType(L.ValType), Cexpr(L.Cexpr) {}
-
-  // The clang expression for this literal.
-  const clang::Expr *clangExpr() const { return Cexpr; }
-
-  ValueType valueType() const { return ValType; }
-
-  template<class T> const LiteralT<T>& as() const {
-    return *static_cast<const LiteralT<T>*>(this);
-  }
-  template<class T> LiteralT<T>& as() {
-    return *static_cast<LiteralT<T>*>(this);
-  }
-
-  template <class V> typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx);
-
-  template <class C>
-  typename C::CType compare(const Literal* E, C& Cmp) const {
-    // TODO: defer actual comparison to LiteralT
-    return Cmp.trueResult();
-  }
-
-private:
-  const ValueType ValType;
-  const clang::Expr *Cexpr;
-};
-
-
-// Derived class for literal values, which stores the actual value.
-template<class T>
-class LiteralT : public Literal {
-public:
-  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
-  LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
-
-  T  value() const { return Val;}
-  T& value() { return Val; }
-
-private:
-  T Val;
-};
-
-
-
-template <class V>
-typename V::R_SExpr Literal::traverse(V &Vs, typename V::R_Ctx Ctx) {
-  if (Cexpr)
-    return Vs.reduceLiteral(*this);
-
-  switch (ValType.Base) {
-  case ValueType::BT_Void:
-    break;
-  case ValueType::BT_Bool:
-    return Vs.reduceLiteralT(as<bool>());
-  case ValueType::BT_Int: {
-    switch (ValType.Size) {
-    case ValueType::ST_8:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int8_t>());
-      else
-        return Vs.reduceLiteralT(as<uint8_t>());
-    case ValueType::ST_16:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int16_t>());
-      else
-        return Vs.reduceLiteralT(as<uint16_t>());
-    case ValueType::ST_32:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int32_t>());
-      else
-        return Vs.reduceLiteralT(as<uint32_t>());
-    case ValueType::ST_64:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int64_t>());
-      else
-        return Vs.reduceLiteralT(as<uint64_t>());
-    default:
-      break;
-    }
-  }
-  case ValueType::BT_Float: {
-    switch (ValType.Size) {
-    case ValueType::ST_32:
-      return Vs.reduceLiteralT(as<float>());
-    case ValueType::ST_64:
-      return Vs.reduceLiteralT(as<double>());
-    default:
-      break;
-    }
-  }
-  case ValueType::BT_String:
-    return Vs.reduceLiteralT(as<StringRef>());
-  case ValueType::BT_Pointer:
-    return Vs.reduceLiteralT(as<void*>());
-  case ValueType::BT_ValueRef:
-    break;
-  }
-  return Vs.reduceLiteral(*this);
-}
-
-
-/// A Literal pointer to an object allocated in memory.
-/// At compile time, pointer literals are represented by symbolic names.
-class LiteralPtr : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_LiteralPtr; }
-
-  LiteralPtr(const clang::ValueDecl *D) : SExpr(COP_LiteralPtr), Cvdecl(D) {}
-  LiteralPtr(const LiteralPtr &R) : SExpr(R), Cvdecl(R.Cvdecl) {}
-
-  // The clang declaration for the value that this pointer points to.
-  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
-
-  template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    return Vs.reduceLiteralPtr(*this);
-  }
-
-  template <class C>
-  typename C::CType compare(const LiteralPtr* E, C& Cmp) const {
-    return Cmp.comparePointers(Cvdecl, E->Cvdecl);
-  }
-
-private:
-  const clang::ValueDecl *Cvdecl;
 };
 
 
@@ -697,15 +538,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    // This is a variable declaration, so traverse the definition.
-    auto E0 = Vs.traverse(VDecl->Definition, Vs.typeCtx(Ctx));
-    // Tell the rewriter to enter the scope of the function.
-    VarDecl *Nvd = Vs.enterScope(*VDecl, E0);
-    auto E1 = Vs.traverse(Body, Vs.declCtx(Ctx));
-    Vs.exitScope(*VDecl);
-    return Vs.reduceFunction(*this, Nvd, E1);
-  }
+  MAPTYPE(V, Function) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Function* E, C& Cmp) const {
@@ -752,16 +585,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    // A self-variable points to the SFunction itself.
-    // A rewrite must introduce the variable with a null definition, and update
-    // it after 'this' has been rewritten.
-    VarDecl *Nvd = Vs.enterScope(*VDecl, nullptr);
-    auto E1 = Vs.traverse(Body, Vs.declCtx(Ctx));
-    Vs.exitScope(*VDecl);
-    // A rewrite operation will call SFun constructor to set Vvd->Definition.
-    return Vs.reduceSFunction(*this, Nvd, E1);
-  }
+  MAPTYPE(V, SFunction) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SFunction* E, C& Cmp) const {
@@ -793,11 +617,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nt = Vs.traverse(ReturnType, Vs.typeCtx(Ctx));
-    auto Nb = Vs.traverse(Body,       Vs.lazyCtx(Ctx));
-    return Vs.reduceCode(*this, Nt, Nb);
-  }
+  MAPTYPE(V, Code) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Code* E, C& Cmp) const {
@@ -829,11 +649,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nr = Vs.traverse(Range, Vs.typeCtx(Ctx));
-    auto Nb = Vs.traverse(Body,  Vs.lazyCtx(Ctx));
-    return Vs.reduceField(*this, Nr, Nb);
-  }
+  MAPTYPE(V, Field) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Field* E, C& Cmp) const {
@@ -870,11 +686,7 @@ public:
   const SExpr *arg() const { return Arg; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nf = Vs.traverse(Fun, Vs.subExprCtx(Ctx));
-    auto Na = Vs.traverse(Arg, Vs.subExprCtx(Ctx));
-    return Vs.reduceApply(*this, Nf, Na);
-  }
+  MAPTYPE(V, Apply) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Apply* E, C& Cmp) const {
@@ -908,12 +720,7 @@ public:
   bool isDelegation() const { return Arg != nullptr; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nf = Vs.traverse(Sfun, Vs.subExprCtx(Ctx));
-    typename V::R_SExpr Na = Arg ? Vs.traverse(Arg, Vs.subExprCtx(Ctx))
-                                       : nullptr;
-    return Vs.reduceSApply(*this, Nf, Na);
-  }
+  MAPTYPE(V, SApply) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SApply* E, C& Cmp) const {
@@ -963,10 +770,7 @@ public:
   }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nr = Vs.traverse(Rec, Vs.subExprCtx(Ctx));
-    return Vs.reduceProject(*this, Nr);
-  }
+  MAPTYPE(V, Project) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Project* E, C& Cmp) const {
@@ -998,10 +802,7 @@ public:
   const clang::CallExpr *clangCallExpr() const { return Cexpr; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nt = Vs.traverse(Target, Vs.subExprCtx(Ctx));
-    return Vs.reduceCall(*this, Nt);
-  }
+  MAPTYPE(V, Call) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Call* E, C& Cmp) const {
@@ -1033,10 +834,7 @@ public:
   const SExpr *dataType() const { return Dtype; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nd = Vs.traverse(Dtype, Vs.declCtx(Ctx));
-    return Vs.reduceAlloc(*this, Nd);
-  }
+  MAPTYPE(V, Alloc) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Alloc* E, C& Cmp) const {
@@ -1063,10 +861,7 @@ public:
   const SExpr *pointer() const { return Ptr; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Np = Vs.traverse(Ptr, Vs.subExprCtx(Ctx));
-    return Vs.reduceLoad(*this, Np);
-  }
+  MAPTYPE(V, Load) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Load* E, C& Cmp) const {
@@ -1094,11 +889,7 @@ public:
   const SExpr *source() const { return Source; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Np = Vs.traverse(Dest,   Vs.subExprCtx(Ctx));
-    auto Nv = Vs.traverse(Source, Vs.subExprCtx(Ctx));
-    return Vs.reduceStore(*this, Np, Nv);
-  }
+  MAPTYPE(V, Store) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Store* E, C& Cmp) const {
@@ -1131,11 +922,7 @@ public:
   const SExpr *index() const { return Index; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Na = Vs.traverse(Array, Vs.subExprCtx(Ctx));
-    auto Ni = Vs.traverse(Index, Vs.subExprCtx(Ctx));
-    return Vs.reduceArrayIndex(*this, Na, Ni);
-  }
+  MAPTYPE(V, ArrayIndex) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const ArrayIndex* E, C& Cmp) const {
@@ -1169,11 +956,7 @@ public:
   const SExpr *index() const { return Index; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Na = Vs.traverse(Array, Vs.subExprCtx(Ctx));
-    auto Ni = Vs.traverse(Index, Vs.subExprCtx(Ctx));
-    return Vs.reduceArrayAdd(*this, Na, Ni);
-  }
+  MAPTYPE(V, ArrayAdd) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const ArrayAdd* E, C& Cmp) const {
@@ -1208,10 +991,7 @@ public:
   const SExpr *expr() const { return Expr0; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Ne = Vs.traverse(Expr0, Vs.subExprCtx(Ctx));
-    return Vs.reduceUnaryOp(*this, Ne);
-  }
+  MAPTYPE(V, UnaryOp) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const UnaryOp* E, C& Cmp) const {
@@ -1253,11 +1033,7 @@ public:
   const SExpr *expr1() const { return Expr1; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Ne0 = Vs.traverse(Expr0, Vs.subExprCtx(Ctx));
-    auto Ne1 = Vs.traverse(Expr1, Vs.subExprCtx(Ctx));
-    return Vs.reduceBinaryOp(*this, Ne0, Ne1);
-  }
+  MAPTYPE(V, BinaryOp) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const BinaryOp* E, C& Cmp) const {
@@ -1295,10 +1071,7 @@ public:
   const SExpr *expr() const { return Expr0; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Ne = Vs.traverse(Expr0, Vs.subExprCtx(Ctx));
-    return Vs.reduceCast(*this, Ne);
-  }
+  MAPTYPE(V, Cast) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Cast* E, C& Cmp) const {
@@ -1339,8 +1112,8 @@ public:
     : SExpr(COP_Phi), Cvdecl(nullptr) {}
   Phi(MemRegionRef A, unsigned Nvals)
     : SExpr(COP_Phi), Values(A, Nvals), Cvdecl(nullptr)  {}
-  Phi(const Phi &P, ValArray &&Vs)
-    : SExpr(P), Values(std::move(Vs)), Cvdecl(nullptr) {}
+  Phi(const Phi &Ph, MemRegionRef A)
+    : SExpr(Ph), Values(A, Ph.values().size()), Cvdecl(Ph.Cvdecl) { }
 
   const ValArray &values() const { return Values; }
   ValArray &values() { return Values; }
@@ -1355,15 +1128,7 @@ public:
   void setClangDecl(const clang::ValueDecl *Cvd) { Cvdecl = Cvd; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    typename V::template Container<typename V::R_SExpr>
-      Nvs(Vs, Values.size());
-
-    for (auto *Val : Values) {
-      Nvs.push_back( Vs.traverse(Val, Vs.subExprCtx(Ctx)) );
-    }
-    return Vs.reducePhi(*this, Nvs);
-  }
+  MAPTYPE(V, Phi) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Phi *E, C &Cmp) const {
@@ -1424,10 +1189,7 @@ public:
   }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    BasicBlock *Ntb = Vs.reduceBasicBlockRef(TargetBlock);
-    return Vs.reduceGoto(*this, Ntb);
-  }
+  MAPTYPE(V, Goto) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Goto *E, C &Cmp) const {
@@ -1474,12 +1236,7 @@ public:
   }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nc = Vs.traverse(Condition, Vs.subExprCtx(Ctx));
-    BasicBlock *Ntb = Vs.reduceBasicBlockRef(Branches[0]);
-    BasicBlock *Nte = Vs.reduceBasicBlockRef(Branches[1]);
-    return Vs.reduceBranch(*this, Nc, Ntb, Nte);
-  }
+  MAPTYPE(V, Branch) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Branch *E, C &Cmp) const {
@@ -1511,10 +1268,7 @@ public:
   const SExpr *returnValue() const { return Retval; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Ne = Vs.traverse(Retval, Vs.subExprCtx(Ctx));
-    return Vs.reduceReturn(*this, Ne);
-  }
+  MAPTYPE(V, Return) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Return *E, C &Cmp) const {
@@ -1574,10 +1328,10 @@ public:
   explicit BasicBlock(MemRegionRef A)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
         Visited(0), TermInstr(nullptr) {}
-  BasicBlock(BasicBlock &B, MemRegionRef A, InstrArray &&As, InstrArray &&Is,
-             Terminator *T)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),Visited(0),
-        Args(std::move(As)), Instrs(std::move(Is)), TermInstr(T) {}
+  BasicBlock(BasicBlock &B, MemRegionRef A)
+      : SExpr(B), Arena(A), CFGPtr(nullptr), BlockID(0), Visited(0),
+        Args(A, B.Args.size()), Instrs(A, B.Instrs.size()),
+        TermInstr(nullptr) {}
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
   int blockID() const { return BlockID; }
@@ -1650,28 +1404,7 @@ public:
   }
 
   template <class V>
-  typename V::R_BasicBlock traverse(V &Vs, typename V::R_Ctx Ctx) {
-    typename V::template Container<SExpr*> Nas(Vs, Args.size());
-    typename V::template Container<SExpr*> Nis(Vs, Instrs.size());
-
-    // Entering the basic block should do any scope initialization.
-    Vs.enterBasicBlock(*this);
-
-    for (auto *E : Args) {
-      auto Ne = Vs.traverse(E, Vs.subExprCtx(Ctx));
-      Nas.push_back(Ne);
-    }
-    for (auto *E : Instrs) {
-      auto Ne = Vs.traverse(E, Vs.subExprCtx(Ctx));
-      Nis.push_back(Ne);
-    }
-    auto Nt = Vs.traverse(TermInstr, Ctx);
-
-    // Exiting the basic block should handle any scope cleanup.
-    Vs.exitBasicBlock(*this);
-
-    return Vs.reduceBasicBlock(*this, Nas, Nis, Nt);
-  }
+  MAPTYPE(V, BasicBlock) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const BasicBlock *E, C &Cmp) const {
@@ -1727,10 +1460,10 @@ public:
     add(Entry);
     add(Exit);
   }
-  SCFG(const SCFG &Cfg, BlockArray &&Ba) // steals memory from Ba
-      : SExpr(COP_SCFG), Arena(Cfg.Arena), Blocks(std::move(Ba)),
+  SCFG(const SCFG &Cfg, MemRegionRef A)
+      : SExpr(COP_SCFG), Arena(A), Blocks(A, Cfg.numBlocks()),
         Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) {
-    // TODO: set entry and exit!
+
   }
 
   /// Return true if this CFG is valid.
@@ -1777,16 +1510,7 @@ public:
   void computeNormalForm();
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    Vs.enterCFG(*this);
-    typename V::template Container<BasicBlock *> Bbs(Vs, Blocks.size());
-
-    for (auto *B : Blocks) {
-      Bbs.push_back( B->traverse(Vs, Vs.subExprCtx(Ctx)) );
-    }
-    Vs.exitCFG(*this);
-    return Vs.reduceSCFG(*this, Bbs);
-  }
+  MAPTYPE(V, SCFG) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const SCFG *E, C &Cmp) const {
@@ -1807,6 +1531,100 @@ private:
 };
 
 
+/// Placeholder for an expression that has not yet been created.
+/// Used to implement lazy copy and rewriting strategies.
+class Future : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
+
+  enum FutureStatus {
+    FS_pending,
+    FS_evaluating,
+    FS_done
+  };
+
+  Future() : SExpr(COP_Future), Status(FS_pending), Result(nullptr) {}
+
+private:
+  virtual ~Future() LLVM_DELETED_FUNCTION;
+
+public:
+  // A lazy rewriting strategy should subclass Future and override this method.
+  virtual SExpr *compute() { return nullptr; }
+
+  // Return the result of this future if it exists, otherwise return null.
+  SExpr *maybeGetResult() const {
+    return Result;
+  }
+
+  // Return the result of this future; forcing it if necessary.
+  SExpr *result() {
+    switch (Status) {
+    case FS_pending:
+      return force();
+    case FS_evaluating:
+      return nullptr; // infinite loop; illegal recursion.
+    case FS_done:
+      return Result;
+    }
+  }
+
+  template <class V>
+  MAPTYPE(V, Future) traverse(V &Vs, typename V::CtxT Ctx);
+
+  template <class C>
+  typename C::CType compare(const Future* E, C& Cmp) const {
+    if (!Result || !E->Result)
+      return Cmp.comparePointers(this, E);
+    return Cmp.compare(Result, E->Result);
+  }
+
+private:
+  SExpr* force();
+
+  FutureStatus Status;
+  SExpr *Result;
+};
+
+
+/// Placeholder for expressions that cannot be represented in the TIL.
+class Undefined : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Undefined; }
+
+  Undefined(const clang::Stmt *S = nullptr) : SExpr(COP_Undefined), Cstmt(S) {}
+  Undefined(const Undefined &U) : SExpr(U), Cstmt(U.Cstmt) {}
+
+  template <class V>
+  MAPTYPE(V, Undefined) traverse(V &Vs, typename V::CtxT Ctx);
+
+  template <class C>
+  typename C::CType compare(const Undefined* E, C& Cmp) const {
+    return Cmp.trueResult();
+  }
+
+private:
+  const clang::Stmt *Cstmt;
+};
+
+
+/// Placeholder for a wildcard that matches any other expression.
+class Wildcard : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Wildcard; }
+
+  Wildcard() : SExpr(COP_Wildcard) {}
+  Wildcard(const Wildcard &W) : SExpr(W) {}
+
+  template <class V>
+  MAPTYPE(V, Wildcard) traverse(V &Vs, typename V::CtxT Ctx);
+
+  template <class C>
+  typename C::CType compare(const Wildcard* E, C& Cmp) const {
+    return Cmp.trueResult();
+  }
+};
+
 
 /// An identifier, e.g. 'foo' or 'x'.
 /// This is a pseduo-term; it will be lowered to a variable or projection.
@@ -1820,9 +1638,7 @@ public:
   StringRef name() const { return Name; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    return Vs.reduceIdentifier(*this);
-  }
+  MAPTYPE(V, Identifier) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Identifier* E, C& Cmp) const {
@@ -1857,12 +1673,7 @@ public:
   const SExpr *elseExpr() const { return ElseExpr; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    auto Nc = Vs.traverse(Condition, Vs.subExprCtx(Ctx));
-    auto Nt = Vs.traverse(ThenExpr,  Vs.subExprCtx(Ctx));
-    auto Ne = Vs.traverse(ElseExpr,  Vs.subExprCtx(Ctx));
-    return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
-  }
+  MAPTYPE(V, IfThenElse) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const IfThenElse* E, C& Cmp) const {
@@ -1902,15 +1713,7 @@ public:
   const SExpr *body() const { return Body; }
 
   template <class V>
-  typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-    // This is a variable declaration, so traverse the definition.
-    auto E0 = Vs.traverse(VDecl->Definition, Vs.subExprCtx(Ctx));
-    // Tell the rewriter to enter the scope of the let variable.
-    VarDecl *Nvd = Vs.enterScope(*VDecl, E0);
-    auto E1 = Vs.traverse(Body, Ctx);
-    Vs.exitScope(*VDecl);
-    return Vs.reduceLet(*this, Nvd, E1);
-  }
+  MAPTYPE(V, Let) traverse(V &Vs, typename V::CtxT Ctx);
 
   template <class C>
   typename C::CType compare(const Let* E, C& Cmp) const {

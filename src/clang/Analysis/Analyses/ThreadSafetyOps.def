@@ -14,11 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 
-TIL_OPCODE_DEF(Future)
-TIL_OPCODE_DEF(Undefined)
-TIL_OPCODE_DEF(Wildcard)
-
-
 // Declarations and definitions
 TIL_OPCODE_DEF(Function)
 TIL_OPCODE_DEF(SFunction)
@@ -60,6 +55,10 @@ TIL_OPCODE_DEF(Return)
 
 
 // pseudo-terms
+TIL_OPCODE_DEF(Future)
+TIL_OPCODE_DEF(Undefined)
+TIL_OPCODE_DEF(Wildcard)
+
 TIL_OPCODE_DEF(Identifier)
 TIL_OPCODE_DEF(IfThenElse)
 TIL_OPCODE_DEF(Let)

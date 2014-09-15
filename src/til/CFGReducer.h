@@ -64,64 +64,53 @@ private:
 };
 
 
-
-class CFGReducerBase {
+class CFGContext {
 public:
-  enum TraversalKind {
-    TRV_Normal,
-    TRV_Decl,
-    TRV_Lazy,
-    TRV_Type
-  };
+  // Create a new variable from orig, and push it onto the lexical scope.
+  VarDecl *enterScope(VarDecl &Orig, R_SExpr E0) {
+    VarDecl *Nv = new (Arena) VarDecl(Orig, E0);
+    if (Orig.name().length() > 0) {
+      varCtx_.push(Nv);
+      if (currentBB_) {
+        if (currentInstrs_.size() > 0 && currentInstrs_.back() == E0)
+          currentInstrs_.back() = Nv;
+        else
+          currentInstrs_.push_back(Nv);
+      }
+    }
+    return Nv;
+  }
 
-  struct Context {
-    TraversalKind Kind;
-    BasicBlock *Continuation;
+  // Exit the lexical scope of orig.
+  void exitScope(const VarDecl &Orig) {
+    if (Orig.name().length() > 0)
+      varCtx_.pop();
+  }
 
-    Context(TraversalKind K, BasicBlock *C) : Kind(K), Continuation(C) {}
-  };
+  void enterCFG(SCFG &Cfg) {}
+  void exitCFG(SCFG &Cfg) {}
+  void enterBasicBlock(BasicBlock &BB) {}
+  void exitBasicBlock(BasicBlock &BB) {}
 
-  typedef Context R_Ctx;
+  void enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) {}
+  void exitBasicBlock (BasicBlock *BB) {}
 
-  R_Ctx subExprCtx(const R_Ctx& Ctx) { return Context(TRV_Normal, nullptr); }
-  R_Ctx declCtx   (const R_Ctx& Ctx) { return Context(TRV_Decl,   nullptr); }
-  R_Ctx lazyCtx   (const R_Ctx& Ctx) { return Context(TRV_Lazy,   nullptr); }
-  R_Ctx typeCtx   (const R_Ctx& Ctx) { return Context(TRV_Type,   nullptr); }
+  void enterCFG(SCFG *Cfg, SCFG* NCfg) {}
+  void exitCFG (SCFG *Cfg) {}
 
-  // R_SExpr is the result type for a traversal.
-  // A copy or non-destructive rewrite returns a newly allocated term.
-  typedef SExpr *R_SExpr;
-  typedef BasicBlock *R_BasicBlock;
-
-  // Container is a minimal interface used to store results when traversing
-  // SExprs of variable arity, such as Phi, Goto, and SCFG.
-  template <class T> class Container {
-  public:
-    // Allocate a new container with a capacity for n elements.
-    Container(CFGReducerBase &S, unsigned N) : Elems(S.Arena, N) {}
-
-    // Push a new element onto the container.
-    void push_back(T E) { Elems.push_back(E); }
-
-    SimpleArray<T> Elems;
-  };
-
-  CFGReducerBase(MemRegionRef A) : Arena(A) { }
-
-protected:
-  MemRegionRef Arena;
+private:
 };
 
 
-template <class Self>
-class CFGReducer : public Traversal<Self, CFGReducerBase>,
-                   public CFGReducerBase {
+
+class CFGRewriter : public Traversal<CFGRewriter, CFGContext, CopyReducer>,
+                    public CopyReducer {
 public:
   SCFG* convertToCFG(SExpr *E) {
     assert(currentCFG_ == nullptr && currentBB_ == nullptr);
     currentCFG_ = new (Arena) SCFG(Arena, 0);
     currentBB_ = currentCFG_->entry();
-    traverseSExpr(E, Context(TRV_Normal, currentCFG_->exit()));
+    traverseSExpr(E, );
     currentCFG_->computeNormalForm();
     return currentCFG_;
   }
@@ -137,106 +126,6 @@ public:
       return Result;  // No current basic block.  Rewrite expressions in place.
     terminateWithGoto(Result, Ctx.Continuation);
     return nullptr;
-  }
-
-  R_SExpr reduceNull() {
-    return nullptr;
-  }
-  // R_SExpr reduceFuture(...)  is never used.
-
-  R_SExpr reduceUndefined(Undefined &Orig) {
-    return new (Arena) Undefined(Orig);
-  }
-  R_SExpr reduceWildcard(Wildcard &Orig) {
-    return new (Arena) Wildcard(Orig);
-  }
-
-  R_SExpr reduceVarDecl(VarDecl &Orig, R_SExpr E) {
-    return new (Arena) VarDecl(Orig, E);
-  }
-
-  R_SExpr reduceLiteral(Literal &Orig) {
-    return new (Arena) Literal(Orig);
-  }
-  template<class T>
-  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
-    return new (Arena) LiteralT<T>(Orig);
-  }
-  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
-    return new (Arena) LiteralPtr(Orig);
-  }
-
-  R_SExpr reduceFunction(Function &Orig, VarDecl *Nvd, R_SExpr E0) {
-    return new (Arena) Function(Orig, Nvd, E0);
-  }
-  R_SExpr reduceSFunction(SFunction &Orig, VarDecl *Nvd, R_SExpr E0) {
-    return new (Arena) SFunction(Orig, Nvd, E0);
-  }
-  R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) Code(Orig, E0, E1);
-  }
-  R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) Field(Orig, E0, E1);
-  }
-
-  R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) Apply(Orig, E0, E1);
-  }
-  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
-    return new (Arena) SApply(Orig, E0, E1);
-  }
-  R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
-    return new (Arena) Project(Orig, E0);
-  }
-  R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
-    return addLetVar(new (Arena) Call(Orig, E0));
-  }
-
-  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
-    return addLetVar(new (Arena) Alloc(Orig, E0));
-  }
-  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
-    return addLetVar(new (Arena) Load(Orig, E0));
-  }
-  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
-    return addLetVar(new (Arena) Store(Orig, E0, E1));
-  }
-  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
-    return addLetVar(new (Arena) ArrayIndex(Orig, E0, E1));
-  }
-  R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
-    return addLetVar(new (Arena) ArrayAdd(Orig, E0, E1));
-  }
-  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
-    return addLetVar(new (Arena) UnaryOp(Orig, E0));
-  }
-  R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
-    return addLetVar(new (Arena) BinaryOp(Orig, E0, E1));
-  }
-  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
-    return addLetVar(new (Arena) Cast(Orig, E0));
-  }
-
-  R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> &Bbs) {
-    return new (Arena) SCFG(Orig, std::move(Bbs.Elems));
-  }
-  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<R_SExpr> &As,
-                                Container<R_SExpr> &Is, R_SExpr T) {
-    return new (Arena) BasicBlock(Orig, Arena, std::move(As.Elems),
-                                               std::move(Is.Elems),
-                                               dyn_cast<Terminator>(T));
-  }
-  R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
-    return addLetVar(new (Arena) Phi(Orig, std::move(As.Elems)));
-  }
-  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B) {
-    return new (Arena) Goto(Orig, B, 0);
-  }
-  R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
-    return new (Arena) Branch(O, C, B0, B1);
-  }
-  R_SExpr reduceReturn(Return &O, R_SExpr E) {
-    return new (Arena) Return(O, E);
   }
 
   R_SExpr reduceIdentifier(Identifier &Orig) {
@@ -299,50 +188,8 @@ public:
     return NcbArg;
   }
 
-  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
-    return new (Arena) IfThenElse(Orig, C, T, E);
-  }
-
-
-  // Create a new variable from orig, and push it onto the lexical scope.
-  VarDecl *enterScope(VarDecl &Orig, R_SExpr E0) {
-    VarDecl *Nv = new (Arena) VarDecl(Orig, E0);
-    if (Orig.name().length() > 0) {
-      varCtx_.push(Nv);
-      if (currentBB_) {
-        if (currentInstrs_.size() > 0 && currentInstrs_.back() == E0)
-          currentInstrs_.back() = Nv;
-        else
-          currentInstrs_.push_back(Nv);
-      }
-    }
-    return Nv;
-  }
-
-  // Exit the lexical scope of orig.
-  void exitScope(const VarDecl &Orig) {
-    if (Orig.name().length() > 0)
-      varCtx_.pop();
-  }
-
-  void enterCFG(SCFG &Cfg) {}
-  void exitCFG(SCFG &Cfg) {}
-  void enterBasicBlock(BasicBlock &BB) {}
-  void exitBasicBlock(BasicBlock &BB) {}
-
-  // Map Variable references to their rewritten definitions.
-  VarDecl *reduceVariableRef(VarDecl *Ovd) { return Ovd; }
-
-  // Map BasicBlock references to their rewritten defs.
-  BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }
 
 protected:
-  SExpr* addLetVar(SExpr* E) {
-    if (E && currentBB_ && !ThreadSafetyTIL::isTrivial(E))
-    currentInstrs_.push_back(E);
-    return E;
-  }
-
   // Start a new basic block, and traverse E.
   void startBB(BasicBlock *BB) {
     assert(currentBB_ == nullptr);
