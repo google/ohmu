@@ -185,6 +185,164 @@ private:
 };
 
 
+template <class Self, class R>
+class DefaultReducer : public R {
+public:
+  typedef MAPTYPE(R,SExpr)      R_SExpr;
+  typedef MAPTYPE(R,VarDecl)    R_VarDecl;
+  typedef MAPTYPE(R,BasicBlock) R_BasicBlock;
+  typedef MAPTYPE(R,SCFG)       R_SCFG;
+  typedef MAPTYPE(R,Phi)        R_Phi;
+
+  Self* self() { return static_cast<Self*>(this); }
+
+  R_SExpr reduceSExpr(SExpr& Orig) {
+    return self()->reduceNull();
+  }
+  R_SExpr reduceDefinition(SExpr& Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reducePath(SExpr& Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceInstruction(SExpr& Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceTerminator(Terminator& Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reducePseudoTerm(SExpr& Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+
+
+  R_SExpr reduceWeakInstr(SExpr* E) {
+    return self()->reduceNull();
+  }
+  R_VarDecl reduceWeakVarDecl(VarDecl *E) {
+    return self()->reduceNull();
+  }
+  R_BasicBlock reduceWeakBasicBlock(BasicBlock *E) {
+    return self()->reduceNull();
+  }
+
+  R_SExpr reduceLiteral(Literal &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  template<class T>
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+
+  R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceFunction(Function &Orig, R_VarDecl Nvd, R_SExpr E0) {
+    return self()->reduceDefinition(Orig);
+  }
+  R_SExpr reduceSFunction(SFunction &Orig, R_VarDecl Nvd, R_SExpr E0) {
+    return self()->reduceDefinition(Orig);
+  }
+  R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceDefinition(Orig);
+  }
+  R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceDefinition(Orig);
+  }
+
+  R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reducePath(Orig);
+  }
+  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reducePath(Orig);
+  }
+  R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
+    return self()->reducePath(Orig);
+  }
+
+  R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+
+
+  R_Phi reducePhiBegin(Phi &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  void reducePhiArg(R_Phi Ph, unsigned i, R_SExpr E) { }
+  R_Phi reducePhi(R_Phi Ph) { return Ph; }
+
+
+  R_SCFG reduceSCFGBegin(SCFG &Orig) {
+    return self()->reduceDefinition(Orig);
+  }
+  void reduceSCFGBlock(R_SCFG Scfg, unsigned i, R_BasicBlock B) { }
+  R_SCFG reduceSCFG(R_SCFG Scfg) { return Scfg; }
+
+
+  R_BasicBlock reduceBasicBlockBegin(BasicBlock &Orig) {
+    return self()->reduceDefinition(Orig);
+  }
+  void reduceBasicBlockArg  (R_BasicBlock, unsigned i, R_SExpr E) { }
+  void reduceBasicBlockInstr(R_BasicBlock, unsigned i, R_SExpr E) { }
+  void reduceBasicBlockTerm (R_BasicBlock, R_SExpr E) { }
+  R_BasicBlock reduceBasicBlock(R_BasicBlock BB) { return BB; }
+
+  R_SExpr reduceGoto(Goto &Orig, R_BasicBlock B) {
+    return self()->reduceTerminator(Orig);
+  }
+  R_SExpr reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
+    return self()->reduceTerminator(O);
+  }
+  R_SExpr reduceReturn(Return &O, R_SExpr E) {
+    return self()->reduceTerminator(O);
+  }
+
+  R_SExpr reduceUndefined(Undefined &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceWildcard(Wildcard &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+
+  R_SExpr reduceIdentifier(Identifier &Orig) {
+    return self()->reducePseudoTerm(Orig);
+  }
+  R_SExpr reduceLet(Let &Orig, R_VarDecl Nvd, R_SExpr B) {
+    return self()->reducePseudoTerm(Orig);
+  }
+  R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
+    return self()->reducePseudoTerm(Orig);
+  }
+};
+
+
 
 /// Implements enter/exit methods for a reducer that doesn't care about scope.
 /// RedT is the base type of the Reducer.
@@ -202,73 +360,21 @@ public:
 };
 
 
+/// Defines the TypeMap for VisitReducerBase
+class VisitReducerMap {
+public:
+  /// A visitor maps all expression types to bool.
+  template <class T> struct TypeMap { typedef bool Ty; };
+};
+
 
 /// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
 /// SExprs to booleans: it returns true on success, and false on failure.
-class VisitReducerBase {
+class VisitReducerBase
+  : public DefaultReducer<VisitReducerBase, VisitReducerMap> {
 public:
-  VisitReducerBase() {}
-
-  // A visitor maps all expression types to bool.
-  template <class T> struct TypeMap { typedef bool Ty; };
-
-public:
-  bool reduceNull() { return true; }
-
-  bool reduceWeakInstr(SExpr* E)      { return true; }
-  bool reduceWeakVarDecl(SExpr *E)    { return true; }
-  bool reduceWeakBasicBlock(SExpr *E) { return true; }
-
-  bool reduceLiteral(Literal &Orig)       { return true; }
-  template<class T>
-  bool reduceLiteralT(LiteralT<T> &Orig)  { return true; }
-  bool reduceLiteralPtr(LiteralPtr &Orig) { return true; }
-
-  bool reduceVarDecl(VarDecl &Orig, bool E)                 { return true; }
-  bool reduceFunction(Function &Orig, bool E0, bool E1)     { return true; }
-  bool reduceSFunction(SFunction &Orig, bool E0, bool E1)   { return true; }
-  bool reduceCode(Code &Orig, bool E0, bool E1)             { return true; }
-  bool reduceField(Field &Orig, bool E0, bool E1)           { return true; }
-  bool reduceApply(Apply &Orig, bool E0, bool E1)           { return true; }
-  bool reduceSApply(SApply &Orig, bool E0, bool E1)         { return true; }
-
-  bool reduceProject(Project &Orig, bool E0)                { return true; }
-  bool reduceCall(Call &Orig, bool E0)                      { return true; }
-  bool reduceAlloc(Alloc &Orig, bool E0)                    { return true; }
-  bool reduceLoad(Load &Orig, bool E0)                      { return true; }
-  bool reduceStore(Store &Orig, bool E0, bool E1)           { return true; }
-  bool reduceArrayIndex(ArrayIndex &Orig, bool E0, bool E1) { return true; }
-  bool reduceArrayAdd(ArrayAdd &Orig, bool E0, bool E1)     { return true; }
-
-  bool reduceUnaryOp(UnaryOp &Orig, bool E0)                { return true; }
-  bool reduceBinaryOp(BinaryOp &Orig, bool E0, bool E1)     { return true; }
-  bool reduceCast(Cast &Orig, bool E0)                      { return true; }
-
-  bool reducePhiBegin(Phi &Orig) { return true; }
-  void reducePhiArg(bool Ph, unsigned i, bool E) { }
-  bool reducePhi(bool Ph) { return Ph; }
-
-  bool reduceSCFGBegin(SCFG &Orig) { return true; }
-  void reduceSCFGBlock(bool Scfg, unsigned i, bool E) { }
-  bool reduceSCFG(bool S) { return S; }
-
-  bool reduceBasicBlockBegin(BasicBlock &Orig) { return true; }
-  void reduceBasicBlockArg  (bool BB, unsigned i, bool E)  { }
-  void reduceBasicBlockInstr(bool BB, unsigned i, bool E)  { }
-  void reduceBasicBlockTerm (bool BB, bool E)              { }
-  bool reduceBasicBlock     (bool BB) { return BB; }
-
-  bool reduceGoto(Goto &Orig, bool B)                    { return true; }
-  bool reduceBranch(Branch &O, bool C, bool B0, bool B1) { return true; }
-  bool reduceReturn(Return &O, bool E)                   { return true; }
-
-  bool reduceUndefined(Undefined &Orig)   { return true; }
-  bool reduceWildcard(Wildcard &Orig)     { return true; }
-  bool reduceIdentifier(Identifier &Orig) { return true; }
-  bool reduceIfThenElse(IfThenElse &Orig, bool C, bool T, bool E) {
-    return true;
-  }
-  bool reduceLet(Let &Orig, bool E0, bool E1) { return true; }
+  bool reduceNull()             { return true; }
+  bool reduceSExpr(SExpr &Orig) { return true; }
 };
 
 
@@ -294,7 +400,7 @@ private:
 };
 
 
-// Used by CopyReducer.  Most terms map to SExpr*.
+// Used by CopyReducerBase.  Most terms map to SExpr*.
 template <class T> struct DefaultTypeMap { typedef SExpr* Ty; };
 
 // These kinds of SExpr must map to the same kind.
@@ -303,13 +409,17 @@ template<> struct DefaultTypeMap<VarDecl>    { typedef VarDecl* Ty; };
 template<> struct DefaultTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
 template<> struct DefaultTypeMap<SCFG>       { typedef SCFG* Ty; };
 
-
-class CopyReducerBase {
+/// Defines the TypeMap for CopyReducerBase.
+class CopyReducerMap {
 public:
   // R_SExpr is the result type for a traversal.
   // A copy reducer returns a newly allocated term.
   template <class T> struct TypeMap : public DefaultTypeMap<T> { };
+};
 
+
+class CopyReducerBase : public CopyReducerMap {
+public:
   CopyReducerBase() {}
   CopyReducerBase(MemRegionRef A) : Arena(A) { }
 
