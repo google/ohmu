@@ -15,24 +15,33 @@ namespace threadSafety {
 namespace til {
 
 
-class SimpleVisitReducer
-  : public UnscopedReducer<SimpleVisitReducer, VisitReducerBase> { };
-
-class SimpleVisitor : public VisitTraversal<SimpleVisitor, SimpleVisitReducer> {
+class SimpleVisitReducer : public VisitReducerBase,
+                           public UnscopedReducer<VisitReducerBase> {
 public:
-  static bool doTraversal(SExpr *E) {
+  typedef DefaultContext<SimpleVisitReducer> ContextT;
+};
+
+class SimpleVisitor
+  : public VisitTraversal<SimpleVisitor, SimpleVisitReducer> {
+public:
+  static bool visit(SExpr *E) {
     SimpleVisitor Traverser;
     SimpleVisitReducer Reducer;
     return Traverser.traverse(E, &Reducer);
   }
 };
 
-class SimpleCopyReducer
-  : public UnscopedReducer<SimpleCopyReducer, CopyReducerBase> { };
+class SimpleCopyReducer : public CopyReducerBase,
+                          public UnscopedReducer<CopyReducerBase> {
+public:
+  typedef DefaultContext<SimpleCopyReducer> ContextT;
+};
+
+
 
 class SimpleCopier : public Traversal<SimpleCopier, SimpleCopyReducer> {
 public:
-  static SExpr* doTraversal(SExpr *E, MemRegionRef A) {
+  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
     SimpleCopier  Traverser;
     SimpleCopyReducer Reducer;
     Reducer.setArena(A);
@@ -41,8 +50,8 @@ public:
 };
 
 void test(SExpr* E, MemRegionRef A) {
-  SimpleVisitor::doTraversal(E);
-  SimpleCopier::doTraversal(E, A);
+  SimpleVisitor::visit(E);
+  SimpleCopier::rewrite(E, A);
 }
 
 

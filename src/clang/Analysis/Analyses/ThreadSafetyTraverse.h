@@ -24,37 +24,37 @@ namespace threadSafety {
 namespace til {
 
 enum TraversalKind {
-  TRV_Normal,   ///< argument subexpression (the default)
+  TRV_Normal,   ///< subexpression in argument position (the default)
   TRV_SubExpr,  ///< owned subexpression
-  TRV_Lazy,     ///< subexpression that requires lazy rewriting (e.g. code)
+  TRV_Tail,     ///< subexpression in tail position
+  TRV_Lazy,     ///< subexpression in a lazy position
   TRV_Type      ///< type expressions
 };
 
 
-/// Traversal defines an interface for traversing SExprs.  Traversals have
-/// been made as generic as possible, and are intended to handle any kind of
-/// pass over the AST, e.g. visiters, copying, non-destructive rewriting,
-/// destructive (in-place) rewriting, hashing, typing, etc.
+/// The Traversal class defines an interface for traversing SExprs.  Traversals
+/// have been made as generic as possible, and are intended to handle any kind
+/// of pass over the AST, e.g. visiters, copiers, non-destructive rewriting,
+/// destructive (in-place) rewriting, hashing, typing, garbage collection, etc.
 ///
 /// The Traversal class is responsible for traversing the AST in some order.
 /// The default is a depth first traversal, but other orders are possible,
-/// such as lazy or parallel traversals.  The traversal will process the AST
-/// by invoking methods on a context.
+/// such as lazy or parallel traversals.  The Traversal maintains a Context,
+/// which provides method callbacks to handle various parts of the traversal.
 ///
-/// A Context is a pointer (or smart pointer) to a Reducer object, which is
-/// responsible for two separate tasks:
-/// (1) tracking lexical scope via enterX/exitX methods, and
-/// (2) implementing reduceX methods to rewrite the AST.
+/// A Context is passed by value, and is a smart pointer to a Reducer object.
+/// The Reducer does most of the work, and is responsible for two tasks:
+/// (1) Tracking lexical scope via enterX/exitX methods
+/// (2) Implementing reduceX methods to rewrite the AST.
 ///
 /// Lexical scope consists of information such as the types of variables,
-/// the current CFG, etc.  The traversal infrastructure will call enter/exit
-/// methods as it traverses the program to update the scope.  These methods
-/// may clone the context or create a new one.
+/// the current CFG, etc.  The traversal infrastructure will invoke enter/exit
+/// methods on the Context object as it traverses the program.
 ///
 /// The reduceX methods are responsible for rewriting terms.  After an SExpr
 /// has been traversed, the traversal results are passed to reduceX(...), which
 /// essentially implements an SExpr builder API.  A normal transform pass will
-/// implement this API to build a rewritten SExpr, but other passes may build
+/// use this API to build a rewritten SExpr, but other passes may build
 /// an object of some other type.  In functional programming terms, reduceX
 /// implements a fold operation over the AST.
 ///
@@ -62,6 +62,12 @@ enum TraversalKind {
 /// infrastructure provides default implementations of the enter/exit methods,
 /// and reduceX methods, in separate classes.  A reducer object should be
 /// constructed via multiple inheritance.
+///
+/// Then enter/exit methods may copy or clone the scope, and are methods of
+/// Context.
+///
+/// The reduceX methods are part of Reducer, and are invoked via operator->
+/// from Context.
 ///
 template <class Self, class ReducerT>
 class Traversal {
@@ -130,37 +136,61 @@ public:
 };
 
 
-/// Implements enter/exit methods for a reducer that doesn't care about scope.
-/// The context is a simple pointer to the reducer object.
-/// This is a mixin class which inherits from R, which should be a ReducerBase.
-template <class Self, class RedT>
-class UnscopedReducer : public RedT {
+/// Implements a Context that simply forwards all enter/exit methods to the
+/// Reducer object.  Used for Contexts that don't need to clone scopes.
+/// RedT is the type of the Reducer.
+template <class RedT>
+class DefaultContext {
 public:
-  typedef Self* ContextT;
+  DefaultContext(RedT* RP) : RPtr(RP) { }
 
-  Self* self() { return static_cast<Self*>(this); }
-
-  Self* enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) {
-    return self();
+  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) {
+    RPtr->enterScope(Orig, Nvd);
   }
-  Self* exitScope(VarDecl* Orig) {
-    return self();
+  void exitScope(VarDecl* Orig) {
+    RPtr->exitScope(Orig);
   }
 
-  Self* enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) {
-    return self();
+  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) {
+    RPtr->enterBasicBlock(Orig, Nbb);
   }
-  Self* exitBasicBlock(BasicBlock* Orig) {
-    return self();
+  void exitBasicBlock(BasicBlock* Orig) {
+    RPtr->exitBasicBlock(Orig);
   }
 
-  Self* enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Nscfg) {
-    return self();
+  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) {
+    RPtr->enterCFG(Orig, Ns);
   }
-  Self* exitCFG(SCFG* Orig) {
-    return self();
+  void exitCFG(SCFG* Orig) {
+    RPtr->exitCFG(Orig);
   }
+
+  /// Used to invoke ReduceX methods on Reducer.
+  RedT* operator->() { return RPtr; }
+
+protected:
+  RedT* get() { return RPtr; }
+
+private:
+  RedT* RPtr;
 };
+
+
+/// Implements enter/exit methods for a reducer that doesn't care about scope.
+/// RedT is the base type of the Reducer.
+template <class RedT>
+class UnscopedReducer {
+public:
+  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) { }
+  void exitScope(VarDecl* Orig) { }
+
+  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) { }
+  void exitBasicBlock(BasicBlock* Orig) { }
+
+  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) { }
+  void exitCFG(SCFG* Orig) { }
+};
+
 
 
 /// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
@@ -491,9 +521,9 @@ MAPTYPE(V::RedT, Function) Function::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
   // Tell the rewriter to enter the scope of the function.
-  Ctx = Ctx->enterScope(VDecl, E0);
+  Ctx.enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
-  Ctx = Ctx->exitScope(VDecl);
+  Ctx.exitScope(VDecl);
   return Ctx->reduceFunction(*this, E0, E1);
 }
 
@@ -501,9 +531,9 @@ template <class V>
 MAPTYPE(V::RedT, SFunction) SFunction::traverse(V &Vs, typename V::CtxT Ctx) {
   // Traversing an self-definition is a no-op.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
-  Ctx = Ctx->enterScope(VDecl, E0);
+  Ctx.enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
-  Ctx = Ctx->exitScope(VDecl);
+  Ctx.exitScope(VDecl);
   // The SFun constructor will set E0->Definition to E1.
   return Ctx->reduceSFunction(*this, E0, E1);
 }
@@ -634,7 +664,7 @@ MAPTYPE(V::RedT, Return) Return::traverse(V &Vs, typename V::CtxT Ctx) {
 template <class V>
 MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nb = Ctx->reduceBasicBlockBegin(*this);
-  Ctx = Ctx->enterBasicBlock(this, Nb);
+  Ctx.enterBasicBlock(this, Nb);
   unsigned i = 0;
   for (auto *A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
@@ -648,7 +678,7 @@ MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::CtxT Ctx) {
     ++i;
   }
   Ctx->reduceBasicBlockTerm(Nb, Vs.traverse(TermInstr, Ctx, TRV_SubExpr));
-  Ctx = Ctx->exitBasicBlock(this);
+  Ctx.exitBasicBlock(this);
 
   return Ctx->reduceBasicBlock(Nb);
 }
@@ -656,14 +686,14 @@ MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::CtxT Ctx) {
 template <class V>
 MAPTYPE(V::RedT, SCFG) SCFG::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Ns = Ctx->reduceSCFGBegin(*this);
-  Ctx = Ctx->enterCFG(this, Ns);
+  Ctx.enterCFG(this, Ns);
 
   unsigned i = 0;
   for (auto *B : Blocks) {
     Ctx->reduceSCFGBlock(Ns, i, Vs.traverseBasicBlock(B, Ctx, TRV_SubExpr));
     ++i;
   }
-  Ctx = Ctx->exitCFG(this);
+  Ctx.exitCFG(this);
   return Ctx->reduceSCFG(Ns);
 }
 
@@ -692,8 +722,8 @@ Identifier::traverse(V &Vs, typename V::CtxT Ctx) {
 template <class V>
 MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Nc = Vs.traverse(Condition, Ctx);
-  auto Nt = Vs.traverse(ThenExpr,  Ctx);
-  auto Ne = Vs.traverse(ElseExpr,  Ctx);
+  auto Nt = Vs.traverse(ThenExpr,  Ctx, TRV_Tail);
+  auto Ne = Vs.traverse(ElseExpr,  Ctx, TRV_Tail);
   return Ctx->reduceIfThenElse(*this, Nc, Nt, Ne);
 }
 
@@ -702,9 +732,9 @@ MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
   auto E0 = Vs.traverseVarDecl(VDecl, Ctx);
   // Tell the rewriter to enter the scope of the let variable.
-  Ctx = Ctx->enterScope(VDecl, E0);
-  auto E1 = Vs.traverse(Body, Ctx);
-  Ctx = Ctx->exitScope(VDecl);
+  Ctx.enterScope(VDecl, E0);
+  auto E1 = Vs.traverse(Body, Ctx, TRV_Tail);
+  Ctx.exitScope(VDecl);
   return Ctx->reduceLet(*this, E0, E1);
 }
 

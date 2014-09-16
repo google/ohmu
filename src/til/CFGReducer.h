@@ -68,40 +68,39 @@ private:
 class CFGRewriteReducer : public CopyReducerBase {
 public:
   /// A Context consists of the reducer, and the current continuation.
-  struct ContextT {
+  class ContextT : public DefaultContext<CFGRewriteReducer> {
+  public:
     ContextT(CFGRewriteReducer *R, BasicBlock *C)
-      : Reducer(R), Continuation(C)
+      : DefaultContext(R), Continuation(C)
     { }
 
     ContextT subExpr(TraversalKind K) {
-      return ContextT(Reducer, nullptr);
+      return ContextT(get(), nullptr);
     }
 
     ContextT getCurrentContinuation() {
       if (Continuation)
-        return ContextT(Reducer, Continuation);
+        return *this;
       else
-        return ContextT(Reducer, Reducer->makeContinuation());
+        return ContextT(get(), get()->makeContinuation());
     }
 
-    // Forward entry/exit calls and reduceX calls to reducer
-    CFGRewriteReducer* operator->() { return Reducer; }
+    bool insideCFG() { return get()->currentBB_; }
 
-    // Entry/exit methods will only reset the reducer.
-    void operator=(CFGRewriteReducer* R) { Reducer = R; }
+    BasicBlock* continuation() { return Continuation; }
 
-  public:  // FIXME
+  private:
     friend class CFGRewriteReducer;
-
-    CFGRewriteReducer* Reducer;
     BasicBlock* Continuation;
   };
 
 
-  CFGRewriteReducer(MemRegionRef A) : CopyReducerBase(A) { }
+  CFGRewriteReducer(MemRegionRef A)
+    : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr)
+  { }
 
 
-  CFGRewriteReducer* enterScope(VarDecl *Orig, VarDecl *Nv) {
+  void enterScope(VarDecl *Orig, VarDecl *Nv) {
     if (Orig->name().length() > 0) {
       varCtx_.push(Nv);
       if (currentBB_) {
@@ -112,28 +111,18 @@ public:
           currentInstrs_.push_back(Nv);
       }
     }
-    return this;
   }
 
-  CFGRewriteReducer* exitScope(const VarDecl *Orig) {
+  void exitScope(const VarDecl *Orig) {
     if (Orig->name().length() > 0)
       varCtx_.pop();
-    return this;
   }
 
-  CFGRewriteReducer* enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) {
-    return this;
-  }
-  CFGRewriteReducer* exitBasicBlock (BasicBlock *BB) {
-    return this;
-  }
+  void enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) { }
+  void exitBasicBlock (BasicBlock *BB) { }
 
-  CFGRewriteReducer* enterCFG(SCFG *Cfg, SCFG* NCfg) {
-    return this;
-  }
-  CFGRewriteReducer* exitCFG (SCFG *Cfg) {
-    return this;
-  }
+  void enterCFG(SCFG *Cfg, SCFG* NCfg) { }
+  void exitCFG (SCFG *Cfg) { }
 
 
   SExpr* reduceIdentifier(Identifier &Orig) {
@@ -152,11 +141,24 @@ public:
   }
 
 
-  // Add BB to the current CFG, and start working on it.
+  SExpr* addInstruction(SExpr* E) {
+    if (!ThreadSafetyTIL::isTrivial(E) && !E->block())
+      currentBB_->addInstruction(E);
+    return E;
+  }
+
+
+  /// Add BB to the current CFG, and start working on it.
   void startBlock(BasicBlock *BB) {
+    std::cerr << "Start  block " <<
+                 reinterpret_cast<size_t>(currentBB_) << "\n";
+
     assert(currentBB_ == nullptr);
     assert(currentArgs_.empty());
     assert(currentInstrs_.empty());
+    assert(BB->instructions().size() == 0);
+
+    assert(!currentBB_ || currentBB_->instructions().size() == 0);
 
     currentBB_ = BB;
     if (!BB->cfg())
@@ -164,9 +166,9 @@ public:
   }
 
 
-  // Terminate the current block with a branch instruction.
-  // This will create new blocks for the branches.
-  Branch* finishBlockWithBranch(SExpr *Cond) {
+  /// Terminate the current block with a branch instruction.
+  /// This will create new blocks for the branches.
+  Branch* createBranch(SExpr *Cond) {
     assert(currentBB_);
 
     // Create new basic blocks for then and else.
@@ -182,8 +184,8 @@ public:
   }
 
 
-  // Terminate the current block with a Goto instruction.
-  Goto* finishBlockWithGoto(SExpr* Result, BasicBlock *Target) {
+  /// Terminate the current block with a Goto instruction.
+  Goto* createGoto(SExpr* Result, BasicBlock *Target) {
     assert(currentBB_);
 
     unsigned Idx = Target->addPredecessor(currentBB_);
@@ -199,12 +201,19 @@ public:
   }
 
 
-  void initCFG() {
+  /// Creates a new CFG.
+  /// Returns the exit block, for use as a continuation.
+  BasicBlock* initCFG() {
     assert(currentCFG_ == nullptr && currentBB_ == nullptr);
     currentCFG_ = new (Arena) SCFG(Arena, 0);
     currentBB_ = currentCFG_->entry();
+    assert(currentBB_->instructions().size() == 0);
+    std::cerr << "Entry  block " <<
+                 reinterpret_cast<size_t>(currentBB_) << "\n";
+    return currentCFG_->exit();
   }
 
+  /// Completes the CFG and returns it.
   SCFG* finishCFG() {
     currentCFG_->computeNormalForm();
     return currentCFG_;
@@ -214,6 +223,9 @@ public:
 protected:
   // Finish the current basic block, terminating it with Term.
   void finishBlock(Terminator* Term) {
+    std::cerr << "Finish block " <<
+                  reinterpret_cast<size_t>(currentBB_) << "\n";
+
     assert(currentBB_);
     assert(currentBB_->instructions().size() == 0);
 
@@ -236,7 +248,9 @@ protected:
   }
 
 
-public:  // FIXME
+private:
+  friend class ContextT;
+
   VarContext varCtx_;
   std::vector<SExpr*> instructionMap_;
   std::vector<SExpr*> blockMap_;
@@ -255,10 +269,12 @@ public:
   SExpr* traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
     auto* Result = this->self()->traverseByCase(E, Ctx.subExpr(K), K);
 
-    // If no continuation, or no current block, then return the result.
-    if (!Ctx->currentBB_ || !Ctx.Continuation)
+    if (!Ctx.insideCFG())     // no current block
       return Result;
-    Ctx->finishBlockWithGoto(Result, Ctx.Continuation);
+    if (!Ctx.continuation())  // add instruction to current block and continue
+      return Ctx->addInstruction(Result);
+    // pass the result to the continuation
+    Ctx->createGoto(Result, Ctx.continuation());
     return nullptr;
   }
 
@@ -266,26 +282,29 @@ public:
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *E, CtxT Ctx,
                             TraversalKind K = TRV_Normal) {
-    if (!Ctx->currentBB_) {
+    if (!Ctx.insideCFG()) {
       // Just do a normal traversal if we're not currently rewriting in a CFG.
       return E->traverse(*this->self(), Ctx);
     }
 
-    // Get the current continuation.
+    // Get the current continuation, or make one.
     CtxT Cont = Ctx.getCurrentContinuation();
 
+    // End current block with a branch
     SExpr*  Nc = this->self()->traverse(E->condition(), Ctx);
-    Branch* Br = Ctx->finishBlockWithBranch(Nc);
+    Branch* Br = Ctx->createBranch(Nc);
 
-    Ctx->startBlock(Br->elseBlock());
+    // Process the then and else blocks
+    Cont->startBlock(Br->elseBlock());
     this->self()->traverse(E->elseExpr(), Cont);
 
-    Ctx->startBlock(Br->thenBlock());
+    Cont->startBlock(Br->thenBlock());
     this->self()->traverse(E->thenExpr(), Cont);
 
-    // Jump to the newly created continuation
-    Ctx->startBlock(Cont.Continuation);
-    return Cont.Continuation->arguments()[0];
+    // Jump to the continuation
+    Cont->startBlock(Cont.continuation());
+    assert(Cont.continuation()->arguments().size() > 0);
+    return Cont.continuation()->arguments()[0];
   }
 
 
@@ -293,8 +312,8 @@ public:
     CFGRewriteReducer Reducer(A);
     CFGRewriter Traverser;
 
-    Reducer.initCFG();
-    Traverser.traverse(E, CtxT(&Reducer, nullptr));  // FIXME exitblock!
+    auto *Exit = Reducer.initCFG();
+    Traverser.traverse(E, CtxT(&Reducer, Exit));
     return Reducer.finishCFG();
   }
 };
