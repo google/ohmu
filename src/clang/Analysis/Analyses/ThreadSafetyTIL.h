@@ -126,6 +126,9 @@ const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
 const TIL_CastOpcode   CAST_Min = CAST_none;
 const TIL_CastOpcode   CAST_Max = CAST_objToPtr;
 
+/// Return the name of an opcode.
+StringRef getOpcodeString(TIL_Opcode Op);
+
 /// Return the name of a unary opcode.
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
 
@@ -309,6 +312,9 @@ public:
 
   /// Set the basic block and instruction ID for this expression.
   void setID(BasicBlock *B, unsigned id) { Block = B; SExprID = id; }
+
+  /// Set the basic block for this expression
+  void setBlock(BasicBlock *B) { Block = B; }
 
 protected:
   SExpr(TIL_Opcode Op)
@@ -1378,11 +1384,13 @@ public:
   void addArgument(Phi *V) {
     Args.reserveCheck(1, Arena);
     Args.push_back(V);
+    V->setBlock(this);
   }
   /// Add a new instruction.
   void addInstruction(SExpr *V) {
     Instrs.reserveCheck(1, Arena);
     Instrs.push_back(V);
+    V->setBlock(this);
   }
   // Add a new predecessor, and return the phi-node index for it.
   // Will add an argument to all phi-nodes, initialized to nullptr.
@@ -1461,10 +1469,8 @@ public:
     add(Exit);
   }
   SCFG(const SCFG &Cfg, MemRegionRef A)
-      : SExpr(COP_SCFG), Arena(A), Blocks(A, Cfg.numBlocks()),
-        Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) {
-
-  }
+    : SExpr(COP_SCFG), Arena(A), Blocks(A, Cfg.numBlocks()),
+      Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) { }
 
   /// Return true if this CFG is valid.
   bool valid() const { return Entry && Exit && Blocks.size() > 0; }

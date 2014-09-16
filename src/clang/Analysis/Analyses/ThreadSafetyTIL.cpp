@@ -55,6 +55,16 @@ void test(SExpr* E, MemRegionRef A) {
 }
 
 
+StringRef getOpcodeString(TIL_Opcode Op) {
+  switch (Op) {
+#define TIL_OPCODE_DEF(X)                                                   \
+  case COP_##X:                                                             \
+    return #X;
+#include "ThreadSafetyOps.def"
+#undef TIL_OPCODE_DEF
+  }
+  return "";
+}
 
 
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op) {

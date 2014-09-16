@@ -84,9 +84,14 @@ public:
   /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
+  /// Adjust context and call traverseSExpr
+  R_SExpr traverse(SExpr *E, const CtxT &C, TraversalKind K = TRV_Normal) {
+    return self()->traverseSExpr(E, C.sub(K), K);
+  }
+
   /// Entry point for traversing an SExpr of unknown type.
   /// This will dispatch on the type of E, and call traverseX.
-  R_SExpr traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
+  R_SExpr traverseSExpr(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
     // Avoid infinite loops.
     // E->block() is true if E is an instruction in a basic block.
     // When traversing the instr from the basic block, then K == TRV_SubExpr.
@@ -97,7 +102,7 @@ public:
   }
 
   /// Helper method to call traverseX(e) on the appropriate type.
-  R_SExpr traverseByCase(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
+  R_SExpr traverseByCase(SExpr *E, CtxT Ctx, TraversalKind K) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                   \
     case COP_##X:                                                           \
@@ -118,8 +123,7 @@ public:
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
 
-  /// Entry point for traversing a weak reference to an SExpr.
-  /// Override this to handle weak (non-owning) references to instructions.
+  /// Entry point for traversing a weak (non-owning) ref to an instruction.
   MAPTYPE(RedT, SExpr) traverseWeakInstr(SExpr *E, CtxT Ctx) {
     return Ctx->reduceWeakInstr(E);
   }
@@ -143,7 +147,12 @@ template <class RedT>
 class DefaultContext {
 public:
   DefaultContext(RedT* RP) : RPtr(RP) { }
+  DefaultContext(const DefaultContext<RedT>& c) = default;
 
+  /// Adjust the context when entering a particular kind of subexpression.
+  DefaultContext<RedT> sub(TraversalKind K) const { return *this; }
+
+  /// Forward the scope commands to the Reducer object.
   void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) {
     RPtr->enterScope(Orig, Nvd);
   }
@@ -169,11 +178,12 @@ public:
   RedT* operator->() { return RPtr; }
 
 protected:
-  RedT* get() { return RPtr; }
+  RedT* get() const { return RPtr; }
 
 private:
   RedT* RPtr;
 };
+
 
 
 /// Implements enter/exit methods for a reducer that doesn't care about scope.
@@ -273,7 +283,7 @@ public:
   Self *self() { return static_cast<Self *>(this); }
 
   /// Override traverse to set success, and bail on failure.
-  bool traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
+  bool traverseSExpr(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
     if (K == TRV_Normal && E->block())
       return self()->traverseWeakInstr(E, Ctx);
     return Success = Success && self()->traverseByCase(E, Ctx, K);
@@ -306,7 +316,7 @@ public:
   void setArena(MemRegionRef A) { Arena = A; }
 
 public:
-  SExpr* reduceNull() { return nullptr; }
+  std::nullptr_t reduceNull() { return nullptr; }
 
   SExpr* reduceWeakInstr(SExpr* E)                { return nullptr; }
   VarDecl* reduceWeakVarDecl(VarDecl *E)          { return nullptr; }
@@ -507,19 +517,26 @@ MAPTYPE(V::RedT, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::CtxT Ctx) {
 
 template <class V>
 MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::CtxT Ctx) {
-  // Don't traverse the definition of a self-function, since it points
-  // back to self.
-  if (kind() == VK_SFun) {
-    return Ctx->reduceVarDecl(*this, Ctx->reduceNull());
+  switch (kind()) {
+    case VK_Fun: {
+      auto D = Vs.traverse(Definition, Ctx, TRV_Type);
+      return Ctx->reduceVarDecl(*this, D);
+    }
+    case VK_SFun: {
+      // Don't traverse self-fun, since it points back to self.
+      return Ctx->reduceVarDecl(*this, Ctx->reduceNull());
+    }
+    case VK_Let: {
+      auto D = Vs.traverse(Definition, Ctx, TRV_SubExpr);
+      return Ctx->reduceVarDecl(*this, D);
+    }
   }
-  auto D = Vs.traverse(Definition, Ctx);
-  return Ctx->reduceVarDecl(*this, D);
 }
 
 template <class V>
 MAPTYPE(V::RedT, Function) Function::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
+  auto E0 = Vs.traverseVarDecl(VDecl, Ctx.sub(TRV_SubExpr), TRV_SubExpr);
   // Tell the rewriter to enter the scope of the function.
   Ctx.enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
@@ -530,7 +547,7 @@ MAPTYPE(V::RedT, Function) Function::traverse(V &Vs, typename V::CtxT Ctx) {
 template <class V>
 MAPTYPE(V::RedT, SFunction) SFunction::traverse(V &Vs, typename V::CtxT Ctx) {
   // Traversing an self-definition is a no-op.
-  auto E0 = Vs.traverseVarDecl(VDecl, Ctx, TRV_Type);
+  auto E0 = Vs.traverseVarDecl(VDecl, Ctx.sub(TRV_SubExpr), TRV_SubExpr);
   Ctx.enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_SubExpr);
   Ctx.exitScope(VDecl);
@@ -690,7 +707,8 @@ MAPTYPE(V::RedT, SCFG) SCFG::traverse(V &Vs, typename V::CtxT Ctx) {
 
   unsigned i = 0;
   for (auto *B : Blocks) {
-    Ctx->reduceSCFGBlock(Ns, i, Vs.traverseBasicBlock(B, Ctx, TRV_SubExpr));
+    auto Nb = Vs.traverseBasicBlock(B, Ctx.sub(TRV_SubExpr), TRV_SubExpr);
+    Ctx->reduceSCFGBlock(Ns, i, Nb);
     ++i;
   }
   Ctx.exitCFG(this);
@@ -730,7 +748,7 @@ MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::CtxT Ctx) {
 template <class V>
 MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::CtxT Ctx) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverseVarDecl(VDecl, Ctx);
+  auto E0 = Vs.traverseVarDecl(VDecl, Ctx.sub(TRV_SubExpr), TRV_SubExpr);
   // Tell the rewriter to enter the scope of the let variable.
   Ctx.enterScope(VDecl, E0);
   auto E1 = Vs.traverse(Body, Ctx, TRV_Tail);

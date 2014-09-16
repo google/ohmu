@@ -55,6 +55,7 @@ public:
 
   void        push(VarDecl *V) { Vars.push_back(V); }
   void        pop()            { Vars.pop_back(); }
+  VarDecl*    back()           { return Vars.back(); }
   VarContext* clone()          { return new VarContext(Vars); }
 
 private:
@@ -74,8 +75,11 @@ public:
       : DefaultContext(R), Continuation(C)
     { }
 
-    ContextT subExpr(TraversalKind K) {
-      return ContextT(get(), nullptr);
+    ContextT sub(TraversalKind K) const {
+      if (K == TRV_Tail)
+        return *this;
+      else
+        return ContextT(get(), nullptr);
     }
 
     ContextT getCurrentContinuation() {
@@ -95,27 +99,19 @@ public:
   };
 
 
-  CFGRewriteReducer(MemRegionRef A)
-    : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr)
-  { }
-
-
   void enterScope(VarDecl *Orig, VarDecl *Nv) {
     if (Orig->name().length() > 0) {
       varCtx_.push(Nv);
-      if (currentBB_) {
-        if (currentInstrs_.size() > 0 &&
-            currentInstrs_.back() == Nv->definition())
-          currentInstrs_.back() = Nv;
-        else
-          currentInstrs_.push_back(Nv);
-      }
+      if (currentBB_)
+        addLetDecl(Nv);
     }
   }
 
   void exitScope(const VarDecl *Orig) {
-    if (Orig->name().length() > 0)
+    if (Orig->name().length() > 0) {
+      assert(Orig->name() == varCtx_.back()->name() && "Variable mismatch");
       varCtx_.pop();
+    }
   }
 
   void enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) { }
@@ -141,24 +137,28 @@ public:
   }
 
 
-  SExpr* addInstruction(SExpr* E) {
-    if (!ThreadSafetyTIL::isTrivial(E) && !E->block())
-      currentBB_->addInstruction(E);
-    return E;
+  /// Process the result of a traversal.
+  SExpr* processResult(SExpr* Result, ContextT Ctx) {
+    if (!currentBB_)     // no current block
+      return Result;
+    addInstruction(Result);
+
+    if (Ctx.continuation()) {
+      // If we have a continuation, then terminate current block,
+      // and pass the result to the continuation.
+      createGoto(Ctx.continuation(), Result);
+      return nullptr;
+    }
+    return Result;
   }
 
 
   /// Add BB to the current CFG, and start working on it.
   void startBlock(BasicBlock *BB) {
-    std::cerr << "Start  block " <<
-                 reinterpret_cast<size_t>(currentBB_) << "\n";
-
-    assert(currentBB_ == nullptr);
+    assert(currentBB_ == nullptr && "Haven't finished current block.");
     assert(currentArgs_.empty());
     assert(currentInstrs_.empty());
-    assert(BB->instructions().size() == 0);
-
-    assert(!currentBB_ || currentBB_->instructions().size() == 0);
+    assert(BB->instructions().size() == 0 && "Already processed block.");
 
     currentBB_ = BB;
     if (!BB->cfg())
@@ -185,7 +185,7 @@ public:
 
 
   /// Terminate the current block with a Goto instruction.
-  Goto* createGoto(SExpr* Result, BasicBlock *Target) {
+  Goto* createGoto(BasicBlock *Target, SExpr* Result) {
     assert(currentBB_);
 
     unsigned Idx = Target->addPredecessor(currentBB_);
@@ -208,8 +208,6 @@ public:
     currentCFG_ = new (Arena) SCFG(Arena, 0);
     currentBB_ = currentCFG_->entry();
     assert(currentBB_->instructions().size() == 0);
-    std::cerr << "Entry  block " <<
-                 reinterpret_cast<size_t>(currentBB_) << "\n";
     return currentCFG_->exit();
   }
 
@@ -221,11 +219,34 @@ public:
 
 
 protected:
+  // Add new let variable to the current basic block.
+  void addLetDecl(VarDecl* Nv) {
+    // Set the block and ID now, to mark it as having been added.
+    Nv->setID(currentBB_, currentInstrNum_++);
+    if (currentInstrs_.size() > 0 &&
+        currentInstrs_.back() == Nv->definition() &&
+        !isa<VarDecl>(Nv->definition())) {
+      // Definition already in block -- replace old instr with let decl.
+      Nv->definition()->setID(nullptr, 0);
+      currentInstrs_.back() = Nv;
+    }
+    else {
+      currentInstrs_.push_back(Nv);
+    }
+  }
+
+  // Add a new instruction to the current basic block.
+  void addInstruction(SExpr* E) {
+    if (!ThreadSafetyTIL::isTrivial(E) && !E->block()) {
+      // Set the block and ID now, to mark it as having been added.
+      // We won't actually add instructions until the block is done.
+      E->setID(currentBB_, currentInstrNum_++);
+      currentInstrs_.push_back(E);
+    }
+  }
+
   // Finish the current basic block, terminating it with Term.
   void finishBlock(Terminator* Term) {
-    std::cerr << "Finish block " <<
-                  reinterpret_cast<size_t>(currentBB_) << "\n";
-
     assert(currentBB_);
     assert(currentBB_->instructions().size() == 0);
 
@@ -248,6 +269,13 @@ protected:
   }
 
 
+public:
+  CFGRewriteReducer(MemRegionRef A)
+    : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr),
+      currentInstrNum_(0)
+  { }
+
+
 private:
   friend class ContextT;
 
@@ -257,25 +285,24 @@ private:
 
   SCFG*       currentCFG_;              // the current SCFG
   BasicBlock* currentBB_;               // the current basic block
+  unsigned    currentInstrNum_;
   std::vector<SExpr*> currentArgs_;     // arguments in currentBB.
   std::vector<SExpr*> currentInstrs_;   // instructions in currentBB.
-  std::vector<BasicBlock*> currentBlocks_;  // current set of basic blocks.
 };
 
 
 
 class CFGRewriter : public Traversal<CFGRewriter, CFGRewriteReducer> {
 public:
-  SExpr* traverse(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
-    auto* Result = this->self()->traverseByCase(E, Ctx.subExpr(K), K);
-
-    if (!Ctx.insideCFG())     // no current block
-      return Result;
-    if (!Ctx.continuation())  // add instruction to current block and continue
-      return Ctx->addInstruction(Result);
-    // pass the result to the continuation
-    Ctx->createGoto(Result, Ctx.continuation());
-    return nullptr;
+  SExpr* traverseSExpr(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
+    // std::cerr << "traverse " << getOpcodeString(E->opcode())
+    //           << " ctx:"     << static_cast<bool>(Ctx.continuation())
+    //           << " k:"       << K
+    //           << "\n";
+    if (K == TRV_Normal && E->block())
+      return self()->traverseWeakInstr(E, Ctx);
+    auto* Result = this->self()->traverseByCase(E, Ctx, K);
+    return Ctx->processResult(Result, Ctx);
   }
 
   // IfThenElse requires a special traverse, because it involves creating
@@ -295,13 +322,18 @@ public:
     Branch* Br = Ctx->createBranch(Nc);
 
     // Process the then and else blocks
-    Cont->startBlock(Br->elseBlock());
-    this->self()->traverse(E->elseExpr(), Cont);
-
     Cont->startBlock(Br->thenBlock());
-    this->self()->traverse(E->thenExpr(), Cont);
+    this->self()->traverse(E->thenExpr(), Cont, TRV_Tail);
 
-    // Jump to the continuation
+    Cont->startBlock(Br->elseBlock());
+    this->self()->traverse(E->elseExpr(), Cont, TRV_Tail);
+
+    // If we had an existing continuation, then we're done.
+    // The then/else blocks will call the continuation.
+    if (Ctx.continuation())
+      return nullptr;
+
+    // Otherwise, if we created a new continuation, then start processing it.
     Cont->startBlock(Cont.continuation());
     assert(Cont.continuation()->arguments().size() > 0);
     return Cont.continuation()->arguments()[0];
@@ -313,7 +345,7 @@ public:
     CFGRewriter Traverser;
 
     auto *Exit = Reducer.initCFG();
-    Traverser.traverse(E, CtxT(&Reducer, Exit));
+    Traverser.traverse(E, CtxT(&Reducer, Exit), TRV_Tail);
     return Reducer.finishCFG();
   }
 };
