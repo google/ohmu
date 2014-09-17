@@ -42,9 +42,9 @@ template <class T> struct LLVMTypeMap { typedef llvm::Value* Ty; };
 
 // These kinds of SExpr must map to the same kind.
 // We define these here b/c template specializations cannot be class members.
-template<> struct LLVMTypeMap<Phi>        { typedef llvm::PHINode* Ty; };
+template<> struct LLVMTypeMap<Phi>        { typedef llvm::PHINode*    Ty; };
 template<> struct LLVMTypeMap<BasicBlock> { typedef llvm::BasicBlock* Ty; };
-template<> struct LLVMTypeMap<SCFG>       { typedef llvm::Function* Ty; };
+template<> struct LLVMTypeMap<SCFG>       { typedef llvm::Function*   Ty; };
 
 
 /// The LLVMReducer maps SExpr* to Value*
@@ -73,17 +73,30 @@ public:
   llvm::Module* module() { return outModule_; }
 
 public:
-  typedef DefaultContext<LLVMReducer> ContextT;
+  class ContextT : public DefaultContext<LLVMReducer> {
+  public:
+    ContextT(LLVMReducer* R) : DefaultContext(R) { }
+
+    ContextT sub(TraversalKind K) const { return *this; }
+
+    template<class T>
+    llvm::Value* handleResult(T **e, llvm::Value* v, TraversalKind k) {
+      if (k != TRV_Weak) {
+        T* se = *e;
+        if (se->block())
+          get()->currentValues_[se->id()] = v;
+      }
+      return v;
+    }
+
+    llvm::BasicBlock* handleResult(BasicBlock **e, llvm::BasicBlock* v,
+                                   TraversalKind k) {
+      return v;
+    }
+  };
 
   // default result of all undefined reduce methods.
   std::nullptr_t reduceNull() { return nullptr; }
-
-
-  void processResult(SExpr& orig, llvm::Value* v) {
-    if (orig.block()) {
-      currentValues_[orig.id()] = v;
-    }
-  }
 
   llvm::Value* reduceWeakInstr(SExpr* e) {
     return currentValues_[e->id()];
@@ -100,6 +113,10 @@ public:
     return lbb;
   }
 
+  llvm::Value* reduceVarDecl(VarDecl& orig, llvm::Value* v) {
+    // Eliminate vardecls -- just return the definition.
+    return v;
+  }
 
   llvm::Value* reduceLiteral(Literal& e) { return nullptr; }
 
@@ -176,6 +193,8 @@ public:
   }
 
   void reducePhiArg(Phi& orig, llvm::PHINode* lph, unsigned i, llvm::Value *v) {
+    if (!v)
+      return;
     BasicBlock* bb = orig.block();
     auto* lbb = reduceWeakBasicBlock(bb->predecessors()[i]);
     lph->addIncoming(v, lbb);
@@ -187,7 +206,8 @@ public:
     return nullptr;
   }
 
-  llvm::Value* reduceBranch(Branch& orig) {
+  llvm::Value* reduceBranch(Branch& orig, llvm::Value* c,
+                            llvm::Value* ntb, llvm::Value* neb) {
     return nullptr;
   }
 
@@ -203,7 +223,7 @@ public:
     return lbb;
   }
 
-  llvm::Function* reduceCFGBegin(SCFG& orig) {
+  llvm::Function* reduceSCFGBegin(SCFG& orig) {
     currentBlocks_.clear();
     currentBlocks_.resize(orig.numBlocks(), nullptr);
     currentValues_.clear();
@@ -243,7 +263,8 @@ public:
   static void generate(SExpr* E) {
     IRGen Traverser;
     LLVMReducer Reducer;
-    return Traverser.traverse(E, &Reducer);
+    Traverser.traverse(&E, &Reducer);
+    // Reducer.module()->dump();
   }
 };
 

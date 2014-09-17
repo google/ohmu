@@ -277,6 +277,8 @@ class BasicBlock;
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {
 public:
+  static const unsigned InvalidSExprID = 0xFFFFFFFF;
+
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
   // Subclasses of SExpr must define the following:
@@ -304,14 +306,14 @@ public:
 
   /// Returns the instruction ID for this expression.
   /// All basic block instructions have a unique ID (i.e. virtual register).
-  unsigned id() const { return SExprID; }
+  size_t id() const { return SExprID; }
 
   /// Returns the block, if this is an instruction in a basic block,
   /// otherwise returns null.
   BasicBlock* block() const { return Block; }
 
   /// Set the basic block and instruction ID for this expression.
-  void setID(BasicBlock *B, unsigned id) { Block = B; SExprID = id; }
+  void setID(BasicBlock *B, size_t id) { Block = B; SExprID = id; }
 
   /// Set the basic block for this expression
   void setBlock(BasicBlock *B) { Block = B; }
@@ -1307,6 +1309,8 @@ public:
   typedef SimpleArray<SExpr*>      InstrArray;
   typedef SimpleArray<BasicBlock*> BlockArray;
 
+  static const unsigned InvalidBlockID = 0x0FFFFFFF;
+
   // TopologyNodes are used to overlay tree structures on top of the CFG,
   // such as dominator and postdominator trees.  Each block is assigned an
   // ID in the tree according to a depth-first search.  Tree traversals are
@@ -1340,11 +1344,12 @@ public:
         TermInstr(nullptr) {}
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
-  int blockID() const { return BlockID; }
+  size_t blockID() const { return BlockID; }
+  void setBlockID(size_t i) { BlockID = i; }
 
   /// Returns the number of predecessors.
   size_t numPredecessors() const { return Predecessors.size(); }
-  size_t numSuccessors() const { return successors().size(); }
+  size_t numSuccessors()   const { return successors().size(); }
 
   const SCFG* cfg() const { return CFGPtr; }
   SCFG* cfg() { return CFGPtr; }
@@ -1364,8 +1369,12 @@ public:
   BlockArray &predecessors() { return Predecessors; }
   const BlockArray &predecessors() const { return Predecessors; }
 
-  ArrayRef<BasicBlock*> successors() { return TermInstr->successors(); }
-  ArrayRef<BasicBlock*> successors() const { return TermInstr->successors(); }
+  ArrayRef<BasicBlock*> successors() {
+    return TermInstr ? TermInstr->successors() : ArrayRef<BasicBlock*>();
+  }
+  ArrayRef<BasicBlock*> successors() const {
+    return TermInstr ? TermInstr->successors() : ArrayRef<BasicBlock*>();
+  }
 
   const Terminator *terminator() const { return TermInstr; }
   Terminator *terminator() { return TermInstr; }
@@ -1432,9 +1441,9 @@ private:
 private:
   MemRegionRef Arena;        // The arena used to allocate this block.
   SCFG         *CFGPtr;      // The CFG that contains this block.
-  int          BlockID : 31; // unique id for this BB in the containing CFG.
+  unsigned     BlockID : 31; // unique id for this BB in the containing CFG.
                              // IDs are in topological order.
-  int          Visited : 1;  // Bit to determine if a block has been visited
+  bool         Visited : 1;  // Bit to determine if a block has been visited
                              // during a traversal.
   BlockArray  Predecessors;  // Predecessor blocks in the CFG.
   InstrArray  Args;          // Phi nodes.  One argument per predecessor.
@@ -1467,6 +1476,7 @@ public:
     Exit->setTerminator(new (A) Return(V));
     add(Entry);
     add(Exit);
+    Exit->setBlockID(1);
   }
   SCFG(const SCFG &Cfg, MemRegionRef A)
     : SExpr(COP_SCFG), Arena(A), Blocks(A, Cfg.numBlocks()),
@@ -1501,7 +1511,7 @@ public:
   /// Return the total number of instructions in the CFG.
   /// This is useful for building instruction side-tables;
   /// A call to SExpr::id() will return a number less than numInstructions().
-  unsigned numInstructions() { return NumInstructions; }
+  size_t numInstructions() { return NumInstructions; }
 
   inline void add(BasicBlock *BB) {
     assert(BB->CFGPtr == nullptr);
@@ -1532,7 +1542,7 @@ private:
   BlockArray   Blocks;
   BasicBlock   *Entry;
   BasicBlock   *Exit;
-  unsigned     NumInstructions;
+  size_t       NumInstructions;
   bool         Normal;
 };
 

@@ -9,17 +9,30 @@
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 namespace clang {
 namespace threadSafety {
 namespace til {
 
 
+void traceTraversal(const char* msg, SExpr *E) {
+  std::cout << msg << " -- [";
+  std::cout << getOpcodeString(E->opcode());
+  std::cout << "]";
+  StdPrinter::print(E, std::cout);
+  std::cout << "\n";
+}
+
+
 class SimpleVisitReducer : public VisitReducerBase {
 public:
-  typedef DefaultContext<SimpleVisitReducer> ContextT;
+  class ContextT : public DefaultContext<SimpleVisitReducer> {
+  public:
+    ContextT(SimpleVisitReducer* R) : DefaultContext(R) { }
 
-  bool processResult(SExpr& Orig, bool E, ContextT Ctx) { return E; }
+    ContextT sub(TraversalKind K) const { return *this; }
+  };
 };
 
 class SimpleVisitor
@@ -28,15 +41,24 @@ public:
   static bool visit(SExpr *E) {
     SimpleVisitor Traverser;
     SimpleVisitReducer Reducer;
-    return Traverser.traverse(E, &Reducer);
+    return Traverser.traverse(&E, &Reducer);
   }
 };
 
 class SimpleCopyReducer : public CopyReducerBase {
 public:
-  typedef DefaultContext<SimpleCopyReducer> ContextT;
+  class ContextT : public DefaultContext<SimpleCopyReducer> {
+  public:
+    ContextT(SimpleCopyReducer* R) : DefaultContext(R) { }
 
-  SExpr* processResult(SExpr& Orig, SExpr* E, ContextT Ctx) { return E; }
+    ContextT sub(TraversalKind K) const { return *this; }
+
+    /// Use dyn_cast to cast results to the appropriate type.
+    template<class T>
+    T* castResult(T** E, SExpr* Result) {
+      return dyn_cast_or_null<T>(Result);
+    }
+  };
 };
 
 class SimpleCopier : public Traversal<SimpleCopier, SimpleCopyReducer> {
@@ -45,7 +67,7 @@ public:
     SimpleCopier  Traverser;
     SimpleCopyReducer Reducer;
     Reducer.setArena(A);
-    return Traverser.traverse(E, &Reducer);
+    return Traverser.traverse(&E, &Reducer);
   }
 };
 

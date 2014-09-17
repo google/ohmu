@@ -53,8 +53,8 @@ int main(int argc, const char** argv) {
 
   bool success = BNFParser::initParserFromFile(tilParser, file, false);
   std::cout << "\n";
-  if (success)
-    tilParser.printSyntax(std::cout);
+  // if (success)
+  //  tilParser.printSyntax(std::cout);
 
   fclose(file);
 
@@ -101,7 +101,6 @@ int main(int argc, const char** argv) {
     irgen.generate(cfg);
     //encode(cfg, nullptr);
   }
-  irgen.module()->dump();
 
   delete v;
 

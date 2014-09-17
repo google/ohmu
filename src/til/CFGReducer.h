@@ -82,6 +82,29 @@ public:
         return ContextT(get(), nullptr);
     }
 
+    /// Handle the result of a traversal.
+    SExpr* handleResult(SExpr** E, SExpr* Result, TraversalKind K) {
+      if (!insideCFG())     // no current block
+        return Result;
+      get()->addInstruction(Result);
+
+      if (Continuation) {
+        // If we have a continuation, then terminate current block,
+        // and pass the result to the continuation.
+        get()->createGoto(Continuation, Result);
+        return nullptr;
+      }
+      return Result;
+    }
+
+    /// Handle traversals of more specialized types (e.g. BasicBlock, VarDecl)
+    template<class T>
+    T* handleResult(T** E, T* Result, TraversalKind K) { return Result; }
+
+    /// Cast a result to the appropriate type.
+    template<class T>
+    T* castResult(T** E, SExpr* Result) { return cast<T>(Result); }
+
     ContextT getCurrentContinuation() {
       if (Continuation)
         return *this;
@@ -137,22 +160,6 @@ public:
   }
 
 
-  /// Process the result of a traversal.
-  SExpr* processResult(SExpr& Orig, SExpr* Result, ContextT Ctx) {
-    if (!currentBB_)     // no current block
-      return Result;
-    addInstruction(Result);
-
-    if (Ctx.continuation()) {
-      // If we have a continuation, then terminate current block,
-      // and pass the result to the continuation.
-      createGoto(Ctx.continuation(), Result);
-      return nullptr;
-    }
-    return Result;
-  }
-
-
   /// Add BB to the current CFG, and start working on it.
   void startBlock(BasicBlock *BB) {
     assert(currentBB_ == nullptr && "Haven't finished current block.");
@@ -172,9 +179,10 @@ public:
     assert(currentBB_);
 
     // Create new basic blocks for then and else.
-    BasicBlock *Ntb = new (Arena) BasicBlock(Arena);
-    BasicBlock *Neb = new (Arena) BasicBlock(Arena);
+    BasicBlock *Ntb = addBlock();
     Ntb->addPredecessor(currentBB_);
+
+    BasicBlock *Neb = addBlock();
     Neb->addPredecessor(currentBB_);
 
     // Terminate current basic block with a branch
@@ -213,6 +221,8 @@ public:
 
   /// Completes the CFG and returns it.
   SCFG* finishCFG() {
+    StdPrinter::print(currentCFG_, std::cout);
+    std::cout << "\n\n";
     currentCFG_->computeNormalForm();
     return currentCFG_;
   }
@@ -245,6 +255,13 @@ protected:
     }
   }
 
+  // Create a new basic block.
+  BasicBlock* addBlock() {
+    BasicBlock *B = new (Arena) BasicBlock(Arena);
+    B->setBlockID(currentBlockNum_++);
+    return B;
+  }
+
   // Finish the current basic block, terminating it with Term.
   void finishBlock(Terminator* Term) {
     assert(currentBB_);
@@ -262,8 +279,9 @@ protected:
 
   // Make a new continuation
   BasicBlock* makeContinuation() {
-    auto *Ncb = new (Arena) BasicBlock(Arena);
+    auto *Ncb = addBlock();
     auto *Nph = new (Arena) Phi();
+    Ncb->setID(Ncb, currentInstrNum_++);
     Ncb->addArgument(Nph);
     return Ncb;
   }
@@ -272,7 +290,7 @@ protected:
 public:
   CFGRewriteReducer(MemRegionRef A)
     : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr),
-      currentInstrNum_(0)
+      currentInstrNum_(0), currentBlockNum_(2)
   { }
 
 
@@ -286,6 +304,8 @@ private:
   SCFG*       currentCFG_;              // the current SCFG
   BasicBlock* currentBB_;               // the current basic block
   unsigned    currentInstrNum_;
+  unsigned    currentBlockNum_;
+
   std::vector<SExpr*> currentArgs_;     // arguments in currentBB.
   std::vector<SExpr*> currentInstrs_;   // instructions in currentBB.
 };
@@ -307,15 +327,18 @@ public:
     CtxT Cont = Ctx.getCurrentContinuation();
 
     // End current block with a branch
-    SExpr*  Nc = this->self()->traverse(E->condition(), Ctx);
+    SExpr*  cond = E->condition();
+    SExpr*  Nc = this->self()->traverse(&cond, Ctx);
     Branch* Br = Ctx->createBranch(Nc);
 
     // Process the then and else blocks
+    SExpr* thenE = E->thenExpr();
     Cont->startBlock(Br->thenBlock());
-    this->self()->traverse(E->thenExpr(), Cont, TRV_Tail);
+    this->self()->traverse(&thenE, Cont, TRV_Tail);
 
+    SExpr* elseE = E->elseExpr();
     Cont->startBlock(Br->elseBlock());
-    this->self()->traverse(E->elseExpr(), Cont, TRV_Tail);
+    this->self()->traverse(&elseE, Cont, TRV_Tail);
 
     // If we had an existing continuation, then we're done.
     // The then/else blocks will call the continuation.
@@ -334,7 +357,7 @@ public:
     CFGRewriter Traverser;
 
     auto *Exit = Reducer.initCFG();
-    Traverser.traverse(E, CtxT(&Reducer, Exit), TRV_Tail);
+    Traverser.traverse(&E, CtxT(&Reducer, Exit), TRV_Tail);
     return Reducer.finishCFG();
   }
 };
