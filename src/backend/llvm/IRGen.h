@@ -37,14 +37,32 @@ namespace backend_llvm {
 using namespace clang::threadSafety::til;
 
 
-class IRGen : public SimpleReducerBase {
+// Used by CopyReducerBase.  Most terms map to SExpr*.
+template <class T> struct LLVMTypeMap { typedef llvm::Value* Ty; };
+
+// These kinds of SExpr must map to the same kind.
+// We define these here b/c template specializations cannot be class members.
+template<> struct LLVMTypeMap<Phi>        { typedef llvm::PHINode* Ty; };
+template<> struct LLVMTypeMap<BasicBlock> { typedef llvm::BasicBlock* Ty; };
+template<> struct LLVMTypeMap<SCFG>       { typedef llvm::CFG* Ty; };
+
+
+/// The LLVMReducer maps SExpr* to Value*
+class LLVMReducerMap {
+  template <class T> struct TypeMap : public LLVMTypeMap<T> { };
+};
+
+
+class LLVMReducer
+    : public LLVMReducerMap,
+      public DefaultReducer<LLVMReducer, LLVMReducerMap> {
 public:
-  IRGen() :  currentFunction_(nullptr), builder_(ctx()) {
+  LLVMReducer() :  currentFunction_(nullptr), builder_(ctx()) {
     // The module holds all of the llvm output.
     outModule_ = new llvm::Module("ohmu_output", ctx());
   }
 
-  ~IRGen() {
+  ~LLVMReducer() {
      delete outModule_;
   }
 
@@ -53,38 +71,26 @@ public:
   llvm::Module* module() { return outModule_; }
 
 
-  llvm::Value* generate(SExpr* e) {
-    llvm::Value* v;
-    if (e->block()) {
-      v = currentValues_[e->id()];
-      if (v)
-        return v;
-    }
-
-    switch (e->opcode()) {
-#define TIL_OPCODE_DEF(X)                                                   \
-    case COP_##X:                                                           \
-      v = generate##X(cast<X>(e)); break;
-#include "clang/Analysis/Analyses/ThreadSafetyOps.def"
-#undef TIL_OPCODE_DEF
-    }
-
-    if (e->block()) {
-      currentValues_[e->id()] = v;
-    }
-    return v;
+  llvm::Value* reduceWeakInstr(SExpr* E) {
+    return currentValues_[e->id()];
   }
 
-  llvm::Value* generateFuture(Future* e) {
-    return generate(e->result());
+  llvm::BasicBlock* reduceWeakBasicBlock(BasicBlock* b) {
+    auto *lbb = currentBlocks_[b->blockID()];
+    if (!lbb) {
+      if (!currentFunction_)
+        return nullptr;
+      lbb = llvm::BasicBlock::Create(ctx(), "", currentFunction_);
+      currentBlocks_[b->blockID()] = lbb;
+    }
+    return lbb;
   }
 
-  llvm::Value* generateUndefined(Undefined* e)   { return nullptr; }
-  llvm::Value* generateWildcard (Wildcard* e)    { return nullptr; }
-
-
-  // We define part of the reducer interface for literals here.
-  typedef llvm::Value* R_SExpr;
+  void processResult(SExpr& orig, llvm::Value* v) {
+    if (orig.block()) {
+      currentValues_[orig.id()] = v;
+    }
+  }
 
   llvm::Value* reduceLiteral(Literal& e) { return nullptr; }
 
@@ -98,38 +104,7 @@ public:
     return c;
   }
 
-  llvm::Value* generateLiteral(Literal* e) {
-    return e->traverse(*this, TRV_Normal);
-  }
-
-  llvm::Value* generateLiteralPtr(LiteralPtr* e) {
-    return nullptr;
-  }
-
-  llvm::Value* generateVarDecl(VarDecl* e) {
-    if (e->kind() == VarDecl::VK_Let)
-      return generate(e->definition());
-    return nullptr;
-  }
-
-  llvm::Value* generateFunction  (Function* e)   { return nullptr; }
-  llvm::Value* generateSFunction (SFunction* e)  { return nullptr; }
-  llvm::Value* generateCode      (Code* e)       { return nullptr; }
-  llvm::Value* generateField     (Field* e)      { return nullptr; }
-
-  llvm::Value* generateApply     (Apply* e)      { return nullptr; }
-  llvm::Value* generateSApply    (SApply* e)     { return nullptr; }
-  llvm::Value* generateProject   (Project* e)    { return nullptr; }
-
-  llvm::Value* generateCall      (Call* e)       { return nullptr; }
-  llvm::Value* generateAlloc     (Alloc* e)      { return nullptr; }
-  llvm::Value* generateLoad      (Load* e)       { return nullptr; }
-  llvm::Value* generateStore     (Store* e)      { return nullptr; }
-  llvm::Value* generateArrayIndex(ArrayIndex* e) { return nullptr; }
-  llvm::Value* generateArrayAdd  (ArrayAdd* e)   { return nullptr; }
-
-  llvm::Value* generateUnaryOp(UnaryOp* e) {
-    auto *e0 = generate(e->expr());
+  llvm::Value* reduceUnaryOp(UnaryOp* e, llvm::Value* e0) {
     if (!e0)
       return nullptr;
 
@@ -144,9 +119,7 @@ public:
     return nullptr;
   }
 
-  llvm::Value* generateBinaryOp(BinaryOp* e) {
-    auto* e0 = generate(e->expr0());
-    auto* e1 = generate(e->expr1());
+  llvm::Value* reduceBinaryOp(BinaryOp& e, llvm:Value* e0, llvm::Value* e1) {
     if (!e0 || !e1)
       return nullptr;
 
@@ -187,15 +160,44 @@ public:
     return nullptr;
   }
 
-  llvm::Value* generateCast(Cast* e) {
+  llvm::PHINode* reducePhiBegin(Phi& orig) {
+    llvm::Type* ty = llvm::Type::getInt32Ty(ctx());
+    llvm::PHINode* lph = builder_.CreatePHI(ty, e->values().size());
+  }
+
+  void reducePhiArg(Phi& orig, llvm:PHINode* lph, unsigned i, llvm::Value *v) {
+    BasicBlock* bb = orig.block();
+    auto* lbb = reduceWeakBasicBlock(bb->predecessors()[i]);
+    lph->addIncoming(larg, lbb);
+  }
+
+  llvm::Value* reduceGoto(Goto& orig, llvm::BasicBlock* target) {
+    auto* lbb = getBasicBlock(e->targetBlock());
+    builder_.CreateBr(lbb);
     return nullptr;
   }
 
-  llvm::Value* generateSCFG(SCFG* e) {
+  llvm::Value* reduceBranch(Branch& orig) {
+    return nullptr;
+  }
+
+  llvm::Value* reduceReturn(Return& orig) {
+    auto* rv = generate(e->returnValue());
+    if (!rv)
+      return nullptr;
+    return builder_.CreateRet(rv);
+  }
+
+  llvm::BasicBlock* reduceBasicBlockBegin(BasicBlock &orig) {
+    auto* lbb = reduceWeakBasicBlock(&orig);
+    builder_.SetInsertPoint(lbb);
+  }
+
+  llvm::CFG* reduceCFGBegin(SCFG& orig) {
     currentBlocks_.clear();
-    currentBlocks_.resize(e->numBlocks(), nullptr);
+    currentBlocks_.resize(orig.numBlocks(), nullptr);
     currentValues_.clear();
-    currentValues_.resize(e->numInstructions(), nullptr);
+    currentValues_.resize(orig.numInstructions(), nullptr);
 
     // Create a new function in outModule_
     std::vector<llvm::Type*> argTypes;
@@ -205,72 +207,14 @@ public:
       llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "ohmu_main",
                              outModule_);
 
-    for (auto* b : *e) {
-      generateBasicBlock(b);
-    }
+    // The current CFG is implicit.
+    return nullptr;
+  }
 
+  llvm::CFG* reduceSCFG(llvm::CFG* cfg) {
     llvm::verifyFunction(*currentFunction_);
     currentFunction_->dump();
-
-    return nullptr;
-  }
-
-  llvm::Value* generateBasicBlock(BasicBlock* e) {
-    auto* lbb = getBasicBlock(e);
-    builder_.SetInsertPoint(lbb);
-    for (auto* a : e->arguments()) {
-      generate(a);
-    }
-    for (auto* inst : e->instructions()) {
-      generate(inst);
-    }
-    generate(e->terminator());
-    return nullptr;
-  }
-
-  llvm::Value* generatePhi(Phi* e) {
-    llvm::Type* ty = llvm::Type::getInt32Ty(ctx());
-    llvm::PHINode* lph = builder_.CreatePHI(ty, e->values().size());
-    BasicBlock* bb = e->block();
-    for (unsigned i = 0; i < bb->numPredecessors(); ++i) {
-      auto* larg = generate(e->values()[i]);
-      auto* lbb = getBasicBlock(bb->predecessors()[i]);
-      lph->addIncoming(larg, lbb);
-    }
-    return lph;
-  }
-
-  llvm::Value* generateGoto(Goto* e) {
-    auto* lbb = getBasicBlock(e->targetBlock());
-    builder_.CreateBr(lbb);
-    return nullptr;
-  }
-
-  llvm::Value* generateBranch(Branch* e) {
-    return nullptr;
-  }
-
-  llvm::Value* generateReturn(Return* e) {
-    auto* rv = generate(e->returnValue());
-    if (!rv)
-      return nullptr;
-    return builder_.CreateRet(rv);
-  }
-
-  llvm::Value* generateIdentifier(Identifier* e) { return nullptr; }
-  llvm::Value* generateIfThenElse(IfThenElse* e) { return nullptr; }
-  llvm::Value* generateLet       (Let* e)        { return nullptr; }
-
-
-  inline llvm::BasicBlock* getBasicBlock(BasicBlock* b) {
-    llvm::BasicBlock *lbb = currentBlocks_[b->blockID()];
-    if (!lbb) {
-      if (!currentFunction_)
-        return nullptr;
-      lbb = llvm::BasicBlock::Create(ctx(), "", currentFunction_);
-      currentBlocks_[b->blockID()] = lbb;
-    }
-    return lbb;
+    return cfg;
   }
 
 

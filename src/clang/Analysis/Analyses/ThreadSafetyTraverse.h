@@ -98,7 +98,8 @@ public:
     // Indirect references to the instruction will have K == TRV_Normal.
     if (K == TRV_Normal && E->block())
       return self()->traverseWeakInstr(E, Ctx);
-    return self()->traverseByCase(E, Ctx, K);
+    auto Result = self()->traverseByCase(E, Ctx, K);
+    return Ctx->processResult(*E, Result, Ctx);
   }
 
   /// Helper method to call traverseX(e) on the appropriate type.
@@ -185,8 +186,9 @@ private:
 };
 
 
+
 template <class Self, class R>
-class DefaultReducer : public R {
+class DefaultReducer {
 public:
   typedef MAPTYPE(R,SExpr)      R_SExpr;
   typedef MAPTYPE(R,VarDecl)    R_VarDecl;
@@ -195,6 +197,10 @@ public:
   typedef MAPTYPE(R,Phi)        R_Phi;
 
   Self* self() { return static_cast<Self*>(this); }
+
+  // Process the result of reducing the expression.
+  // (Commented out because it depends on having a ContextT type.)
+  // R_SExpr processResult(SExpr& Orig, R_SExpr Result, ContextT Ctx);
 
   R_SExpr reduceSExpr(SExpr& Orig) {
     return self()->reduceNull();
@@ -295,7 +301,7 @@ public:
   R_Phi reducePhiBegin(Phi &Orig) {
     return self()->reduceInstruction(Orig);
   }
-  void reducePhiArg(R_Phi Ph, unsigned i, R_SExpr E) { }
+  void reducePhiArg(Phi &Orig, R_Phi Ph, unsigned i, R_SExpr E) { }
   R_Phi reducePhi(R_Phi Ph) { return Ph; }
 
 
@@ -343,19 +349,23 @@ public:
 };
 
 
-
-/// Implements enter/exit methods for a reducer that doesn't care about scope.
-/// RedT is the base type of the Reducer.
-template <class RedT>
+/// Provides default implementations of the enter/exit methods that do nothing.
+/// R must provide the TypeMap.
+template<class R>
 class UnscopedReducer {
 public:
-  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) { }
+  typedef MAPTYPE(R,SExpr)      R_SExpr;
+  typedef MAPTYPE(R,VarDecl)    R_VarDecl;
+  typedef MAPTYPE(R,BasicBlock) R_BasicBlock;
+  typedef MAPTYPE(R,SCFG)       R_SCFG;
+
+  void enterScope(VarDecl* Orig, R_VarDecl Nvd) { }
   void exitScope(VarDecl* Orig) { }
 
-  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) { }
+  void enterBasicBlock(BasicBlock* Orig, R_BasicBlock Nbb) { }
   void exitBasicBlock(BasicBlock* Orig) { }
 
-  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) { }
+  void enterCFG(SCFG* Orig, R_SCFG Ns) { }
   void exitCFG(SCFG* Orig) { }
 };
 
@@ -371,7 +381,9 @@ public:
 /// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
 /// SExprs to booleans: it returns true on success, and false on failure.
 class VisitReducerBase
-  : public DefaultReducer<VisitReducerBase, VisitReducerMap> {
+    : public VisitReducerMap,
+      public UnscopedReducer<VisitReducerMap>,
+      public DefaultReducer<VisitReducerBase, VisitReducerMap> {
 public:
   bool reduceNull()             { return true; }
   bool reduceSExpr(SExpr &Orig) { return true; }
@@ -410,7 +422,7 @@ template<> struct DefaultTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
 template<> struct DefaultTypeMap<SCFG>       { typedef SCFG* Ty; };
 
 /// Defines the TypeMap for CopyReducerBase.
-class CopyReducerMap {
+class SExprReducerMap {
 public:
   // R_SExpr is the result type for a traversal.
   // A copy reducer returns a newly allocated term.
@@ -418,7 +430,9 @@ public:
 };
 
 
-class CopyReducerBase : public CopyReducerMap {
+class CopyReducerBase
+    : public SExprReducerMap,
+      public UnscopedReducer<SExprReducerMap> {
 public:
   CopyReducerBase() {}
   CopyReducerBase(MemRegionRef A) : Arena(A) { }
@@ -500,7 +514,7 @@ public:
   Phi* reducePhiBegin(Phi &Orig) {
     return new (Arena) Phi(Orig, Arena);
   }
-  void reducePhiArg(Phi* Ph, unsigned i, SExpr* E) {
+  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) {
     Ph->values().push_back(E);
   }
   Phi* reducePhi(Phi* Ph) { return Ph; }
@@ -762,7 +776,7 @@ MAPTYPE(V::RedT, Phi) Phi::traverse(V &Vs, typename V::CtxT Ctx) {
   auto Np = Ctx->reducePhiBegin(*this);
   unsigned i = 0;
   for (auto *Va : Values) {
-    Ctx->reducePhiArg(Np, i, Vs.traverse(Va, Ctx));
+    Ctx->reducePhiArg(*this, Np, i, Vs.traverse(Va, Ctx));
     ++i;
   }
   return Ctx->reducePhi(Np);

@@ -15,10 +15,11 @@ namespace threadSafety {
 namespace til {
 
 
-class SimpleVisitReducer : public VisitReducerBase,
-                           public UnscopedReducer<VisitReducerBase> {
+class SimpleVisitReducer : public VisitReducerBase {
 public:
   typedef DefaultContext<SimpleVisitReducer> ContextT;
+
+  bool processResult(SExpr& Orig, bool E, ContextT Ctx) { return E; }
 };
 
 class SimpleVisitor
@@ -31,13 +32,12 @@ public:
   }
 };
 
-class SimpleCopyReducer : public CopyReducerBase,
-                          public UnscopedReducer<CopyReducerBase> {
+class SimpleCopyReducer : public CopyReducerBase {
 public:
   typedef DefaultContext<SimpleCopyReducer> ContextT;
+
+  SExpr* processResult(SExpr& Orig, SExpr* E, ContextT Ctx) { return E; }
 };
-
-
 
 class SimpleCopier : public Traversal<SimpleCopier, SimpleCopyReducer> {
 public:

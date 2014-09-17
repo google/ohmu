@@ -138,7 +138,7 @@ public:
 
 
   /// Process the result of a traversal.
-  SExpr* processResult(SExpr* Result, ContextT Ctx) {
+  SExpr* processResult(SExpr& Orig, SExpr* Result, ContextT Ctx) {
     if (!currentBB_)     // no current block
       return Result;
     addInstruction(Result);
@@ -294,17 +294,6 @@ private:
 
 class CFGRewriter : public Traversal<CFGRewriter, CFGRewriteReducer> {
 public:
-  SExpr* traverseSExpr(SExpr *E, CtxT Ctx, TraversalKind K = TRV_Normal) {
-    // std::cerr << "traverse " << getOpcodeString(E->opcode())
-    //           << " ctx:"     << static_cast<bool>(Ctx.continuation())
-    //           << " k:"       << K
-    //           << "\n";
-    if (K == TRV_Normal && E->block())
-      return self()->traverseWeakInstr(E, Ctx);
-    auto* Result = this->self()->traverseByCase(E, Ctx, K);
-    return Ctx->processResult(Result, Ctx);
-  }
-
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *E, CtxT Ctx,
