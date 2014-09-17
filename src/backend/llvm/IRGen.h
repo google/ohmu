@@ -37,18 +37,19 @@ namespace backend_llvm {
 using namespace clang::threadSafety::til;
 
 
-// Used by CopyReducerBase.  Most terms map to SExpr*.
+// Map ohmu IR types to LLVM Types.
 template <class T> struct LLVMTypeMap { typedef llvm::Value* Ty; };
 
 // These kinds of SExpr must map to the same kind.
 // We define these here b/c template specializations cannot be class members.
 template<> struct LLVMTypeMap<Phi>        { typedef llvm::PHINode* Ty; };
 template<> struct LLVMTypeMap<BasicBlock> { typedef llvm::BasicBlock* Ty; };
-template<> struct LLVMTypeMap<SCFG>       { typedef llvm::CFG* Ty; };
+template<> struct LLVMTypeMap<SCFG>       { typedef llvm::Function* Ty; };
 
 
 /// The LLVMReducer maps SExpr* to Value*
 class LLVMReducerMap {
+public:
   template <class T> struct TypeMap : public LLVMTypeMap<T> { };
 };
 
@@ -71,7 +72,7 @@ public:
   llvm::Module* module() { return outModule_; }
 
 
-  llvm::Value* reduceWeakInstr(SExpr* E) {
+  llvm::Value* reduceWeakInstr(SExpr* e) {
     return currentValues_[e->id()];
   }
 
@@ -104,11 +105,11 @@ public:
     return c;
   }
 
-  llvm::Value* reduceUnaryOp(UnaryOp* e, llvm::Value* e0) {
+  llvm::Value* reduceUnaryOp(UnaryOp& orig, llvm::Value* e0) {
     if (!e0)
       return nullptr;
 
-    switch (e->unaryOpcode()) {
+    switch (orig.unaryOpcode()) {
       case UOP_Minus:
         return builder_.CreateNeg(e0);
       case UOP_BitNot:
@@ -119,11 +120,11 @@ public:
     return nullptr;
   }
 
-  llvm::Value* reduceBinaryOp(BinaryOp& e, llvm:Value* e0, llvm::Value* e1) {
+  llvm::Value* reduceBinaryOp(BinaryOp& orig, llvm::Value* e0, llvm::Value* e1) {
     if (!e0 || !e1)
       return nullptr;
 
-    switch (e->binaryOpcode()) {
+    switch (orig.binaryOpcode()) {
       case BOP_Add:
         return builder_.CreateAdd(e0, e1);
       case BOP_Sub:
@@ -162,17 +163,18 @@ public:
 
   llvm::PHINode* reducePhiBegin(Phi& orig) {
     llvm::Type* ty = llvm::Type::getInt32Ty(ctx());
-    llvm::PHINode* lph = builder_.CreatePHI(ty, e->values().size());
+    llvm::PHINode* lph = builder_.CreatePHI(ty, orig.values().size());
+    return lph;
   }
 
-  void reducePhiArg(Phi& orig, llvm:PHINode* lph, unsigned i, llvm::Value *v) {
+  void reducePhiArg(Phi& orig, llvm::PHINode* lph, unsigned i, llvm::Value *v) {
     BasicBlock* bb = orig.block();
     auto* lbb = reduceWeakBasicBlock(bb->predecessors()[i]);
-    lph->addIncoming(larg, lbb);
+    lph->addIncoming(v, lbb);
   }
 
   llvm::Value* reduceGoto(Goto& orig, llvm::BasicBlock* target) {
-    auto* lbb = getBasicBlock(e->targetBlock());
+    auto* lbb = reduceWeakBasicBlock(orig.targetBlock());
     builder_.CreateBr(lbb);
     return nullptr;
   }
@@ -181,8 +183,7 @@ public:
     return nullptr;
   }
 
-  llvm::Value* reduceReturn(Return& orig) {
-    auto* rv = generate(e->returnValue());
+  llvm::Value* reduceReturn(Return& orig, llvm::Value *rv) {
     if (!rv)
       return nullptr;
     return builder_.CreateRet(rv);
@@ -191,9 +192,10 @@ public:
   llvm::BasicBlock* reduceBasicBlockBegin(BasicBlock &orig) {
     auto* lbb = reduceWeakBasicBlock(&orig);
     builder_.SetInsertPoint(lbb);
+    return lbb;
   }
 
-  llvm::CFG* reduceCFGBegin(SCFG& orig) {
+  llvm::Function* reduceCFGBegin(SCFG& orig) {
     currentBlocks_.clear();
     currentBlocks_.resize(orig.numBlocks(), nullptr);
     currentValues_.clear();
@@ -208,10 +210,10 @@ public:
                              outModule_);
 
     // The current CFG is implicit.
-    return nullptr;
+    return currentFunction_;
   }
 
-  llvm::CFG* reduceSCFG(llvm::CFG* cfg) {
+  llvm::Function* reduceSCFG(llvm::Function* cfg) {
     llvm::verifyFunction(*currentFunction_);
     currentFunction_->dump();
     return cfg;
