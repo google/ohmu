@@ -56,6 +56,7 @@ public:
 
 class LLVMReducer
     : public LLVMReducerMap,
+      public UnscopedReducer<LLVMReducerMap>,
       public DefaultReducer<LLVMReducer, LLVMReducerMap> {
 public:
   LLVMReducer() :  currentFunction_(nullptr), builder_(ctx()) {
@@ -71,6 +72,18 @@ public:
 
   llvm::Module* module() { return outModule_; }
 
+public:
+  typedef DefaultContext<LLVMReducer> ContextT;
+
+  // default result of all undefined reduce methods.
+  std::nullptr_t reduceNull() { return nullptr; }
+
+
+  void processResult(SExpr& orig, llvm::Value* v) {
+    if (orig.block()) {
+      currentValues_[orig.id()] = v;
+    }
+  }
 
   llvm::Value* reduceWeakInstr(SExpr* e) {
     return currentValues_[e->id()];
@@ -87,11 +100,6 @@ public:
     return lbb;
   }
 
-  void processResult(SExpr& orig, llvm::Value* v) {
-    if (orig.block()) {
-      currentValues_[orig.id()] = v;
-    }
-  }
 
   llvm::Value* reduceLiteral(Literal& e) { return nullptr; }
 
@@ -228,6 +236,17 @@ private:
   std::vector<llvm::BasicBlock*> currentBlocks_;
   std::vector<llvm::Value*> currentValues_;
 };
+
+
+class IRGen : public Traversal<IRGen, LLVMReducer> {
+public:
+  static void generate(SExpr* E) {
+    IRGen Traverser;
+    LLVMReducer Reducer;
+    return Traverser.traverse(E, &Reducer);
+  }
+};
+
 
 
 }  // end namespace backend_llvm

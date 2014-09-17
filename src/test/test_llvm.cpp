@@ -98,7 +98,7 @@ int main(int argc, const char** argv) {
     SCFG* cfg = CFGRewriter::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
 
-    irgen.generateSCFG(cfg);
+    irgen.generate(cfg);
     //encode(cfg, nullptr);
   }
   irgen.module()->dump();
