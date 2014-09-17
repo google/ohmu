@@ -43,15 +43,7 @@ class VarContext {
 public:
   VarContext() { }
 
-  SExpr* lookup(StringRef S) {
-    for (unsigned i=0,n=Vars.size(); i < n; ++i) {
-      VarDecl* V = Vars[n-i-1];
-      if (V->name() == S) {
-        return V;
-      }
-    }
-    return nullptr;
-  }
+  SExpr* lookup(StringRef S);
 
   void        push(VarDecl *V) { Vars.push_back(V); }
   void        pop()            { Vars.pop_back(); }
@@ -75,6 +67,7 @@ public:
       : DefaultContext(R), Continuation(C)
     { }
 
+    /// Pass the continuation only to SExprs in tail position.
     ContextT sub(TraversalKind K) const {
       if (K == TRV_Tail)
         return *this;
@@ -161,138 +154,44 @@ public:
 
 
   /// Add BB to the current CFG, and start working on it.
-  void startBlock(BasicBlock *BB) {
-    assert(currentBB_ == nullptr && "Haven't finished current block.");
-    assert(currentArgs_.empty());
-    assert(currentInstrs_.empty());
-    assert(BB->instructions().size() == 0 && "Already processed block.");
-
-    currentBB_ = BB;
-    if (!BB->cfg())
-      currentCFG_->add(BB);
-  }
-
+  void startBlock(BasicBlock *BB);
 
   /// Terminate the current block with a branch instruction.
   /// This will create new blocks for the branches.
-  Branch* createBranch(SExpr *Cond) {
-    assert(currentBB_);
-
-    // Create new basic blocks for then and else.
-    BasicBlock *Ntb = addBlock();
-    Ntb->addPredecessor(currentBB_);
-
-    BasicBlock *Neb = addBlock();
-    Neb->addPredecessor(currentBB_);
-
-    // Terminate current basic block with a branch
-    auto *Nt = new (Arena) Branch(Cond, Ntb, Neb);
-    finishBlock(Nt);
-    return Nt;
-  }
-
+  Branch* createBranch(SExpr *Cond);
 
   /// Terminate the current block with a Goto instruction.
-  Goto* createGoto(BasicBlock *Target, SExpr* Result) {
-    assert(currentBB_);
-
-    unsigned Idx = Target->addPredecessor(currentBB_);
-    if (Target->arguments().size() > 0) {
-      // First argument is always the result
-      SExpr *E = Target->arguments()[0];
-      if (Phi *Ph = dyn_cast<Phi>(E))
-        Ph->values()[Idx] = Result;
-    }
-    auto *Nt = new (Arena) Goto(Target, Idx);
-    finishBlock(Nt);
-    return Nt;
-  }
-
+  Goto* createGoto(BasicBlock *Target, SExpr* Result);
 
   /// Creates a new CFG.
   /// Returns the exit block, for use as a continuation.
-  BasicBlock* initCFG() {
-    assert(currentCFG_ == nullptr && currentBB_ == nullptr);
-    currentCFG_ = new (Arena) SCFG(Arena, 0);
-    currentBB_ = currentCFG_->entry();
-    assert(currentBB_->instructions().size() == 0);
-    return currentCFG_->exit();
-  }
+  BasicBlock* initCFG();
 
   /// Completes the CFG and returns it.
-  SCFG* finishCFG() {
-    StdPrinter::print(currentCFG_, std::cout);
-    std::cout << "\n\n";
-    currentCFG_->computeNormalForm();
-    return currentCFG_;
-  }
+  SCFG* finishCFG();
 
 
 protected:
   // Add new let variable to the current basic block.
-  void addLetDecl(VarDecl* Nv) {
-    // Set the block and ID now, to mark it as having been added.
-    Nv->setID(currentBB_, currentInstrNum_++);
-    if (currentInstrs_.size() > 0 &&
-        currentInstrs_.back() == Nv->definition() &&
-        !isa<VarDecl>(Nv->definition())) {
-      // Definition already in block -- replace old instr with let decl.
-      Nv->definition()->setID(nullptr, 0);
-      currentInstrs_.back() = Nv;
-    }
-    else {
-      currentInstrs_.push_back(Nv);
-    }
-  }
+  void addLetDecl(VarDecl* Nv);
 
   // Add a new instruction to the current basic block.
-  void addInstruction(SExpr* E) {
-    if (!ThreadSafetyTIL::isTrivial(E) && !E->block()) {
-      // Set the block and ID now, to mark it as having been added.
-      // We won't actually add instructions until the block is done.
-      E->setID(currentBB_, currentInstrNum_++);
-      currentInstrs_.push_back(E);
-    }
-  }
+  void addInstruction(SExpr* E);
 
   // Create a new basic block.
-  BasicBlock* addBlock() {
-    BasicBlock *B = new (Arena) BasicBlock(Arena);
-    B->setBlockID(currentBlockNum_++);
-    return B;
-  }
+  BasicBlock* addBlock();
 
   // Finish the current basic block, terminating it with Term.
-  void finishBlock(Terminator* Term) {
-    assert(currentBB_);
-    assert(currentBB_->instructions().size() == 0);
-
-    currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
-    for (auto *E : currentInstrs_) {
-      currentBB_->addInstruction(E);
-    }
-    currentBB_->setTerminator(Term);
-    currentArgs_.clear();
-    currentInstrs_.clear();
-    currentBB_ = nullptr;
-  }
+  void finishBlock(Terminator* Term);
 
   // Make a new continuation
-  BasicBlock* makeContinuation() {
-    auto *Ncb = addBlock();
-    auto *Nph = new (Arena) Phi();
-    Ncb->setID(Ncb, currentInstrNum_++);
-    Ncb->addArgument(Nph);
-    return Ncb;
-  }
-
+  BasicBlock* makeContinuation();
 
 public:
   CFGRewriteReducer(MemRegionRef A)
     : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr),
       currentInstrNum_(0), currentBlockNum_(2)
   { }
-
 
 private:
   friend class ContextT;
@@ -317,49 +216,9 @@ public:
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *E, CtxT Ctx,
-                            TraversalKind K = TRV_Normal) {
-    if (!Ctx.insideCFG()) {
-      // Just do a normal traversal if we're not currently rewriting in a CFG.
-      return E->traverse(*this->self(), Ctx);
-    }
+                            TraversalKind K = TRV_Normal);
 
-    // Get the current continuation, or make one.
-    CtxT Cont = Ctx.getCurrentContinuation();
-
-    // End current block with a branch
-    SExpr*  cond = E->condition();
-    SExpr*  Nc = this->self()->traverse(&cond, Ctx);
-    Branch* Br = Ctx->createBranch(Nc);
-
-    // Process the then and else blocks
-    SExpr* thenE = E->thenExpr();
-    Cont->startBlock(Br->thenBlock());
-    this->self()->traverse(&thenE, Cont, TRV_Tail);
-
-    SExpr* elseE = E->elseExpr();
-    Cont->startBlock(Br->elseBlock());
-    this->self()->traverse(&elseE, Cont, TRV_Tail);
-
-    // If we had an existing continuation, then we're done.
-    // The then/else blocks will call the continuation.
-    if (Ctx.continuation())
-      return nullptr;
-
-    // Otherwise, if we created a new continuation, then start processing it.
-    Cont->startBlock(Cont.continuation());
-    assert(Cont.continuation()->arguments().size() > 0);
-    return Cont.continuation()->arguments()[0];
-  }
-
-
-  static SCFG* convertSExprToCFG(SExpr *E, MemRegionRef A) {
-    CFGRewriteReducer Reducer(A);
-    CFGRewriter Traverser;
-
-    auto *Exit = Reducer.initCFG();
-    Traverser.traverse(&E, CtxT(&Reducer, Exit), TRV_Tail);
-    return Reducer.finishCFG();
-  }
+  static SCFG* convertSExprToCFG(SExpr *E, MemRegionRef A);
 };
 
 

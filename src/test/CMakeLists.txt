@@ -9,5 +9,6 @@ target_link_libraries(test_TILParser base parser ohmu_til tilpasslib)
 add_dependencies(test_TILParser ohmu_grammar)
 
 add_executable(test_llvm test_llvm.cpp)
-target_link_libraries(test_llvm base parser ohmu_til tilpasslib ${llvm_libs})
+target_link_libraries(test_llvm base parser ohmu_til tilpasslib
+                      backend_llvm ${llvm_libs})
 add_dependencies(test_llvm ohmu_grammar)

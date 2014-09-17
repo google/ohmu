@@ -89,8 +89,6 @@ int main(int argc, const char** argv) {
     return 0;
   }
 
-  backend_llvm::IRGen irgen;
-
   for (SExpr* e : *v) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
@@ -98,7 +96,7 @@ int main(int argc, const char** argv) {
     SCFG* cfg = CFGRewriter::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
 
-    irgen.generate(cfg);
+    backend_llvm::generate_LLVM_IR(cfg);
     //encode(cfg, nullptr);
   }
 
