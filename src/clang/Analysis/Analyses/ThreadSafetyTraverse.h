@@ -36,9 +36,6 @@ enum TraversalKind {
 };
 
 
-void traceTraversal(const char* msg, SExpr *E);
-
-
 /// The Traversal class defines an interface for traversing SExprs.  Traversals
 /// have been made as generic as possible, and are intended to handle any kind
 /// of pass over the AST, e.g. visiters, copiers, non-destructive rewriting,
@@ -172,18 +169,15 @@ public:
 };
 
 
-/// Implements a Context that simply forwards all enter/exit methods to the
-/// Reducer object.  Used for Contexts that don't need to clone scopes.
-/// RedT is the type of the Reducer.
-template <class RedT>
+/// Implements a context that acts as a smart pointer to the reducer object.
+/// It ignores lexical scope.  RedT is the type of the Reducer.
+template <class Self, class RedT>
 class DefaultContext {
 public:
   DefaultContext(RedT* RP) : RPtr(RP) { }
-  DefaultContext(const DefaultContext<RedT>& c) = default;
-  ~DefaultContext() { }
 
   /// Adjust the context when entering a particular kind of subexpression.
-  DefaultContext<RedT> sub(TraversalKind K) const { return *this; }
+  Self sub(TraversalKind K) const { return Self(RPtr); }
 
   /// Handle the result of a traversal.  The default is just to return it.
   template<class T>
@@ -198,29 +192,25 @@ public:
     return static_cast<MAPTYPE(RedT, T)>(Result);
   }
 
-  /// Forward the scope commands to the Reducer object.
-  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) {
-    RPtr->enterScope(Orig, Nvd);
-  }
-  void exitScope(VarDecl* Orig) {
-    RPtr->exitScope(Orig);
-  }
+  /// Enter the lexical scope of Orig, which is rewritten to Nvd.
+  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) { }
 
-  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) {
-    RPtr->enterBasicBlock(Orig, Nbb);
-  }
-  void exitBasicBlock(BasicBlock* Orig) {
-    RPtr->exitBasicBlock(Orig);
-  }
+  /// Exit the lexical scope of Orig.
+  void exitScope(VarDecl* Orig) { }
 
-  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) {
-    RPtr->enterCFG(Orig, Ns);
-  }
-  void exitCFG(SCFG* Orig) {
-    RPtr->exitCFG(Orig);
-  }
+  /// Enter the basic block Orig, which will be rewritten to Nbb
+  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) { }
 
-  /// Used to invoke ReduceX methods on Reducer.
+  /// Exit the basic block Orig.
+  void exitBasicBlock(BasicBlock* Orig) { }
+
+  /// Enter the SCFG Orig, which will be rewritten to Ns
+  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) { }
+
+  /// Exit the lexical scope of Orig
+  void exitCFG(SCFG* Orig) { }
+
+  /// Used to invoke ReduceX methods
   RedT* operator->() { return RPtr; }
 
 protected:
@@ -231,7 +221,8 @@ private:
 };
 
 
-
+/// Implements the reducer interface, with default versions for all methods.
+/// R is a base class that defines the TypeMap.
 template <class Self, class R>
 class DefaultReducer {
 public:
@@ -362,6 +353,7 @@ public:
   void reduceBasicBlockTerm (R_BasicBlock, R_SExpr E) { }
   R_BasicBlock reduceBasicBlock(R_BasicBlock BB) { return BB; }
 
+
   R_SExpr reduceGoto(Goto &Orig, R_BasicBlock B) {
     return self()->reduceTerminator(Orig);
   }
@@ -391,26 +383,6 @@ public:
 };
 
 
-/// Provides default implementations of the enter/exit methods that do nothing.
-/// R must provide the TypeMap.
-template<class R>
-class UnscopedReducer {
-public:
-  typedef MAPTYPE(R,SExpr)      R_SExpr;
-  typedef MAPTYPE(R,VarDecl)    R_VarDecl;
-  typedef MAPTYPE(R,BasicBlock) R_BasicBlock;
-  typedef MAPTYPE(R,SCFG)       R_SCFG;
-
-  void enterScope(VarDecl* Orig, R_VarDecl Nvd) { }
-  void exitScope(VarDecl* Orig) { }
-
-  void enterBasicBlock(BasicBlock* Orig, R_BasicBlock Nbb) { }
-  void exitBasicBlock(BasicBlock* Orig) { }
-
-  void enterCFG(SCFG* Orig, R_SCFG Ns) { }
-  void exitCFG(SCFG* Orig) { }
-};
-
 
 /// Defines the TypeMap for VisitReducerBase
 class VisitReducerMap {
@@ -422,11 +394,15 @@ public:
 
 /// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
 /// SExprs to booleans: it returns true on success, and false on failure.
-class VisitReducerBase
-    : public VisitReducerMap,
-      public UnscopedReducer<VisitReducerMap>,
-      public DefaultReducer<VisitReducerBase, VisitReducerMap> {
+template<class Self>
+class VisitReducer : public VisitReducerMap,
+                     public DefaultReducer<Self, VisitReducerMap> {
 public:
+  class ContextT : public DefaultContext<ContextT, Self> {
+  public:
+    ContextT(Self *R) : DefaultContext<ContextT, Self>(R) { }
+  };
+
   bool reduceNull()             { return true; }
   bool reduceSExpr(SExpr &Orig) { return true; }
 };
@@ -440,12 +416,18 @@ public:
 
   VisitTraversal() : Success(true) { }
 
-  Self *self() { return static_cast<Self *>(this); }
+  Self *self() { return static_cast<Self*>(this); }
 
   /// Override traverse to set success, bail on failure, and ignore results
   bool traverseSExpr(SExpr **E, CtxT Ctx, TraversalKind K = TRV_Normal) {
     Success = Success && Traversal<Self, ReducerT>::traverseSExpr(E, Ctx, K);
     return Success;
+  }
+
+  static bool visit(SExpr *E) {
+    Self Traverser;
+    ReducerT Reducer;
+    return Traverser.traverse(&E, CtxT(&Reducer), TRV_Tail);
   }
 
 private:
@@ -454,26 +436,38 @@ private:
 
 
 // Used by CopyReducerBase.  Most terms map to SExpr*.
-template <class T> struct DefaultTypeMap { typedef SExpr* Ty; };
+template <class T> struct SExprTypeMap { typedef SExpr* Ty; };
 
 // These kinds of SExpr must map to the same kind.
 // We define these here b/c template specializations cannot be class members.
-template<> struct DefaultTypeMap<VarDecl>    { typedef VarDecl* Ty; };
-template<> struct DefaultTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
-template<> struct DefaultTypeMap<SCFG>       { typedef SCFG* Ty; };
+template<> struct SExprTypeMap<VarDecl>    { typedef VarDecl* Ty; };
+template<> struct SExprTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
+template<> struct SExprTypeMap<SCFG>       { typedef SCFG* Ty; };
 
 /// Defines the TypeMap for CopyReducerBase.
 class SExprReducerMap {
 public:
-  // R_SExpr is the result type for a traversal.
-  // A copy reducer returns a newly allocated term.
-  template <class T> struct TypeMap : public DefaultTypeMap<T> { };
+  // An SExpr reducer rewrites one SExpr to another.
+  template <class T> struct TypeMap : public SExprTypeMap<T> { };
 };
 
 
-class CopyReducerBase
-    : public SExprReducerMap,
-      public UnscopedReducer<SExprReducerMap> {
+/// Specialize DefaultContext to dynamically cast SExpr types.
+template <class Self, class RedT>
+class CopyContext : public DefaultContext<Self, RedT> {
+public:
+  CopyContext(RedT *R) : DefaultContext<Self, RedT>(R) { }
+
+  /// Use dyn_cast to cast results to the appropriate type.
+  template<class T>
+  T* castResult(T** E, SExpr* Result) {
+    return dyn_cast_or_null<T>(Result);
+  }
+};
+
+
+/// Reducer class that builds a copy of an SExpr.
+class CopyReducerBase : public SExprReducerMap {
 public:
   CopyReducerBase() {}
   CopyReducerBase(MemRegionRef A) : Arena(A) { }
@@ -611,6 +605,18 @@ public:
 
 protected:
   MemRegionRef Arena;
+};
+
+
+template<class Self, class ReducerT>
+class CopyTraversal : public Traversal<Self, ReducerT> {
+public:
+  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
+    Self Traverser;
+    ReducerT Reducer;
+    Reducer.setArena(A);
+    return Traverser.traverse(&E, &Reducer, TRV_Tail);
+  }
 };
 
 

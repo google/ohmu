@@ -40,7 +40,6 @@ public:
 
 class LLVMReducer
     : public LLVMReducerMap,
-      public UnscopedReducer<LLVMReducerMap>,
       public DefaultReducer<LLVMReducer, LLVMReducerMap> {
 public:
   LLVMReducer() :  currentFunction_(nullptr), builder_(ctx()) {
@@ -53,15 +52,12 @@ public:
   }
 
   static llvm::LLVMContext& ctx() { return llvm::getGlobalContext(); }
-
   llvm::Module* module() { return outModule_; }
 
 public:
-  class ContextT : public DefaultContext<LLVMReducer> {
+  class ContextT : public DefaultContext<ContextT, LLVMReducer> {
   public:
     ContextT(LLVMReducer* R) : DefaultContext(R) { }
-
-    ContextT sub(TraversalKind K) const { return *this; }
 
     template<class T>
     llvm::Value* handleResult(T **e, llvm::Value* v, TraversalKind k) {
@@ -73,8 +69,8 @@ public:
       return v;
     }
 
-    llvm::BasicBlock* handleResult(BasicBlock **e, llvm::BasicBlock* v,
-                                   TraversalKind k) {
+    llvm::BasicBlock*
+    handleResult(BasicBlock **e, llvm::BasicBlock* v, TraversalKind k) {
       return v;
     }
   };

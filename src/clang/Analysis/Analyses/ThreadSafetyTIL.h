@@ -62,6 +62,9 @@ namespace clang {
 namespace threadSafety {
 namespace til {
 
+/// Macro for the ugly template return type of SExpr::traverse
+#define MAPTYPE(V, X) typename V::template TypeMap<X>::Ty
+
 
 /// Enum for the different distinct classes of SExpr
 enum TIL_Opcode {
@@ -190,7 +193,6 @@ inline ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
   }
 }
 
-
 template<>
 inline ValueType ValueType::getValueType<void>() {
   return ValueType(BT_Void, ST_0, false, 0);
@@ -268,11 +270,6 @@ inline ValueType ValueType::getValueType<void*>() {
 
 
 class BasicBlock;
-
-
-// Macro for the ugly template return type of SExpr::traverse
-#define MAPTYPE(V, X) typename V::template TypeMap<X>::Ty
-
 
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {

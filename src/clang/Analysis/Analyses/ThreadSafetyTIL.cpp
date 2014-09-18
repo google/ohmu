@@ -16,67 +16,6 @@ namespace threadSafety {
 namespace til {
 
 
-void traceTraversal(const char* msg, SExpr *E) {
-  std::cout << msg << " -- [";
-  std::cout << getOpcodeString(E->opcode());
-  std::cout << "]";
-  StdPrinter::print(E, std::cout);
-  std::cout << "\n";
-}
-
-
-class SimpleVisitReducer : public VisitReducerBase {
-public:
-  class ContextT : public DefaultContext<SimpleVisitReducer> {
-  public:
-    ContextT(SimpleVisitReducer* R) : DefaultContext(R) { }
-
-    ContextT sub(TraversalKind K) const { return *this; }
-  };
-};
-
-class SimpleVisitor
-  : public VisitTraversal<SimpleVisitor, SimpleVisitReducer> {
-public:
-  static bool visit(SExpr *E) {
-    SimpleVisitor Traverser;
-    SimpleVisitReducer Reducer;
-    return Traverser.traverse(&E, &Reducer);
-  }
-};
-
-class SimpleCopyReducer : public CopyReducerBase {
-public:
-  class ContextT : public DefaultContext<SimpleCopyReducer> {
-  public:
-    ContextT(SimpleCopyReducer* R) : DefaultContext(R) { }
-
-    ContextT sub(TraversalKind K) const { return *this; }
-
-    /// Use dyn_cast to cast results to the appropriate type.
-    template<class T>
-    T* castResult(T** E, SExpr* Result) {
-      return dyn_cast_or_null<T>(Result);
-    }
-  };
-};
-
-class SimpleCopier : public Traversal<SimpleCopier, SimpleCopyReducer> {
-public:
-  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
-    SimpleCopier  Traverser;
-    SimpleCopyReducer Reducer;
-    Reducer.setArena(A);
-    return Traverser.traverse(&E, &Reducer);
-  }
-};
-
-void test(SExpr* E, MemRegionRef A) {
-  SimpleVisitor::visit(E);
-  SimpleCopier::rewrite(E, A);
-}
-
-
 StringRef getOpcodeString(TIL_Opcode Op) {
   switch (Op) {
 #define TIL_OPCODE_DEF(X)                                                   \

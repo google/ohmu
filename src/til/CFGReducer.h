@@ -61,11 +61,22 @@ private:
 class CFGRewriteReducer : public CopyReducerBase {
 public:
   /// A Context consists of the reducer, and the current continuation.
-  class ContextT : public DefaultContext<CFGRewriteReducer> {
+  class ContextT : public DefaultContext<ContextT, CFGRewriteReducer> {
   public:
     ContextT(CFGRewriteReducer *R, BasicBlock *C)
       : DefaultContext(R), Continuation(C)
     { }
+
+    bool insideCFG() { return get()->currentBB_; }
+    BasicBlock* continuation() { return Continuation; }
+
+    ContextT getCurrentContinuation() {
+      if (Continuation)
+        return *this;
+      else
+        return ContextT(get(), get()->makeContinuation());
+    }
+
 
     /// Pass the continuation only to SExprs in tail position.
     ContextT sub(TraversalKind K) const {
@@ -98,16 +109,14 @@ public:
     template<class T>
     T* castResult(T** E, SExpr* Result) { return cast<T>(Result); }
 
-    ContextT getCurrentContinuation() {
-      if (Continuation)
-        return *this;
-      else
-        return ContextT(get(), get()->makeContinuation());
+
+    void enterScope(VarDecl* Orig, VarDecl* Nvd) {
+      return get()->enterScope(Orig, Nvd);
     }
 
-    bool insideCFG() { return get()->currentBB_; }
-
-    BasicBlock* continuation() { return Continuation; }
+    void exitScope(VarDecl* Orig) {
+      return get()->exitScope(Orig);
+    }
 
   private:
     friend class CFGRewriteReducer;
