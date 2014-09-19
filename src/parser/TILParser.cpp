@@ -232,7 +232,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_SFunction: {
       assert(arity == 2);
       Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(copyStr(t->string()));
+      auto* v = new (arena_) VarDecl(copyStr(t->string()), nullptr);
       auto* e = new (arena_) Function(v, sexpr(1));
       delete t;
       return ParseResult(TILP_SExpr, e);

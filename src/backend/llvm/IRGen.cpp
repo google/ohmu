@@ -18,29 +18,34 @@
 #include "backend/llvm/IRGen.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 
+
+#include <cstddef>
+
+
 namespace ohmu {
 namespace backend_llvm {
 
-// Map ohmu IR types to LLVM Types.
+// Map SExpr* to llvm::Value* in general.
 template <class T> struct LLVMTypeMap { typedef llvm::Value* Ty; };
 
-// These kinds of SExpr must map to the same kind.
+// Map other types, e.g. BasicBlock* to llvm::BasicBlock*.
 // We define these here b/c template specializations cannot be class members.
 template<> struct LLVMTypeMap<Phi>        { typedef llvm::PHINode*    Ty; };
 template<> struct LLVMTypeMap<BasicBlock> { typedef llvm::BasicBlock* Ty; };
 template<> struct LLVMTypeMap<SCFG>       { typedef llvm::Function*   Ty; };
 
 
-/// The LLVMReducer maps SExpr* to Value*
 class LLVMReducerMap {
 public:
   template <class T> struct TypeMap : public LLVMTypeMap<T> { };
+  typedef std::nullptr_t NullType;
+
+  // default result of all undefined reduce methods.
+  static NullType reduceNull() { return nullptr; }
 };
 
 
-class LLVMReducer
-    : public LLVMReducerMap,
-      public DefaultReducer<LLVMReducer, LLVMReducerMap> {
+class LLVMReducer : public DefaultReadReducer<LLVMReducer, LLVMReducerMap> {
 public:
   LLVMReducer() :  currentFunction_(nullptr), builder_(ctx()) {
     // The module holds all of the llvm output.
@@ -55,34 +60,25 @@ public:
   llvm::Module* module() { return outModule_; }
 
 public:
-  class ContextT : public DefaultContext<ContextT, LLVMReducer> {
-  public:
-    ContextT(LLVMReducer* R) : DefaultContext(R) { }
+  template <class T>
+  llvm::Value* exitSubExpr(T *e, llvm::Value* v, TraversalKind K) {
+    if (Instruction *inst = e->asCFGInstruction())
+      currentValues_[inst->id()] = v;
+    return v;
+  }
+  llvm::PHINode* exitSubExpr(Phi *e, llvm::Value* v, TraversalKind K) {
+    return llvm::cast<llvm::PHINode>(v);
+  }
+  llvm::BasicBlock* exitSubExpr(BasicBlock *e, llvm::BasicBlock* v,
+                                TraversalKind K) {
+    return v;
+  }
 
-    template<class T>
-    llvm::Value* handleResult(T **e, llvm::Value* v, TraversalKind k) {
-      if (k != TRV_Weak) {
-        T* se = *e;
-        if (se->block())
-          get()->currentValues_[se->id()] = v;
-      }
-      return v;
-    }
-
-    llvm::BasicBlock*
-    handleResult(BasicBlock **e, llvm::BasicBlock* v, TraversalKind k) {
-      return v;
-    }
-  };
-
-  // default result of all undefined reduce methods.
-  std::nullptr_t reduceNull() { return nullptr; }
-
-  llvm::Value* reduceWeakInstr(SExpr* e) {
+  llvm::Value* reduceWeak(Instruction* e) {
     return currentValues_[e->id()];
   }
 
-  llvm::BasicBlock* reduceWeakBasicBlock(BasicBlock* b) {
+  llvm::BasicBlock* reduceWeak(BasicBlock* b) {
     auto *lbb = currentBlocks_[b->blockID()];
     if (!lbb) {
       if (!currentFunction_)
@@ -176,12 +172,11 @@ public:
     if (!v)
       return;
     BasicBlock* bb = orig.block();
-    auto* lbb = reduceWeakBasicBlock(bb->predecessors()[i]);
+    auto* lbb = reduceWeak(bb->predecessors()[i]);
     lph->addIncoming(v, lbb);
   }
 
-  llvm::Value* reduceGoto(Goto& orig, llvm::BasicBlock* target) {
-    auto* lbb = reduceWeakBasicBlock(orig.targetBlock());
+  llvm::Value* reduceGoto(Goto& orig, llvm::BasicBlock* lbb) {
     builder_.CreateBr(lbb);
     return nullptr;
   }
@@ -198,7 +193,7 @@ public:
   }
 
   llvm::BasicBlock* reduceBasicBlockBegin(BasicBlock &orig) {
-    auto* lbb = reduceWeakBasicBlock(&orig);
+    auto* lbb = reduceWeak(&orig);
     builder_.SetInsertPoint(lbb);
     return lbb;
   }
@@ -244,7 +239,7 @@ class IRGen : public Traversal<IRGen, LLVMReducer> { };
 void generate_LLVM_IR(SExpr* E) {
   IRGen Traverser;
   LLVMReducer Reducer;
-  Traverser.traverse(&E, &Reducer);
+  Traverser.traverse(E, &Reducer, TRV_Tail);
   // Reducer.module()->dump();
 }
 

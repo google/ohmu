@@ -29,28 +29,12 @@ namespace threadSafety {
 namespace til {
 
 
-class SimpleVisitReducer : public VisitReducer<SimpleVisitReducer> { };
+class SimpleVisitor : public VisitReducer<SimpleVisitor> { };
 
-class SimpleVisitor
-  : public VisitTraversal<SimpleVisitor, SimpleVisitReducer> { };
-
-
-class SimpleCopyReducer : public CopyReducerBase {
-public:
-  class ContextT : public CopyContext<ContextT, SimpleCopyReducer> {
-  public:
-    ContextT(SimpleCopyReducer *R) : CopyContext(R) { }
-  };
-};
-
-class SimpleCopier
-  : public CopyTraversal<SimpleCopier, SimpleCopyReducer> { };
-
-
-void test(SExpr* E, MemRegionRef A) {
+void test(SExpr* E) {
   SimpleVisitor::visit(E);
-  SimpleCopier::rewrite(E, A);
 }
+
 
 }  // end namespace til
 }  // end namespace threadSafety

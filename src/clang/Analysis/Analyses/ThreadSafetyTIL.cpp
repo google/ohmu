@@ -125,7 +125,7 @@ SExpr *simplifyToCanonicalVal(SExpr *E) {
         return V;
       // Eliminate redundant variables, e.g. x = y, or x = 5,
       // but keep anything more complicated.
-      if (til::ThreadSafetyTIL::isTrivial(V->definition())) {
+      if (V->definition()->isTrivial()) {
         E = V->definition();
         continue;
       }

@@ -271,13 +271,14 @@ inline ValueType ValueType::getValueType<void*>() {
 
 #define DECLARE_TRAVERSE_AND_COMPARE(X)                       \
   template <class V>                                          \
-  MAPTYPE(V::RedT, X) traverse(V &Vs, typename V::CtxT Ctx);  \
+  MAPTYPE(V::RedT, X) traverse(V &Vs, typename V::RedT *R);   \
                                                               \
   template <class C>                                          \
   typename C::CType compare(const X* E, C& Cmp) const;
 
 
 class BasicBlock;
+class Instruction;
 
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {
@@ -285,6 +286,18 @@ public:
   static const unsigned InvalidSExprID = 0xFFFFFFFF;
 
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
+
+  /// Return true if this is a trivial SExpr (constant or variable).
+  bool isTrivial() {
+    return Opcode == COP_Literal || Opcode == COP_LiteralPtr;
+  }
+
+  /// Cast this SExpr to a CFG instruction, or return null if it is not one.
+  Instruction* asCFGInstruction();
+
+  const Instruction* asCFGInstruction() const {
+    return const_cast<SExpr*>(this)->asCFGInstruction();
+  }
 
   // Subclasses of SExpr must define the following:
   //
@@ -309,32 +322,15 @@ public:
   // with REQUIRES_EH=1.
   void operator delete(void *) LLVM_DELETED_FUNCTION;
 
-  /// Returns the instruction ID for this expression.
-  /// All basic block instructions have a unique ID (i.e. virtual register).
-  size_t id() const { return SExprID; }
-
-  /// Returns the block, if this is an instruction in a basic block,
-  /// otherwise returns null.
-  BasicBlock* block() const { return Block; }
-
-  /// Set the basic block and instruction ID for this expression.
-  void setID(BasicBlock *B, size_t id) { Block = B; SExprID = id; }
-
-  /// Set the basic block for this expression
-  void setBlock(BasicBlock *B) { Block = B; }
-
 protected:
   SExpr(TIL_Opcode Op)
-    : Opcode(Op), Reserved(0), Flags(0), SExprID(0), Block(nullptr) {}
+    : Opcode(Op), Reserved(0), Flags(0) {}
   SExpr(const SExpr &E)
-    : Opcode(E.Opcode), Reserved(0), Flags(E.Flags), SExprID(0),
-      Block(nullptr) {}
+    : Opcode(E.Opcode), Reserved(0), Flags(E.Flags) {}
 
   const unsigned char Opcode;
   unsigned char Reserved;
   unsigned short Flags;
-  unsigned     SExprID;
-  BasicBlock*  Block;
 
 private:
   SExpr() LLVM_DELETED_FUNCTION;
@@ -344,105 +340,11 @@ private:
 };
 
 
-/// Instructions are expressions that can appear in basic blocks
-class Instruction : public SExpr {
-public:
-  static bool classof(const SExpr *E) {
-    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Phi;
-  }
-
-  Instruction(TIL_Opcode Op)
-    : SExpr(Op), ValType(ValueType::getValueType<void>())
-  {}
-  Instruction(const Instruction &E)
-    : SExpr(E), ValType(ValueType::getValueType<void>())
-  {}
-
-private:
-  ValueType ValType;
-};
-
-
-
-// Contains various helper functions for SExprs.
-namespace ThreadSafetyTIL {
-  inline bool isTrivial(const SExpr *E) {
-    unsigned Op = E->opcode();
-    return Op == COP_Literal || Op == COP_LiteralPtr;
-  }
-}
 
 // Nodes which declare variables
 class Function;
 class SFunction;
 class Let;
-
-
-template <class T> class LiteralT;
-
-// Base class for literal values.
-class Literal : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
-
-  Literal(const clang::Expr *C)
-     : SExpr(COP_Literal), ValType(ValueType::getValueType<void>()), Cexpr(C)
-  { }
-  Literal(ValueType VT) : SExpr(COP_Literal), ValType(VT), Cexpr(nullptr) {}
-  Literal(const Literal &L) : SExpr(L), ValType(L.ValType), Cexpr(L.Cexpr) {}
-
-  // The clang expression for this literal.
-  const clang::Expr *clangExpr() const { return Cexpr; }
-
-  ValueType valueType() const { return ValType; }
-
-  template<class T> const LiteralT<T>& as() const {
-    return *static_cast<const LiteralT<T>*>(this);
-  }
-  template<class T> LiteralT<T>& as() {
-    return *static_cast<LiteralT<T>*>(this);
-  }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Literal)
-
-private:
-  const ValueType ValType;
-  const clang::Expr *Cexpr;
-};
-
-
-// Derived class for literal values, which stores the actual value.
-template<class T>
-class LiteralT : public Literal {
-public:
-  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
-  LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
-
-  T  value() const { return Val;}
-  T& value() { return Val; }
-
-private:
-  T Val;
-};
-
-
-/// A Literal pointer to an object allocated in memory.
-/// At compile time, pointer literals are represented by symbolic names.
-class LiteralPtr : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_LiteralPtr; }
-
-  LiteralPtr(const clang::ValueDecl *D) : SExpr(COP_LiteralPtr), Cvdecl(D) {}
-  LiteralPtr(const LiteralPtr &R) : SExpr(R), Cvdecl(R.Cvdecl) {}
-
-  // The clang declaration for the value that this pointer points to.
-  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(LiteralPtr)
-
-private:
-  const clang::ValueDecl *Cvdecl;
-};
 
 
 /// A declaration for a named variable.
@@ -460,17 +362,12 @@ public:
     VK_SFun  ///< SFunction (self) parameter
   };
 
-  VarDecl(StringRef s, SExpr *D = nullptr)
-      : SExpr(COP_VarDecl), Name(s), Definition(D), Cvdecl(nullptr) {
-    Flags = VK_Let;
-  }
-  VarDecl(SExpr *D, const clang::ValueDecl *Cvd = nullptr)
-      : SExpr(COP_VarDecl), Name(Cvd ? Cvd->getName() : "_x"),
-        Definition(D), Cvdecl(Cvd) {
+  VarDecl(StringRef s, SExpr *D)
+      : SExpr(COP_VarDecl), Name(s), Definition(D) {
     Flags = VK_Let;
   }
   VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
-      : SExpr(Vd), Name(Vd.Name), Definition(D), Cvdecl(Vd.Cvdecl) {
+      : SExpr(Vd), Name(Vd.Name), Definition(D) {
     Flags = Vd.kind();
   }
 
@@ -479,9 +376,6 @@ public:
 
   /// Return the name of the variable, if any.
   StringRef name() const { return Name; }
-
-  /// Return the clang declaration for this variable, if any.
-  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
 
   /// Return the definition of the variable.
   /// For let-vars, this is the setting expression.
@@ -492,7 +386,6 @@ public:
   void setName(StringRef S)    { Name = S;  }
   void setKind(VariableKind K) { Flags = K; }
   void setDefinition(SExpr *E) { Definition = E; }
-  void setClangDecl(const clang::ValueDecl *VD) { Cvdecl = VD; }
 
   DECLARE_TRAVERSE_AND_COMPARE(VarDecl)
 
@@ -502,15 +395,14 @@ private:
   friend class BasicBlock;
   friend class Let;
 
-  StringRef Name;                  // The name of the variable.
-  SExpr*    Definition;            // The TIL type or definition
-  const clang::ValueDecl *Cvdecl;  // The clang declaration for this variable.
+  StringRef Name;          // The name of the variable.
+  SExpr*    Definition;    // The TIL type or definition
 };
 
 
 /// A function -- a.k.a. lambda abstraction.
 /// Functions with multiple arguments are created by currying,
-/// e.g. (Function (x: Int) (Function (y: Int) (Code { return x + y })))
+/// e.g. (Function (x: Int) (Function (y: Int) (Code { return x + y; })))
 class Function : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Function; }
@@ -618,18 +510,139 @@ private:
 };
 
 
+
+/// Instructions are expressions with computational effect that can appear
+/// inside basic blocks.
+class Instruction : public SExpr {
+public:
+  static bool classof(const SExpr *E) {
+    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Phi;
+  }
+
+  Instruction(TIL_Opcode Op, ValueType VT = ValueType::getValueType<void>())
+      : SExpr(Op), ValType(VT), SExprID(0), Depth(0), Block(nullptr),
+        Name("", 0) { }
+  Instruction(const Instruction &E)
+      : SExpr(E), ValType(E.ValType),
+        SExprID(0), Depth(0), Block(nullptr), Name(E.Name) { }
+
+  /// Return the type of this instruction
+  ValueType valueType() const { return ValType; }
+
+  /// Returns the instruction ID for this expression.
+  /// All basic block instructions have an ID that is unique within the CFG.
+  unsigned id() const { return SExprID; }
+
+  /// Returns the depth of this instruction on the stack.
+  /// This is used when interpreting a program using a stack machine.
+  unsigned depth() const { return Depth; }
+
+  /// Returns the block, if this is an instruction in a basic block,
+  /// otherwise returns null.
+  BasicBlock* block() const { return Block; }
+
+  /// Return the name (if any) of this instruction.
+  StringRef name() const { return Name; }
+
+  /// Set the basic block and instruction ID for this instruction.
+  void setID(BasicBlock *B, unsigned id) { Block = B; SExprID = id; }
+
+  /// Set the basic block for this instruction.
+  void setBlock(BasicBlock *B) { Block = B; }
+
+  /// Set the depth for this instruction.
+  void setDepth(unsigned D) { Depth = D; }
+
+  /// Sets the name of this instructions.
+  void setName(StringRef N) { Name = N; }
+
+protected:
+  ValueType    ValType;
+  unsigned     SExprID;
+  unsigned     Depth;
+  BasicBlock*  Block;
+  StringRef    Name;
+};
+
+
+inline Instruction* SExpr::asCFGInstruction() {
+  Instruction* I = dyn_cast<Instruction>(this);
+  if (I && I->block())
+    return I;
+  return nullptr;
+}
+
+
+template <class T> class LiteralT;
+
+/// Base class for literal values.
+class Literal : public Instruction {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
+
+  Literal(ValueType VT) : Instruction(COP_Literal, VT)  { }
+  Literal(const Literal &L) : Instruction(L) { }
+
+  template<class T> const LiteralT<T>& as() const {
+    return *static_cast<const LiteralT<T>*>(this);
+  }
+  template<class T> LiteralT<T>& as() {
+    return *static_cast<LiteralT<T>*>(this);
+  }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Literal)
+};
+
+
+/// Derived class for literal values, which stores the actual value.
+template<class T>
+class LiteralT : public Literal {
+public:
+  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
+  LiteralT(const LiteralT<T> &L) : Literal(L), Val(L.Val) { }
+
+  T  value() const { return Val;}
+  T& value() { return Val; }
+
+private:
+  T Val;
+};
+
+
+/// A Literal pointer to an object allocated in memory.
+/// At compile time, pointer literals are represented by symbolic names.
+class LiteralPtr : public Instruction {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_LiteralPtr; }
+
+  LiteralPtr(const clang::ValueDecl *D)
+     : Instruction(COP_LiteralPtr), Cvdecl(D) { }
+  LiteralPtr(const LiteralPtr &R)
+     : Instruction(R), Cvdecl(R.Cvdecl) { }
+
+  // The clang declaration for the value that this pointer points to.
+  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(LiteralPtr)
+
+private:
+  const clang::ValueDecl *Cvdecl;
+};
+
+
+
 /// Apply an argument to a function.
 /// Note that this does not actually call the function.  Functions are curried,
 /// so this returns a closure in which the first parameter has been applied.
 /// Once all parameters have been applied, Call can be used to invoke the
 /// function.
-class Apply : public SExpr {
+class Apply : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Apply; }
 
-  Apply(SExpr *F, SExpr *A) : SExpr(COP_Apply), Fun(F), Arg(A) {}
+  Apply(SExpr *F, SExpr *A) : Instruction(COP_Apply), Fun(F), Arg(A) {}
   Apply(const Apply &A, SExpr *F, SExpr *Ar)  // rewrite constructor
-      : SExpr(A), Fun(F), Arg(Ar)
+      : Instruction(A), Fun(F), Arg(Ar)
   {}
 
   SExpr *fun() { return Fun; }
@@ -647,13 +660,14 @@ private:
 
 
 /// Apply a self-argument to a self-applicable function.
-class SApply : public SExpr {
+class SApply : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_SApply; }
 
-  SApply(SExpr *Sf, SExpr *A = nullptr) : SExpr(COP_SApply), Sfun(Sf), Arg(A) {}
+  SApply(SExpr *Sf, SExpr *A = nullptr)
+      : Instruction(COP_SApply), Sfun(Sf), Arg(A) {}
   SApply(SApply &A, SExpr *Sf, SExpr *Ar = nullptr) // rewrite constructor
-      : SExpr(A), Sfun(Sf), Arg(Ar) {}
+      : Instruction(A), Sfun(Sf), Arg(Ar) {}
 
   SExpr *sfun() { return Sfun; }
   const SExpr *sfun() const { return Sfun; }
@@ -671,20 +685,18 @@ private:
 };
 
 
-/// Project a named slot from a C++ struct or class.
-class Project : public SExpr {
+/// Project a named slot from a record.  (Struct or class.)
+class Project : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Project; }
 
   Project(SExpr *R, StringRef SName)
-      : SExpr(COP_Project), Rec(R), SlotName(SName), Cvdecl(nullptr)
-  { }
+      : Instruction(COP_Project), Rec(R), SlotName(SName), Cvdecl(nullptr) { }
   Project(SExpr *R, const clang::ValueDecl *Cvd)
-      : SExpr(COP_Project), Rec(R), SlotName(Cvd->getName()), Cvdecl(Cvd)
+      : Instruction(COP_Project), Rec(R), SlotName(Cvd->getName()), Cvdecl(Cvd)
   { }
   Project(const Project &P, SExpr *R)
-      : SExpr(P), Rec(R), SlotName(P.SlotName), Cvdecl(P.Cvdecl)
-  { }
+      : Instruction(P), Rec(R), SlotName(P.SlotName), Cvdecl(P.Cvdecl) { }
 
   SExpr *record() { return Rec; }
   const SExpr *record() const { return Rec; }
@@ -714,29 +726,25 @@ private:
 
 
 /// Call a function (after all arguments have been applied).
-class Call : public SExpr {
+class Call : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Call; }
 
-  Call(SExpr *T, const clang::CallExpr *Ce = nullptr)
-      : SExpr(COP_Call), Target(T), Cexpr(Ce) {}
-  Call(const Call &C, SExpr *T) : SExpr(C), Target(T), Cexpr(C.Cexpr) {}
+  Call(SExpr *T) : Instruction(COP_Call), Target(T) { }
+  Call(const Call &C, SExpr *T) : Instruction(C), Target(T) { }
 
   SExpr *target() { return Target; }
   const SExpr *target() const { return Target; }
-
-  const clang::CallExpr *clangCallExpr() const { return Cexpr; }
 
   DECLARE_TRAVERSE_AND_COMPARE(Call)
 
 private:
   SExpr* Target;
-  const clang::CallExpr *Cexpr;
 };
 
 
 /// Allocate memory for a new value on the heap or stack.
-class Alloc : public SExpr {
+class Alloc : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Call; }
 
@@ -745,8 +753,15 @@ public:
     AK_Heap
   };
 
-  Alloc(SExpr *D, AllocKind K) : SExpr(COP_Alloc), Dtype(D) { Flags = K; }
-  Alloc(const Alloc &A, SExpr *Dt) : SExpr(A), Dtype(Dt) { Flags = A.kind(); }
+  Alloc(SExpr *D, AllocKind K)
+      : Instruction(COP_Alloc), Dtype(D) {
+    Flags = K;
+  }
+
+  Alloc(const Alloc &A, SExpr *Dt)
+      : Instruction(A), Dtype(Dt) {
+    Flags = A.kind();
+  }
 
   AllocKind kind() const { return static_cast<AllocKind>(Flags); }
 
@@ -761,12 +776,12 @@ private:
 
 
 /// Load a value from memory.
-class Load : public SExpr {
+class Load : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Load; }
 
-  Load(SExpr *P) : SExpr(COP_Load), Ptr(P) {}
-  Load(const Load &L, SExpr *P) : SExpr(L), Ptr(P) {}
+  Load(SExpr *P) : Instruction(COP_Load), Ptr(P) {}
+  Load(const Load &L, SExpr *P) : Instruction(L), Ptr(P) {}
 
   SExpr *pointer() { return Ptr; }
   const SExpr *pointer() const { return Ptr; }
@@ -780,12 +795,14 @@ private:
 
 /// Store a value to memory.
 /// The destination is a pointer to a field, the source is the value to store.
-class Store : public SExpr {
+class Store : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Store; }
 
-  Store(SExpr *P, SExpr *V) : SExpr(COP_Store), Dest(P), Source(V) {}
-  Store(const Store &S, SExpr *P, SExpr *V) : SExpr(S), Dest(P), Source(V) {}
+  Store(SExpr *P, SExpr *V)
+      : Instruction(COP_Store), Dest(P), Source(V) {}
+  Store(const Store &S, SExpr *P, SExpr *V)
+      : Instruction(S), Dest(P), Source(V) {}
 
   SExpr *destination() { return Dest; }  // Address to store to
   const SExpr *destination() const { return Dest; }
@@ -803,13 +820,14 @@ private:
 
 /// If p is a reference to an array, then p[i] is a reference to the i'th
 /// element of the array.
-class ArrayIndex : public SExpr {
+class ArrayIndex : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_ArrayIndex; }
 
-  ArrayIndex(SExpr *A, SExpr *N) : SExpr(COP_ArrayIndex), Array(A), Index(N) {}
+  ArrayIndex(SExpr *A, SExpr *N)
+      : Instruction(COP_ArrayIndex), Array(A), Index(N) {}
   ArrayIndex(const ArrayIndex &E, SExpr *A, SExpr *N)
-    : SExpr(E), Array(A), Index(N) {}
+      : Instruction(E), Array(A), Index(N) {}
 
   SExpr *array() { return Array; }
   const SExpr *array() const { return Array; }
@@ -828,13 +846,14 @@ private:
 /// Pointer arithmetic, restricted to arrays only.
 /// If p is a reference to an array, then p + n, where n is an integer, is
 /// a reference to a subarray.
-class ArrayAdd : public SExpr {
+class ArrayAdd : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_ArrayAdd; }
 
-  ArrayAdd(SExpr *A, SExpr *N) : SExpr(COP_ArrayAdd), Array(A), Index(N) {}
+  ArrayAdd(SExpr *A, SExpr *N)
+      : Instruction(COP_ArrayAdd), Array(A), Index(N) {}
   ArrayAdd(const ArrayAdd &E, SExpr *A, SExpr *N)
-    : SExpr(E), Array(A), Index(N) {}
+      : Instruction(E), Array(A), Index(N) {}
 
   SExpr *array() { return Array; }
   const SExpr *array() const { return Array; }
@@ -852,14 +871,16 @@ private:
 
 /// Simple arithmetic unary operations, e.g. negate and not.
 /// These operations have no side-effects.
-class UnaryOp : public SExpr {
+class UnaryOp : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_UnaryOp; }
 
-  UnaryOp(TIL_UnaryOpcode Op, SExpr *E) : SExpr(COP_UnaryOp), Expr0(E) {
+  UnaryOp(TIL_UnaryOpcode Op, SExpr *E) : Instruction(COP_UnaryOp), Expr0(E) {
     Flags = Op;
   }
-  UnaryOp(const UnaryOp &U, SExpr *E) : SExpr(U), Expr0(E) { Flags = U.Flags; }
+  UnaryOp(const UnaryOp &U, SExpr *E) : Instruction(U), Expr0(E) {
+    Flags = U.Flags;
+  }
 
   TIL_UnaryOpcode unaryOpcode() const {
     return static_cast<TIL_UnaryOpcode>(Flags);
@@ -877,16 +898,16 @@ private:
 
 /// Simple arithmetic binary operations, e.g. +, -, etc.
 /// These operations have no side effects.
-class BinaryOp : public SExpr {
+class BinaryOp : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_BinaryOp; }
 
   BinaryOp(TIL_BinaryOpcode Op, SExpr *E0, SExpr *E1)
-      : SExpr(COP_BinaryOp), Expr0(E0), Expr1(E1) {
+      : Instruction(COP_BinaryOp), Expr0(E0), Expr1(E1) {
     Flags = Op;
   }
   BinaryOp(const BinaryOp &B, SExpr *E0, SExpr *E1)
-      : SExpr(B), Expr0(E0), Expr1(E1) {
+      : Instruction(B), Expr0(E0), Expr1(E1) {
     Flags = B.Flags;
   }
 
@@ -911,12 +932,16 @@ private:
 /// Cast expressions.
 /// Cast expressions are essentially unary operations, but we treat them
 /// as a distinct AST node because they only change the type of the result.
-class Cast : public SExpr {
+class Cast : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Cast; }
 
-  Cast(TIL_CastOpcode Op, SExpr *E) : SExpr(COP_Cast), Expr0(E) { Flags = Op; }
-  Cast(const Cast &C, SExpr *E) : SExpr(C), Expr0(E) { Flags = C.Flags; }
+  Cast(TIL_CastOpcode Op, SExpr *E) : Instruction(COP_Cast), Expr0(E) {
+      Flags = Op;
+  }
+  Cast(const Cast &C, SExpr *E) : Instruction(C), Expr0(E) {
+      Flags = C.Flags;
+  }
 
   TIL_CastOpcode castOpcode() const {
     return static_cast<TIL_CastOpcode>(Flags);
@@ -938,7 +963,7 @@ class SCFG;
 /// Phi Node, for code in SSA form.
 /// Each Phi node has an array of possible values that it can take,
 /// depending on where control flow comes from.
-class Phi : public SExpr {
+class Phi : public Instruction {
 public:
   typedef SimpleArray<SExpr *> ValArray;
 
@@ -954,42 +979,40 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
 
   Phi()
-    : SExpr(COP_Phi), Cvdecl(nullptr) {}
-  Phi(MemRegionRef A, unsigned Nvals)
-    : SExpr(COP_Phi), Values(A, Nvals), Cvdecl(nullptr)  {}
-  Phi(const Phi &Ph, MemRegionRef A)
-    : SExpr(Ph), Values(A, Ph.values().size()), Cvdecl(Ph.Cvdecl) { }
+      : Instruction(COP_Phi), LocalVar(nullptr) { }
+  Phi(MemRegionRef A, unsigned Nvals, Alloc* Lv = nullptr)
+      : Instruction(COP_Phi), Values(A, Nvals), LocalVar(Lv)  { }
+  Phi(const Phi &Ph, MemRegionRef A, Alloc* Lv = nullptr)
+      : Instruction(Ph), Values(A, Ph.values().size()), LocalVar(Lv) { }
 
+  /// Return the array of Phi arguments
   const ValArray &values() const { return Values; }
   ValArray &values() { return Values; }
 
+  const Alloc* localVar() const { return LocalVar; }
+  Alloc* localVar() { return LocalVar; }
+
   Status status() const { return static_cast<Status>(Flags); }
   void setStatus(Status s) { Flags = s; }
-
-  /// Return the clang declaration of the variable for this Phi node, if any.
-  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
-
-  /// Set the clang variable associated with this Phi node.
-  void setClangDecl(const clang::ValueDecl *Cvd) { Cvdecl = Cvd; }
 
   DECLARE_TRAVERSE_AND_COMPARE(Phi)
 
 private:
   ValArray Values;
-  const clang::ValueDecl* Cvdecl;
+  Alloc* LocalVar;   // The alloc of the associates local variable, if any.
 };
 
 
 /// Base class for basic block terminators:  Branch, Goto, and Return.
-class Terminator : public SExpr {
+class Terminator : public Instruction {
 public:
   static bool classof(const SExpr *E) {
     return E->opcode() >= COP_Goto && E->opcode() <= COP_Return;
   }
 
 protected:
-  Terminator(TIL_Opcode Op)  : SExpr(Op) {}
-  Terminator(const SExpr &E) : SExpr(E)  {}
+  Terminator(TIL_Opcode Op) : Instruction(Op) { }
+  Terminator(const Instruction &E) : Instruction(E) { }
 
 public:
   /// Return the list of basic blocks that this terminator can branch to.
@@ -1116,8 +1139,9 @@ inline ArrayRef<BasicBlock*> Terminator::successors() {
 /// another basic block in the same SCFG.
 class BasicBlock : public SExpr {
 public:
-  typedef SimpleArray<SExpr*>      InstrArray;
-  typedef SimpleArray<BasicBlock*> BlockArray;
+  typedef SimpleArray<Phi*>          ArgArray;
+  typedef SimpleArray<Instruction*>  InstrArray;
+  typedef SimpleArray<BasicBlock*>   BlockArray;
 
   static const unsigned InvalidBlockID = 0x0FFFFFFF;
 
@@ -1147,11 +1171,11 @@ public:
 
   explicit BasicBlock(MemRegionRef A)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        Visited(0), TermInstr(nullptr) {}
+        TermInstr(nullptr), Depth(0), LoopDepth(0), Visited(false) { }
   BasicBlock(BasicBlock &B, MemRegionRef A)
-      : SExpr(B), Arena(A), CFGPtr(nullptr), BlockID(0), Visited(0),
+      : SExpr(B), Arena(A), CFGPtr(nullptr), BlockID(0),
         Args(A, B.Args.size()), Instrs(A, B.Instrs.size()),
-        TermInstr(nullptr) {}
+        TermInstr(nullptr), Depth(0), LoopDepth(0), Visited(false) { }
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
   size_t blockID() const { return BlockID; }
@@ -1167,8 +1191,8 @@ public:
   const BasicBlock *parent() const { return DominatorNode.Parent; }
   BasicBlock *parent() { return DominatorNode.Parent; }
 
-  const InstrArray &arguments() const { return Args; }
-  InstrArray &arguments() { return Args; }
+  const ArgArray &arguments() const { return Args; }
+  ArgArray &arguments() { return Args; }
 
   InstrArray &instructions() { return Instrs; }
   const InstrArray &instructions() const { return Instrs; }
@@ -1191,11 +1215,17 @@ public:
 
   void setTerminator(Terminator *E) { TermInstr = E; }
 
-  bool Dominates(const BasicBlock &Other) {
+  unsigned depth() const { return Depth; }
+  void setDepth(unsigned D) { Depth = D; }
+
+  unsigned loopDepth() const { return LoopDepth; }
+  void setLoopDepth(unsigned Ld) { LoopDepth = Ld; }
+
+  bool dominates(const BasicBlock &Other) {
     return DominatorNode.isParentOfOrEqual(Other.DominatorNode);
   }
 
-  bool PostDominates(const BasicBlock &Other) {
+  bool postDominates(const BasicBlock &Other) {
     return PostDominatorNode.isParentOfOrEqual(Other.PostDominatorNode);
   }
 
@@ -1206,7 +1236,7 @@ public:
     V->setBlock(this);
   }
   /// Add a new instruction.
-  void addInstruction(SExpr *V) {
+  void addInstruction(Instruction *V) {
     Instrs.reserveCheck(1, Arena);
     Instrs.push_back(V);
     V->setBlock(this);
@@ -1244,14 +1274,17 @@ private:
 private:
   MemRegionRef Arena;        // The arena used to allocate this block.
   SCFG         *CFGPtr;      // The CFG that contains this block.
-  unsigned     BlockID : 31; // unique id for this BB in the containing CFG.
+  unsigned     BlockID;      // unique id for this BB in the containing CFG.
                              // IDs are in topological order.
-  bool         Visited : 1;  // Bit to determine if a block has been visited
-                             // during a traversal.
   BlockArray  Predecessors;  // Predecessor blocks in the CFG.
-  InstrArray  Args;          // Phi nodes.  One argument per predecessor.
+  ArgArray    Args;          // Phi nodes.  One argument per predecessor.
   InstrArray  Instrs;        // Instructions.
   Terminator* TermInstr;     // Terminating instruction
+
+  unsigned     Depth;        // The instruction Depth of the first instruction.
+  unsigned     LoopDepth;    // The level of nesting within loops.
+  bool         Visited;      // Bit to determine if a block has been visited
+                             // during a traversal.
 
   TopologyNode DominatorNode;       // The dominator tree
   TopologyNode PostDominatorNode;   // The post-dominator tree
@@ -1309,12 +1342,12 @@ public:
 
   /// Return the number of blocks in the CFG.
   /// Block::blockID() will return a number less than numBlocks();
-  size_t numBlocks() const { return Blocks.size(); }
+  unsigned numBlocks() const { return static_cast<unsigned>(Blocks.size()); }
 
   /// Return the total number of instructions in the CFG.
   /// This is useful for building instruction side-tables;
   /// A call to SExpr::id() will return a number less than numInstructions().
-  size_t numInstructions() { return NumInstructions; }
+  unsigned numInstructions() { return NumInstructions; }
 
   inline void add(BasicBlock *BB) {
     assert(BB->CFGPtr == nullptr);
@@ -1338,7 +1371,7 @@ private:
   BlockArray   Blocks;
   BasicBlock   *Entry;
   BasicBlock   *Exit;
-  size_t       NumInstructions;
+  unsigned     NumInstructions;
   bool         Normal;
 };
 
@@ -1396,13 +1429,10 @@ class Undefined : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Undefined; }
 
-  Undefined(const clang::Stmt *S = nullptr) : SExpr(COP_Undefined), Cstmt(S) {}
-  Undefined(const Undefined &U) : SExpr(U), Cstmt(U.Cstmt) {}
+  Undefined() : SExpr(COP_Undefined) { }
+  Undefined(const Undefined &U) : SExpr(U) { }
 
   DECLARE_TRAVERSE_AND_COMPARE(Undefined)
-
-private:
-  const clang::Stmt *Cstmt;
 };
 
 

@@ -26,14 +26,63 @@ SExpr* VarContext::lookup(StringRef S) {
   for (unsigned i=0,n=Vars.size(); i < n; ++i) {
     VarDecl* V = Vars[n-i-1];
     if (V->name() == S) {
-      return V;
+      return V->definition();
     }
   }
   return nullptr;
 }
 
 
-void CFGRewriteReducer::startBlock(BasicBlock *BB) {
+void CFGRewriteReducer::enterScope(VarDecl *Orig, VarDecl *Nv) {
+  if (Orig->name().length() > 0) {
+    varCtx_.push(Nv);
+    if (currentBB_)
+      if (Instruction *I = Nv->definition()->asCFGInstruction())
+        if (I->name().length() == 0)
+          I->setName(Nv->name());
+  }
+}
+
+
+void CFGRewriteReducer::exitScope(const VarDecl *Orig) {
+  if (Orig->name().length() > 0) {
+    assert(Orig->name() == varCtx_.back()->name() && "Variable mismatch");
+    varCtx_.pop();
+  }
+}
+
+
+
+void CFGRewriteReducer::addInstruction(SExpr* E) {
+  if (E->isTrivial())
+    return;
+
+  if (Instruction* I = dyn_cast<Instruction>(E)) {
+    if (!I->block()) {
+      I->setID(currentBB_, currentInstrNum_++);
+      currentInstrs_.push_back(I);
+    }
+  }
+}
+
+
+BasicBlock* CFGRewriteReducer::addBlock() {
+  BasicBlock *B = new (Arena) BasicBlock(Arena);
+  B->setBlockID(currentBlockNum_++);
+  return B;
+}
+
+
+BasicBlock* CFGRewriteReducer::makeContinuation() {
+  auto *Ncb = addBlock();
+  auto *Nph = new (Arena) Phi();
+  Nph->setID(Ncb, currentInstrNum_++);
+  Ncb->addArgument(Nph);
+  return Ncb;
+}
+
+
+void CFGRewriteReducer::startBlock(BasicBlock *BB, BasicBlock *Cont) {
   assert(currentBB_ == nullptr && "Haven't finished current block.");
   assert(currentArgs_.empty());
   assert(currentInstrs_.empty());
@@ -42,6 +91,22 @@ void CFGRewriteReducer::startBlock(BasicBlock *BB) {
   currentBB_ = BB;
   if (!BB->cfg())
     currentCFG_->add(BB);
+  pushContinuation(Cont);
+}
+
+
+void CFGRewriteReducer::finishBlock(Terminator* Term) {
+  assert(currentBB_);
+  assert(currentBB_->instructions().size() == 0);
+
+  currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
+  for (auto *E : currentInstrs_) {
+    currentBB_->addInstruction(E);
+  }
+  currentBB_->setTerminator(Term);
+  currentArgs_.clear();
+  currentInstrs_.clear();
+  currentBB_ = nullptr;
 }
 
 
@@ -78,12 +143,12 @@ Goto* CFGRewriteReducer::createGoto(BasicBlock *Target, SExpr* Result) {
 }
 
 
-BasicBlock* CFGRewriteReducer::initCFG() {
+void CFGRewriteReducer::initCFG() {
   assert(currentCFG_ == nullptr && currentBB_ == nullptr);
   currentCFG_ = new (Arena) SCFG(Arena, 0);
   currentBB_ = currentCFG_->entry();
+  pushContinuation(currentCFG_->exit());
   assert(currentBB_->instructions().size() == 0);
-  return currentCFG_->exit();
 }
 
 
@@ -95,96 +160,44 @@ SCFG* CFGRewriteReducer::finishCFG() {
 }
 
 
-void CFGRewriteReducer::addLetDecl(VarDecl* Nv) {
-  // Set the block and ID now, to mark it as having been added.
-  Nv->setID(currentBB_, currentInstrNum_++);
-  if (currentInstrs_.size() > 0 &&
-      currentInstrs_.back() == Nv->definition() &&
-      !isa<VarDecl>(Nv->definition())) {
-    // Definition already in block -- replace old instr with let decl.
-    Nv->definition()->setID(nullptr, 0);
-    currentInstrs_.back() = Nv;
-  }
-  else {
-    currentInstrs_.push_back(Nv);
-  }
-}
 
-
-void CFGRewriteReducer::addInstruction(SExpr* E) {
-  if (!ThreadSafetyTIL::isTrivial(E) && !E->block()) {
-    // Set the block and ID now, to mark it as having been added.
-    // We won't actually add instructions until the block is done.
-    E->setID(currentBB_, currentInstrNum_++);
-    currentInstrs_.push_back(E);
-  }
-}
-
-
-BasicBlock* CFGRewriteReducer::addBlock() {
-  BasicBlock *B = new (Arena) BasicBlock(Arena);
-  B->setBlockID(currentBlockNum_++);
-  return B;
-}
-
-
-void CFGRewriteReducer::finishBlock(Terminator* Term) {
-  assert(currentBB_);
-  assert(currentBB_->instructions().size() == 0);
-
-  currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
-  for (auto *E : currentInstrs_) {
-    currentBB_->addInstruction(E);
-  }
-  currentBB_->setTerminator(Term);
-  currentArgs_.clear();
-  currentInstrs_.clear();
-  currentBB_ = nullptr;
-}
-
-
-BasicBlock* CFGRewriteReducer::makeContinuation() {
-  auto *Ncb = addBlock();
-  auto *Nph = new (Arena) Phi();
-  Ncb->setID(Ncb, currentInstrNum_++);
-  Ncb->addArgument(Nph);
-  return Ncb;
-}
-
-
-SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *E, CtxT Ctx,
+SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *E, CFGRewriteReducer *R,
                                        TraversalKind K) {
-  if (!Ctx.insideCFG()) {
+  if (!R->currentBB_) {
     // Just do a normal traversal if we're not currently rewriting in a CFG.
-    return E->traverse(*this->self(), Ctx);
+    return E->traverse(*this->self(), R);
   }
 
-  // Get the current continuation, or make one.
-  CtxT Cont = Ctx.getCurrentContinuation();
+  SExpr* cond = E->condition();
+  SExpr* Nc = this->self()->traverseDM(&cond, R);
 
   // End current block with a branch
-  SExpr*  cond = E->condition();
-  SExpr*  Nc = this->self()->traverse(&cond, Ctx);
-  Branch* Br = Ctx->createBranch(Nc);
+  BasicBlock* CurrCont = R->popContinuation();
+  Branch* Br = R->createBranch(Nc);
+
+  // If the continuation is null, then make a new one.
+  BasicBlock* Cont = CurrCont;
+  if (!Cont)
+    Cont = R->makeContinuation();
 
   // Process the then and else blocks
   SExpr* thenE = E->thenExpr();
-  Cont->startBlock(Br->thenBlock());
-  this->self()->traverse(&thenE, Cont, TRV_Tail);
+  R->startBlock(Br->thenBlock(), Cont);
+  this->self()->traverseDM(&thenE, R, TRV_Tail);
 
   SExpr* elseE = E->elseExpr();
-  Cont->startBlock(Br->elseBlock());
-  this->self()->traverse(&elseE, Cont, TRV_Tail);
+  R->startBlock(Br->elseBlock(), Cont);
+  this->self()->traverseDM(&elseE, R, TRV_Tail);
 
   // If we had an existing continuation, then we're done.
   // The then/else blocks will call the continuation.
-  if (Ctx.continuation())
+  if (CurrCont)
     return nullptr;
 
   // Otherwise, if we created a new continuation, then start processing it.
-  Cont->startBlock(Cont.continuation());
-  assert(Cont.continuation()->arguments().size() > 0);
-  return Cont.continuation()->arguments()[0];
+  R->startBlock(Cont, nullptr);
+  assert(Cont->arguments().size() > 0);
+  return Cont->arguments()[0];
 }
 
 
@@ -192,8 +205,8 @@ SCFG* CFGRewriter::convertSExprToCFG(SExpr *E, MemRegionRef A) {
   CFGRewriteReducer Reducer(A);
   CFGRewriter Traverser;
 
-  auto *Exit = Reducer.initCFG();
-  Traverser.traverse(&E, CtxT(&Reducer, Exit), TRV_Tail);
+  Reducer.initCFG();
+  Traverser.traverse(E, &Reducer, TRV_Tail);
   return Reducer.finishCFG();
 }
 

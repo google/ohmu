@@ -25,6 +25,7 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
+#include <cstddef>
 #include <vector>
 
 namespace ohmu {
@@ -35,6 +36,163 @@ using namespace clang::threadSafety::til;
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
   TILDebugPrinter() : PrettyPrinter(false, false) { }
+};
+
+
+/// Reducer class that builds a copy of an SExpr.
+class CopyReducerBase : public SExprReducerMap,
+                        public ReadReducer<SExprReducerMap> {
+public:
+  CopyReducerBase() {}
+  CopyReducerBase(MemRegionRef A) : Arena(A) { }
+
+  void setArena(MemRegionRef A) { Arena = A; }
+
+public:
+  Instruction* reduceWeak(Instruction* E)  { return nullptr; }
+  VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
+  BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
+
+  SExpr* reduceLiteral(Literal &Orig) {
+    return new (Arena) Literal(Orig);
+  }
+  template<class T>
+  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
+    return new (Arena) LiteralT<T>(Orig);
+  }
+  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
+    return new (Arena) LiteralPtr(Orig);
+  }
+
+  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
+    return new (Arena) VarDecl(Orig, E);
+  }
+  SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
+    return new (Arena) Function(Orig, Nvd, E0);
+  }
+  SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
+    return new (Arena) SFunction(Orig, Nvd, E0);
+  }
+  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) Code(Orig, E0, E1);
+  }
+  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) Field(Orig, E0, E1);
+  }
+
+  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) Apply(Orig, E0, E1);
+  }
+  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) SApply(Orig, E0, E1);
+  }
+  SExpr* reduceProject(Project &Orig, SExpr* E0) {
+    return new (Arena) Project(Orig, E0);
+  }
+  SExpr* reduceCall(Call &Orig, SExpr* E0) {
+    return new (Arena) Call(Orig, E0);
+  }
+  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
+    return new (Arena) Alloc(Orig, E0);
+  }
+  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
+    return new (Arena) Load(Orig, E0);
+  }
+  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) Store(Orig, E0, E1);
+  }
+  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) ArrayIndex(Orig, E0, E1);
+  }
+  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) ArrayAdd(Orig, E0, E1);
+  }
+  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
+    return new (Arena) UnaryOp(Orig, E0);
+  }
+  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
+    return new (Arena) BinaryOp(Orig, E0, E1);
+  }
+  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
+    return new (Arena) Cast(Orig, E0);
+  }
+
+  Phi* reducePhiBegin(Phi &Orig) {
+    return new (Arena) Phi(Orig, Arena);
+  }
+  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) {
+    Ph->values().push_back(E);
+  }
+  Phi* reducePhi(Phi* Ph) { return Ph; }
+
+  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
+    return new (Arena) Goto(Orig, B, 0);
+  }
+  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
+    return new (Arena) Branch(O, C, B0, B1);
+  }
+  SExpr* reduceReturn(Return &O, SExpr* E) {
+    return new (Arena) Return(O, E);
+  }
+
+
+  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
+    return new (Arena) BasicBlock(Orig, Arena);
+  }
+  void reduceBasicBlockArg(BasicBlock *BB, unsigned i, SExpr* E) {
+    if (Phi* Ph = dyn_cast<Phi>(E))
+      BB->addArgument(Ph);
+  }
+  void reduceBasicBlockInstr(BasicBlock *BB, unsigned i, SExpr* E) {
+    if (Instruction* I = dyn_cast<Instruction>(E))
+      BB->addInstruction(I);
+  }
+  void reduceBasicBlockTerm (BasicBlock *BB, SExpr* E) {
+    BB->setTerminator(dyn_cast<Terminator>(E));
+  }
+  BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
+
+
+  SCFG* reduceSCFGBegin(SCFG &Orig) {
+    return new (Arena) SCFG(Orig, Arena);
+  }
+  void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) {
+    Scfg->add(B);
+  }
+  SCFG* reduceSCFG(SCFG* Scfg) { return Scfg; }
+
+
+  SExpr* reduceUndefined(Undefined &Orig) {
+    return new (Arena) Undefined(Orig);
+  }
+  SExpr* reduceWildcard(Wildcard &Orig) {
+    return new (Arena) Wildcard(Orig);
+  }
+
+  SExpr* reduceIdentifier(Identifier &Orig) {
+    return new (Arena) Identifier(Orig);
+  }
+  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
+    return new (Arena) Let(Orig, Nvd, B);
+  }
+  SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
+    return new (Arena) IfThenElse(Orig, C, T, E);
+  }
+
+protected:
+  MemRegionRef Arena;
+};
+
+
+template<class Self, class ReducerT>
+class CopyTraversal : public Traversal<Self, ReducerT> {
+public:
+  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
+    Self Traverser;
+    ReducerT Reducer;
+    Reducer.setArena(A);
+    return Traverser.traverse(E, &Reducer, TRV_Tail);
+  }
 };
 
 
@@ -60,84 +218,48 @@ private:
 
 class CFGRewriteReducer : public CopyReducerBase {
 public:
-  /// A Context consists of the reducer, and the current continuation.
-  class ContextT : public DefaultContext<ContextT, CFGRewriteReducer> {
-  public:
-    ContextT(CFGRewriteReducer *R, BasicBlock *C)
-      : DefaultContext(R), Continuation(C)
-    { }
-
-    bool insideCFG() { return get()->currentBB_; }
-    BasicBlock* continuation() { return Continuation; }
-
-    ContextT getCurrentContinuation() {
-      if (Continuation)
-        return *this;
-      else
-        return ContextT(get(), get()->makeContinuation());
-    }
-
-
-    /// Pass the continuation only to SExprs in tail position.
-    ContextT sub(TraversalKind K) const {
-      if (K == TRV_Tail)
-        return *this;
-      else
-        return ContextT(get(), nullptr);
-    }
-
-    /// Handle the result of a traversal.
-    SExpr* handleResult(SExpr** E, SExpr* Result, TraversalKind K) {
-      if (!insideCFG())     // no current block
-        return Result;
-      get()->addInstruction(Result);
-
-      if (Continuation) {
-        // If we have a continuation, then terminate current block,
-        // and pass the result to the continuation.
-        get()->createGoto(Continuation, Result);
-        return nullptr;
-      }
-      return Result;
-    }
-
-    /// Handle traversals of more specialized types (e.g. BasicBlock, VarDecl)
-    template<class T>
-    T* handleResult(T** E, T* Result, TraversalKind K) { return Result; }
-
-    /// Cast a result to the appropriate type.
-    template<class T>
-    T* castResult(T** E, SExpr* Result) { return cast<T>(Result); }
-
-
-    void enterScope(VarDecl* Orig, VarDecl* Nvd) {
-      return get()->enterScope(Orig, Nvd);
-    }
-
-    void exitScope(VarDecl* Orig) {
-      return get()->exitScope(Orig);
-    }
-
-  private:
-    friend class CFGRewriteReducer;
-    BasicBlock* Continuation;
-  };
-
-
-  void enterScope(VarDecl *Orig, VarDecl *Nv) {
-    if (Orig->name().length() > 0) {
-      varCtx_.push(Nv);
-      if (currentBB_)
-        addLetDecl(Nv);
-    }
+  BasicBlock* currentContinuation() {
+    return continuationStack_.back();
   }
 
-  void exitScope(const VarDecl *Orig) {
-    if (Orig->name().length() > 0) {
-      assert(Orig->name() == varCtx_.back()->name() && "Variable mismatch");
-      varCtx_.pop();
-    }
+  void pushContinuation(BasicBlock* b) {
+    continuationStack_.push_back(b);
   }
+
+  BasicBlock* popContinuation() {
+    BasicBlock* b = continuationStack_.back();
+    continuationStack_.pop_back();
+    return b;
+  }
+
+  bool enterSubExpr(SExpr *E, TraversalKind K) {
+    if (K != TRV_Tail)
+      pushContinuation(nullptr);
+    return true;
+  }
+
+  template <class T>
+  T* exitSubExpr(SExpr *E, T* Res, TraversalKind K) {
+    if (!currentBB_)
+      return Res;
+
+    addInstruction(Res);
+
+    // If we have a continuation, then jump to it.
+    BasicBlock *b = popContinuation();
+    if (b) {
+      assert(K == TRV_Tail);
+      createGoto(b, Res);
+      return nullptr;
+    }
+    return Res;
+  }
+
+  std::nullptr_t skipTraverse(SExpr *E) { return nullptr; }
+
+
+  void enterScope(VarDecl *Orig, VarDecl *Nv);
+  void exitScope(const VarDecl *Orig);
 
   void enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) { }
   void exitBasicBlock (BasicBlock *BB) { }
@@ -163,7 +285,7 @@ public:
 
 
   /// Add BB to the current CFG, and start working on it.
-  void startBlock(BasicBlock *BB);
+  void startBlock(BasicBlock *BB, BasicBlock *Cont);
 
   /// Terminate the current block with a branch instruction.
   /// This will create new blocks for the branches.
@@ -174,16 +296,13 @@ public:
 
   /// Creates a new CFG.
   /// Returns the exit block, for use as a continuation.
-  BasicBlock* initCFG();
+  void initCFG();
 
   /// Completes the CFG and returns it.
   SCFG* finishCFG();
 
 
 protected:
-  // Add new let variable to the current basic block.
-  void addLetDecl(VarDecl* Nv);
-
   // Add a new instruction to the current basic block.
   void addInstruction(SExpr* E);
 
@@ -204,18 +323,20 @@ public:
 
 private:
   friend class ContextT;
+  friend class CFGRewriter;
 
   VarContext varCtx_;
   std::vector<SExpr*> instructionMap_;
   std::vector<SExpr*> blockMap_;
 
-  SCFG*       currentCFG_;              // the current SCFG
-  BasicBlock* currentBB_;               // the current basic block
+  SCFG*       currentCFG_;              //< the current SCFG
+  BasicBlock* currentBB_;               //< the current basic block
   unsigned    currentInstrNum_;
   unsigned    currentBlockNum_;
 
-  std::vector<SExpr*> currentArgs_;     // arguments in currentBB.
-  std::vector<SExpr*> currentInstrs_;   // instructions in currentBB.
+  std::vector<Phi*>         currentArgs_;        //< arguments in currentBB.
+  std::vector<Instruction*> currentInstrs_;      //< instructions in currentBB.
+  std::vector<BasicBlock*>  continuationStack_;
 };
 
 
@@ -224,8 +345,8 @@ class CFGRewriter : public Traversal<CFGRewriter, CFGRewriteReducer> {
 public:
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
-  SExpr* traverseIfThenElse(IfThenElse *E, CtxT Ctx,
-                            TraversalKind K = TRV_Normal);
+  SExpr* traverseIfThenElse(IfThenElse *E, CFGRewriteReducer *R,
+                            TraversalKind K);
 
   static SCFG* convertSExprToCFG(SExpr *E, MemRegionRef A);
 };

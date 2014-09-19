@@ -116,15 +116,24 @@ protected:
     }
   }
 
+  StringRef printableName(StringRef N) {
+    if (N.length() > 0)
+      return N;
+    else
+      return StringRef("_x", 2);
+  }
+
 
   void printSExpr(const SExpr *E, StreamType &SS, unsigned P, bool Sub=true) {
     if (!E) {
       self()->printNull(SS);
       return;
     }
-    if (Sub && E->block() && E->opcode() != COP_VarDecl) {
-      SS << "_x" << E->id();
-      return;
+    if (Sub) {
+      if (const Instruction *I = E->asCFGInstruction()) {
+        SS << printableName(I->name()) << I->id();
+        return;
+      }
     }
     if (self()->precedence(E) > P) {
       // Wrap expr in () if necessary.
@@ -148,18 +157,6 @@ protected:
     SS << "#null";
   }
 
-  void printFuture(const Future *E, StreamType &SS) {
-    self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
-  }
-
-  void printUndefined(const Undefined *E, StreamType &SS) {
-    SS << "#undefined";
-  }
-
-  void printWildcard(const Wildcard *E, StreamType &SS) {
-    SS << "*";
-  }
-
   template<class T>
   void printLiteralT(const LiteralT<T> *E, StreamType &SS) {
     SS << E->value();
@@ -170,96 +167,97 @@ protected:
   }
 
   void printLiteral(const Literal *E, StreamType &SS) {
-    if (E->clangExpr()) {
-      SS << getSourceLiteralString(E->clangExpr());
+    ValueType VT = E->valueType();
+    switch (VT.Base) {
+    case ValueType::BT_Void: {
+      SS << "void";
       return;
     }
-    else {
-      ValueType VT = E->valueType();
-      switch (VT.Base) {
-      case ValueType::BT_Void: {
-        SS << "void";
-        return;
-      }
-      case ValueType::BT_Bool: {
-        if (E->as<bool>().value())
-          SS << "true";
-        else
-          SS << "false";
-        return;
-      }
-      case ValueType::BT_Int: {
-        switch (VT.Size) {
-        case ValueType::ST_8:
-          if (VT.Signed)
-            printLiteralT(&E->as<int8_t>(), SS);
-          else
-            printLiteralT(&E->as<uint8_t>(), SS);
-          return;
-        case ValueType::ST_16:
-          if (VT.Signed)
-            printLiteralT(&E->as<int16_t>(), SS);
-          else
-            printLiteralT(&E->as<uint16_t>(), SS);
-          return;
-        case ValueType::ST_32:
-          if (VT.Signed)
-            printLiteralT(&E->as<int32_t>(), SS);
-          else
-            printLiteralT(&E->as<uint32_t>(), SS);
-          return;
-        case ValueType::ST_64:
-          if (VT.Signed)
-            printLiteralT(&E->as<int64_t>(), SS);
-          else
-            printLiteralT(&E->as<uint64_t>(), SS);
-          return;
-        default:
-          break;
-        }
-        break;
-      }
-      case ValueType::BT_Float: {
-        switch (VT.Size) {
-        case ValueType::ST_32:
-          printLiteralT(&E->as<float>(), SS);
-          return;
-        case ValueType::ST_64:
-          printLiteralT(&E->as<double>(), SS);
-          return;
-        default:
-          break;
-        }
-        break;
-      }
-      case ValueType::BT_String: {
-        SS << "\"";
-        printLiteralT(&E->as<StringRef>(), SS);
-        SS << "\"";
-        return;
-      }
-      case ValueType::BT_Pointer: {
-        SS << "#ptr";
-        return;
-      }
-      case ValueType::BT_ValueRef: {
-        SS << "#vref";
-        return;
-      }
-      }
+    case ValueType::BT_Bool: {
+      if (E->as<bool>().value())
+        SS << "true";
+      else
+        SS << "false";
+      return;
     }
-    SS << "#lit";
+    case ValueType::BT_Int: {
+      switch (VT.Size) {
+      case ValueType::ST_8:
+        if (VT.Signed)
+          printLiteralT(&E->as<int8_t>(), SS);
+        else
+          printLiteralT(&E->as<uint8_t>(), SS);
+        return;
+      case ValueType::ST_16:
+        if (VT.Signed)
+          printLiteralT(&E->as<int16_t>(), SS);
+        else
+          printLiteralT(&E->as<uint16_t>(), SS);
+        return;
+      case ValueType::ST_32:
+        if (VT.Signed)
+          printLiteralT(&E->as<int32_t>(), SS);
+        else
+          printLiteralT(&E->as<uint32_t>(), SS);
+        return;
+      case ValueType::ST_64:
+        if (VT.Signed)
+          printLiteralT(&E->as<int64_t>(), SS);
+        else
+          printLiteralT(&E->as<uint64_t>(), SS);
+        return;
+      default:
+        break;
+      }
+      break;
+    }
+    case ValueType::BT_Float: {
+      switch (VT.Size) {
+      case ValueType::ST_32:
+        printLiteralT(&E->as<float>(), SS);
+        return;
+      case ValueType::ST_64:
+        printLiteralT(&E->as<double>(), SS);
+        return;
+      default:
+        break;
+      }
+      break;
+    }
+    case ValueType::BT_String: {
+      SS << "\"";
+      printLiteralT(&E->as<StringRef>(), SS);
+      SS << "\"";
+      return;
+    }
+    case ValueType::BT_Pointer: {
+      SS << "#ptr";
+      return;
+    }
+    case ValueType::BT_ValueRef: {
+      SS << "#vref";
+      return;
+    }
+    }
   }
 
   void printLiteralPtr(const LiteralPtr *E, StreamType &SS) {
     SS << E->clangDecl()->getNameAsString();
   }
 
-  void printVarDecl(const VarDecl *V, StreamType &SS) {
-    if (CStyle && V->kind() == VarDecl::VK_SFun)
-      SS << "this";
-    else
-      SS << V->name() << V->id();
+  void printVarDecl(const VarDecl *E, StreamType &SS) {
+    SS << printableName(E->name());
+    switch (E->kind()) {
+    case VarDecl::VK_Let:
+      SS << " = ";
+      break;
+    case VarDecl::VK_Fun:
+      SS << ": ";
+      break;
+    case VarDecl::VK_SFun:
+      return;
+    }
+    printSExpr(E->definition(), SS, Prec_Decl);
   }
 
   void printFunction(const Function *E, StreamType &SS, unsigned sugared = 0) {
@@ -275,8 +273,6 @@ protected:
         break;
     }
     self()->printVarDecl(E->variableDecl(), SS);
-    SS << ": ";
-    self()->printSExpr(E->variableDecl()->definition(), SS, Prec_MAX);
 
     const SExpr *B = E->body();
     if (B && B->opcode() == COP_Function)
@@ -333,7 +329,7 @@ protected:
 
   void printProject(const Project *E, StreamType &SS) {
     if (CStyle) {
-      // Omit the  this->
+      // Omit the 'this->'
       if (const SApply *SAP = dyn_cast<SApply>(E->record())) {
         if (auto *V = dyn_cast<VarDecl>(SAP->sfun())) {
           if (!SAP->isDelegation() && V->kind() == VarDecl::VK_SFun) {
@@ -434,18 +430,11 @@ protected:
   }
 
 
-  void printBBInstr(const SExpr *E, StreamType &SS) {
-    bool Sub = false;
-    if (E->opcode() == COP_VarDecl) {
-      auto *V = cast<VarDecl>(E);
-      SS << "let " << V->name() << V->id() << " = ";
-      E = V->definition();
-      Sub = true;
+  void printBBInstr(const Instruction *E, StreamType &SS) {
+    if (E->opcode() != COP_Store) {
+      SS << "let " << printableName(E->name()) << E->id() << " = ";
     }
-    else if (E->opcode() != COP_Store) {
-      SS << "let _x" << E->id() << " = ";
-    }
-    self()->printSExpr(E, SS, Prec_MAX, Sub);
+    self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";
     newline(SS);
   }
@@ -462,7 +451,7 @@ protected:
     for (auto *I : E->instructions())
       printBBInstr(I, SS);
 
-    const SExpr *T = E->terminator();
+    auto *T = E->terminator();
     if (T) {
       self()->printSExpr(T, SS, Prec_MAX, false);
       SS << ";";
@@ -529,10 +518,20 @@ protected:
   void printLet(const Let *E, StreamType &SS) {
     SS << "let ";
     printVarDecl(E->variableDecl(), SS);
-    SS << " = ";
-    printSExpr(E->variableDecl()->definition(), SS, Prec_Decl-1);
     SS << "; ";
     printSExpr(E->body(), SS, Prec_Decl-1);
+  }
+
+  void printFuture(const Future *E, StreamType &SS) {
+    self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
+  }
+
+  void printUndefined(const Undefined *E, StreamType &SS) {
+    SS << "#undefined";
+  }
+
+  void printWildcard(const Wildcard *E, StreamType &SS) {
+    SS << "*";
   }
 };
 
