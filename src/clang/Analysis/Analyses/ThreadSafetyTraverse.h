@@ -261,6 +261,8 @@ public:
   R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
     return self()->reduceInstruction(Orig);
   }
+  R_VarDecl reduceVarDeclLetrec(R_VarDecl VD, R_SExpr E) { return VD; }
+
   R_SExpr reduceFunction(Function &Orig, R_VarDecl Nvd, R_SExpr E0) {
     return self()->reduceSExpr(Orig);
   }
@@ -355,6 +357,9 @@ public:
     return self()->reducePseudoTerm(Orig);
   }
   R_SExpr reduceLet(Let &Orig, R_VarDecl Nvd, R_SExpr B) {
+    return self()->reducePseudoTerm(Orig);
+  }
+  R_SExpr reduceLetrec(Letrec &Orig, R_VarDecl Nvd, R_SExpr B) {
     return self()->reducePseudoTerm(Orig);
   }
   R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
@@ -510,12 +515,24 @@ MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::RedT *R) {
       return R->reduceVarDecl(*this, D);
     }
     case VK_SFun: {
-      // Don't traverse self-fun, since it points back to self.
+      // Don't traverse the definition, since it cyclicly points back to self.
+      // Just create a new (dummy) definition.
       return R->reduceVarDecl(*this, V::RedT::reduceNull());
     }
     case VK_Let: {
       auto D = Vs.traverseDM(&Definition, R, TRV_SubExpr);
       return R->reduceVarDecl(*this, D);
+    }
+    case VK_Letrec: {
+      // Create a new (empty) definition.
+      auto Nvd = R->reduceVarDecl(*this, V::RedT::reduceNull());
+      // Enter the scope of the empty definition.
+      R->enterScope(this, Nvd);
+      // Traverse the definition, and hope recursive references are lazy.
+      auto D = Vs.traverseDM(&Definition, R, TRV_SubExpr);
+      R->exitScope(this);
+      // Tie the knot, by setting Nvd->Definition to D.
+      return R->reduceVarDeclLetrec(Nvd, D);
     }
   }
 }
@@ -725,14 +742,6 @@ Identifier::traverse(V &Vs, typename V::RedT *R) {
 }
 
 template <class V>
-MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::RedT *R) {
-  auto Nc = Vs.traverseDM(&Condition, R);
-  auto Nt = Vs.traverseDM(&ThenExpr,  R, TRV_Tail);
-  auto Ne = Vs.traverseDM(&ElseExpr,  R, TRV_Tail);
-  return R->reduceIfThenElse(*this, Nc, Nt, Ne);
-}
-
-template <class V>
 MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::RedT *R) {
   // This is a variable declaration, so traverse the definition.
   auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
@@ -741,6 +750,25 @@ MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::RedT *R) {
   auto E1 = Vs.traverseDM(&Body, R, TRV_Tail);
   R->exitScope(VDecl);
   return R->reduceLet(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RedT, Letrec) Letrec::traverse(V &Vs, typename V::RedT *R) {
+  // This is a variable declaration, so traverse the definition.
+  auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
+  // Tell the rewriter to enter the scope of the let variable.
+  R->enterScope(VDecl, E0);
+  auto E1 = Vs.traverseDM(&Body, R, TRV_Tail);
+  R->exitScope(VDecl);
+  return R->reduceLetrec(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::RedT *R) {
+  auto Nc = Vs.traverseDM(&Condition, R);
+  auto Nt = Vs.traverseDM(&ThenExpr,  R, TRV_Tail);
+  auto Ne = Vs.traverseDM(&ElseExpr,  R, TRV_Tail);
+  return R->reduceIfThenElse(*this, Nc, Nt, Ne);
 }
 
 
@@ -977,6 +1005,28 @@ typename C::CType Identifier::compare(const Identifier* E, C& Cmp) const {
 }
 
 template <class C>
+typename C::CType Let::compare(const Let* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(VDecl, E->VDecl);
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  Ct = Cmp.compare(body(), E->body());
+  Cmp.leaveScope();
+  return Ct;
+}
+
+template <class C>
+typename C::CType Letrec::compare(const Letrec* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  Ct = Cmp.compare(body(), E->body());
+  Cmp.leaveScope();
+  return Ct;
+}
+
+template <class C>
 typename C::CType IfThenElse::compare(const IfThenElse* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(condition(), E->condition());
   if (Cmp.notTrue(Ct))
@@ -985,18 +1035,6 @@ typename C::CType IfThenElse::compare(const IfThenElse* E, C& Cmp) const {
   if (Cmp.notTrue(Ct))
     return Ct;
   return Cmp.compare(elseExpr(), E->elseExpr());
-}
-
-template <class C>
-typename C::CType Let::compare(const Let* E, C& Cmp) const {
-  typename C::CType Ct =
-    Cmp.compare(VDecl->definition(), E->VDecl->definition());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  Ct = Cmp.compare(body(), E->body());
-  Cmp.leaveScope();
-  return Ct;
 }
 
 

@@ -97,8 +97,9 @@ protected:
       case COP_Return:     return Prec_Other;
 
       case COP_Identifier: return Prec_Atom;
-      case COP_IfThenElse: return Prec_Other;
       case COP_Let:        return Prec_Decl;
+      case COP_Letrec:     return Prec_Decl;
+      case COP_IfThenElse: return Prec_Decl;
     }
     return Prec_MAX;
   }
@@ -248,14 +249,15 @@ protected:
   void printVarDecl(const VarDecl *E, StreamType &SS) {
     SS << printableName(E->name());
     switch (E->kind()) {
-    case VarDecl::VK_Let:
-      SS << " = ";
-      break;
     case VarDecl::VK_Fun:
       SS << ": ";
       break;
     case VarDecl::VK_SFun:
       return;
+    case VarDecl::VK_Let:
+    case VarDecl::VK_Letrec:
+      SS << " = ";
+      break;
     }
     printSExpr(E->definition(), SS, Prec_Decl);
   }
@@ -498,6 +500,20 @@ protected:
     SS << E->name();
   }
 
+  void printLet(const Let *E, StreamType &SS) {
+    SS << "let ";
+    printVarDecl(E->variableDecl(), SS);
+    SS << "; ";
+    printSExpr(E->body(), SS, Prec_Decl-1);
+  }
+
+  void printLetrec(const Letrec *E, StreamType &SS) {
+    SS << "letrec ";
+    printVarDecl(E->variableDecl(), SS);
+    SS << "; ";
+    printSExpr(E->body(), SS, Prec_Decl-1);
+  }
+
   void printIfThenElse(const IfThenElse *E, StreamType &SS) {
     if (CStyle) {
       printSExpr(E->condition(), SS, Prec_Unary);
@@ -513,13 +529,6 @@ protected:
     printSExpr(E->thenExpr(), SS, Prec_Other);
     SS << " else ";
     printSExpr(E->elseExpr(), SS, Prec_Other);
-  }
-
-  void printLet(const Let *E, StreamType &SS) {
-    SS << "let ";
-    printVarDecl(E->variableDecl(), SS);
-    SS << "; ";
-    printSExpr(E->body(), SS, Prec_Decl-1);
   }
 
   void printFuture(const Future *E, StreamType &SS) {

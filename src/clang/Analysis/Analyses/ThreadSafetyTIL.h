@@ -283,7 +283,21 @@ class Instruction;
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {
 public:
-  static const unsigned InvalidSExprID = 0xFFFFFFFF;
+  // Subclasses of SExpr must define the following:
+  //
+  // This(const This& E, ...) {
+  //   copy constructor: construct copy of E, with some additional arguments.
+  // }
+  //
+  // template <class V>
+  // typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
+  //   traverse all subexpressions, following the traversal/rewriter interface.
+  // }
+  //
+  // template <class C> typename C::CType compare(CType* E, C& Cmp) {
+  //   compare all subexpressions, following the comparator interface
+  // }
+
 
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
@@ -299,20 +313,7 @@ public:
     return const_cast<SExpr*>(this)->asCFGInstruction();
   }
 
-  // Subclasses of SExpr must define the following:
-  //
-  // This(const This& E, ...) {
-  //   copy constructor: construct copy of E, with some additional arguments.
-  // }
-  //
-  // template <class V>
-  // typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-  //   traverse all subexpressions, following the traversal/rewriter interface.
-  // }
-  //
-  // template <class C> typename C::CType compare(CType* E, C& Cmp) {
-  //   compare all subexpressions, following the comparator interface
-  // }
+
   void *operator new(size_t S, MemRegionRef &R) {
     return ::operator new(S, R);
   }
@@ -357,9 +358,10 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
 
   enum VariableKind {
-    VK_Let,  ///< Let-variable
-    VK_Fun,  ///< Function parameter
-    VK_SFun  ///< SFunction (self) parameter
+    VK_Fun,     ///< Function parameter
+    VK_SFun,    ///< SFunction (self) parameter
+    VK_Let,     ///< Let-variable
+    VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
   };
 
   VarDecl(StringRef s, SExpr *D)
@@ -518,6 +520,8 @@ public:
   static bool classof(const SExpr *E) {
     return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Phi;
   }
+
+  static const unsigned InvalidInstrID = 0xFFFFFFFF;
 
   Instruction(TIL_Opcode Op, ValueType VT = ValueType::getValueType<void>())
       : SExpr(Op), ValType(VT), SExprID(0), Depth(0), Block(nullptr),
@@ -1466,6 +1470,62 @@ private:
 };
 
 
+/// A let-expression,  e.g.  let x=t; u.
+/// This is a pseduo-term; it will be lowered to instructions in a CFG.
+class Let : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }
+
+  Let(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Let), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Let);
+  }
+  Let(const Let &L, VarDecl *Vd, SExpr *Bd) : SExpr(L), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Let);
+  }
+
+  VarDecl *variableDecl()  { return VDecl; }
+  const VarDecl *variableDecl() const { return VDecl; }
+
+  SExpr *body() { return Body; }
+  const SExpr *body() const { return Body; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Let)
+
+private:
+  VarDecl *VDecl;
+  SExpr* Body;
+};
+
+
+/// A let-expression,  e.g.  let x=t; u.
+/// This is a pseduo-term; it will be lowered to instructions in a CFG.
+class Letrec : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Letrec; }
+
+  Letrec(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Letrec), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Letrec);
+  }
+  Letrec(const Letrec &Lr, VarDecl *Vd, SExpr *Bd)
+      : SExpr(Lr), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Letrec);
+  }
+
+  VarDecl *variableDecl()  { return VDecl; }
+  const VarDecl *variableDecl() const { return VDecl; }
+
+  SExpr *body() { return Body; }
+  const SExpr *body() const { return Body; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Letrec)
+
+private:
+  VarDecl *VDecl;
+  SExpr* Body;
+};
+
+
+
 /// An if-then-else expression.
 /// This is a pseduo-term; it will be lowered to a branch in a CFG.
 class IfThenElse : public SExpr {
@@ -1497,31 +1557,8 @@ private:
 };
 
 
-/// A let-expression,  e.g.  let x=t; u.
-/// This is a pseduo-term; it will be lowered to instructions in a CFG.
-class Let : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }
 
-  Let(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Let), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Let);
-  }
-  Let(const Let &L, VarDecl *Vd, SExpr *Bd) : SExpr(L), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Let);
-  }
 
-  VarDecl *variableDecl()  { return VDecl; }
-  const VarDecl *variableDecl() const { return VDecl; }
-
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Let)
-
-private:
-  VarDecl *VDecl;
-  SExpr* Body;
-};
 
 
 

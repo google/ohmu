@@ -36,7 +36,7 @@ SExpr* VarContext::lookup(StringRef S) {
 void CFGRewriteReducer::enterScope(VarDecl *Orig, VarDecl *Nv) {
   if (Orig->name().length() > 0) {
     varCtx_.push(Nv);
-    if (currentBB_)
+    if (currentBB_ && Nv->definition())
       if (Instruction *I = Nv->definition()->asCFGInstruction())
         if (I->name().length() == 0)
           I->setName(Nv->name());

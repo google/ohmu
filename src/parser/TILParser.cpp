@@ -59,15 +59,16 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
     case TCOP_BinaryOp:   return "binary";
     case TCOP_Cast:       return "cast";
 
-    case TCOP_If:         return "if";
     case TCOP_Let:        return "let";
+    case TCOP_Letrec:     return "letrec";
+    case TCOP_If:         return "if";
     default:              return nullptr;
   }
 }
 
 
 void TILParser::initMap() {
-  for (unsigned op = TCOP_LitNull; op <= TCOP_Let; ++op) {
+  for (unsigned op = TCOP_LitNull; op <= TCOP_MAX; ++op) {
     opcodeMap_.emplace(getOpcodeName(static_cast<TIL_ConstructOp>(op)), op);
   }
   for (unsigned op = UOP_Min; op <= UOP_Max; ++op) {
@@ -334,11 +335,6 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
 
-    case TCOP_If: {
-      assert(arity == 3);
-      auto *e = new (arena_) IfThenElse(sexpr(0), sexpr(1), sexpr(2));
-      return ParseResult(TILP_SExpr, e);
-    }
     case TCOP_Let: {
       assert(arity == 3);
       Token* t = tok(0);
@@ -347,6 +343,20 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       delete t;
       return ParseResult(TILP_SExpr, e);
     }
+    case TCOP_Letrec: {
+      assert(arity == 3);
+      Token* t = tok(0);
+      auto* v = new (arena_) VarDecl(copyStr(t->string()), sexpr(1));
+      auto* e = new (arena_) Letrec(v, sexpr(2));
+      delete t;
+      return ParseResult(TILP_SExpr, e);
+    }
+    case TCOP_If: {
+      assert(arity == 3);
+      auto *e = new (arena_) IfThenElse(sexpr(0), sexpr(1), sexpr(2));
+      return ParseResult(TILP_SExpr, e);
+    }
+
     default:
       return ParseResult();
   }

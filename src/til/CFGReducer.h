@@ -67,6 +67,11 @@ public:
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return new (Arena) VarDecl(Orig, E);
   }
+  VarDecl* reduceVarDeclLetrec(VarDecl* VD, SExpr* E) {
+    VD->setDefinition(E);
+    return VD;
+  }
+
   SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
     return new (Arena) Function(Orig, Nvd, E0);
   }
@@ -175,6 +180,9 @@ public:
   SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
     return new (Arena) Let(Orig, Nvd, B);
   }
+  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
+    return new (Arena) Letrec(Orig, Nvd, B);
+  }
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
     return new (Arena) IfThenElse(Orig, C, T, E);
   }
@@ -233,7 +241,9 @@ public:
   }
 
   bool enterSubExpr(SExpr *E, TraversalKind K) {
-    if (K != TRV_Tail)
+    if (K == TRV_Tail)
+      pushContinuation(currentContinuation());
+    else
       pushContinuation(nullptr);
     return true;
   }

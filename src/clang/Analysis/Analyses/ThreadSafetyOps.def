@@ -58,6 +58,7 @@ TIL_OPCODE_DEF(Undefined)
 TIL_OPCODE_DEF(Wildcard)
 
 TIL_OPCODE_DEF(Identifier)
-TIL_OPCODE_DEF(IfThenElse)
 TIL_OPCODE_DEF(Let)
+TIL_OPCODE_DEF(Letrec)
+TIL_OPCODE_DEF(IfThenElse)
 

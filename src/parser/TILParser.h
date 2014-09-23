@@ -72,9 +72,12 @@ public:
     TCOP_BinaryOp,
     TCOP_Cast,
 
-    TCOP_If,
-    TCOP_Let
+    TCOP_Let,
+    TCOP_Letrec,
+    TCOP_If
   };
+
+  static const unsigned short TCOP_MAX = TCOP_If;
 
   // All parse rules return SExprs.
   static const unsigned short TILP_SExpr = ParseResult::PRS_UserDefined;
