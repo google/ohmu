@@ -22,135 +22,20 @@
 #ifndef OHMU_TIL_SSAPASS_H
 #define OHMU_TIL_SSAPASS_H
 
+#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
-/// Reducer class that builds a copy of an SExpr.
-class DestructiveReducerBase : public SExprReducerMap,
-                               public WriteBaseReducer<SExprReducerMap> {
-public:
-  Instruction* reduceWeak(Instruction* E)  { return nullptr; }
-  VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
-  BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
+#include "til/InplaceReducer.h"
 
-  SExpr* reduceLiteral(Literal &Orig) {
-    return Orig;
-  }
-  template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
-    return Orig;  
-  }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return Orig;
-  }
+namespace ohmu {
 
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    return Orig;
-  }
-  SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceCall(Call &Orig, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return Orig;
-  }
-  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return Orig;
-  }
-  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
-    return Orig;
-  }
-
-  Phi* reducePhiBegin(Phi &Orig) {
-    return Orig;
-  }
-  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) { }
-  Phi* reducePhi(Phi* Ph) { return Ph; }
-
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
-    return Orig;
-  }
-  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    return Orig;
-  }
-  SExpr* reduceReturn(Return &O, SExpr* E) {
-    return Orig;
-  }
-
-
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    return Orig;
-  }
-  void reduceBasicBlockArg  (BasicBlock *BB, unsigned i, SExpr* E) { }
-  void reduceBasicBlockInstr(BasicBlock *BB, unsigned i, SExpr* E) { }
-  void reduceBasicBlockTerm (BasicBlock *BB, SExpr* E) { }
-  BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
-
-
-  SCFG* reduceSCFGBegin(SCFG &Orig) {
-    return Orig;
-  }
-  void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) { }
-  SCFG* reduceSCFG(SCFG* Scfg) { return Scfg; }
-
-
-  SExpr* reduceUndefined(Undefined &Orig) {
-    return Orig;
-  }
-  SExpr* reduceWildcard(Wildcard &Orig) {
-    return Orig;
-  }
-
-  SExpr* reduceIdentifier(Identifier &Orig) {
-    return Orig;
-  }
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    return Orig;
-  }
-  SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
-    return Orig;
-  }
-};
+using namespace clang::threadSafety::til;
 
 
 struct BlockInfo {
   std::vector<SExpr*> AllocVarMap;
 };
-
 
 class SSAPass {
 public:
@@ -172,5 +57,7 @@ private:
   std::vector<SExpr*>*   CurrentVarMap;
 };
 
+
+}  // end namespace ohmu
 
 #endif  // OHMU_TIL_SSAPASS_H

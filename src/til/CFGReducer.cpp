@@ -15,7 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CFGReducer.h"
+#include "til/CFGReducer.h"
+#include "til/InplaceReducer.h"
 
 namespace ohmu {
 

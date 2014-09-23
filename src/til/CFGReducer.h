@@ -24,6 +24,7 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
+#include "til/CopyReducer.h"
 
 #include <cstddef>
 #include <vector>
@@ -36,171 +37,6 @@ using namespace clang::threadSafety::til;
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
   TILDebugPrinter() : PrettyPrinter(false, false, false) { }
-};
-
-
-/// Reducer class that builds a copy of an SExpr.
-class CopyReducerBase : public SExprReducerMap,
-                        public ReadReducer<SExprReducerMap> {
-public:
-  CopyReducerBase() {}
-  CopyReducerBase(MemRegionRef A) : Arena(A) { }
-
-  void setArena(MemRegionRef A) { Arena = A; }
-
-public:
-  Instruction* reduceWeak(Instruction* E)  { return nullptr; }
-  VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
-  BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
-
-  SExpr* reduceLiteral(Literal &Orig) {
-    return new (Arena) Literal(Orig);
-  }
-  template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
-    return new (Arena) LiteralT<T>(Orig);
-  }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return new (Arena) LiteralPtr(Orig);
-  }
-
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    return new (Arena) VarDecl(Orig, E);
-  }
-  VarDecl* reduceVarDeclLetrec(VarDecl* VD, SExpr* E) {
-    VD->setDefinition(E);
-    return VD;
-  }
-
-  SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
-    return new (Arena) Function(Orig, Nvd, E0);
-  }
-  SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
-    return new (Arena) SFunction(Orig, Nvd, E0);
-  }
-  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Code(Orig, E0, E1);
-  }
-  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Field(Orig, E0, E1);
-  }
-
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Apply(Orig, E0, E1);
-  }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) SApply(Orig, E0, E1);
-  }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
-    return new (Arena) Project(Orig, E0);
-  }
-  SExpr* reduceCall(Call &Orig, SExpr* E0) {
-    return new (Arena) Call(Orig, E0);
-  }
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return new (Arena) Alloc(Orig, E0);
-  }
-  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
-    return new (Arena) Load(Orig, E0);
-  }
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Store(Orig, E0, E1);
-  }
-  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) ArrayIndex(Orig, E0, E1);
-  }
-  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) ArrayAdd(Orig, E0, E1);
-  }
-  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return new (Arena) UnaryOp(Orig, E0);
-  }
-  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) BinaryOp(Orig, E0, E1);
-  }
-  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
-    return new (Arena) Cast(Orig, E0);
-  }
-
-  Phi* reducePhiBegin(Phi &Orig) {
-    return new (Arena) Phi(Orig, Arena);
-  }
-  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) {
-    Ph->values().push_back(E);
-  }
-  Phi* reducePhi(Phi* Ph) { return Ph; }
-
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
-    return new (Arena) Goto(Orig, B, 0);
-  }
-  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    return new (Arena) Branch(O, C, B0, B1);
-  }
-  SExpr* reduceReturn(Return &O, SExpr* E) {
-    return new (Arena) Return(O, E);
-  }
-
-
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    return new (Arena) BasicBlock(Orig, Arena);
-  }
-  void reduceBasicBlockArg(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Phi* Ph = dyn_cast<Phi>(E))
-      BB->addArgument(Ph);
-  }
-  void reduceBasicBlockInstr(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Instruction* I = dyn_cast<Instruction>(E))
-      BB->addInstruction(I);
-  }
-  void reduceBasicBlockTerm (BasicBlock *BB, SExpr* E) {
-    BB->setTerminator(dyn_cast<Terminator>(E));
-  }
-  BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
-
-
-  SCFG* reduceSCFGBegin(SCFG &Orig) {
-    return new (Arena) SCFG(Orig, Arena);
-  }
-  void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) {
-    Scfg->add(B);
-  }
-  SCFG* reduceSCFG(SCFG* Scfg) { return Scfg; }
-
-
-  SExpr* reduceUndefined(Undefined &Orig) {
-    return new (Arena) Undefined(Orig);
-  }
-  SExpr* reduceWildcard(Wildcard &Orig) {
-    return new (Arena) Wildcard(Orig);
-  }
-
-  SExpr* reduceIdentifier(Identifier &Orig) {
-    return new (Arena) Identifier(Orig);
-  }
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    return new (Arena) Let(Orig, Nvd, B);
-  }
-  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
-    return new (Arena) Letrec(Orig, Nvd, B);
-  }
-  SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
-    return new (Arena) IfThenElse(Orig, C, T, E);
-  }
-
-protected:
-  MemRegionRef Arena;
-};
-
-
-template<class Self, class ReducerT>
-class CopyTraversal : public Traversal<Self, ReducerT> {
-public:
-  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
-    Self Traverser;
-    ReducerT Reducer;
-    Reducer.setArena(A);
-    return Traverser.traverse(E, &Reducer, TRV_Tail);
-  }
 };
 
 
@@ -224,7 +60,7 @@ private:
 
 
 
-class CFGRewriteReducer : public CopyReducerBase {
+class CFGRewriteReducer : public CopyReducer {
 public:
   BasicBlock* currentContinuation() {
     return continuationStack_.back();
@@ -327,7 +163,7 @@ protected:
 
 public:
   CFGRewriteReducer(MemRegionRef A)
-    : CopyReducerBase(A), currentCFG_(nullptr), currentBB_(nullptr),
+    : CopyReducer(A), currentCFG_(nullptr), currentBB_(nullptr),
       currentInstrNum_(0), currentBlockNum_(2)
   { }
 
