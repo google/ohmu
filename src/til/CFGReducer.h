@@ -18,8 +18,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef OHMU_CFG_REDUCER_H
-#define OHMU_CFG_REDUCER_H
+#ifndef OHMU_TIL_CFGREDUCER_H
+#define OHMU_TIL_CFGREDUCER_H
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
@@ -355,5 +355,5 @@ public:
 
 }  // end namespace ohmu
 
-#endif  // OHMU_CFG_REDUCER_H
+#endif  // OHMU_TIL_CFGREDUCER_H
 
