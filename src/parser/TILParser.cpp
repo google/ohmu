@@ -285,7 +285,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
 
     case TCOP_Alloc: {
       assert(arity == 1);
-      auto* e = new (arena_) Alloc(sexpr(0), Alloc::AK_Heap);
+      auto* e = new (arena_) Alloc(sexpr(0), Alloc::AK_Stack);
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Load: {

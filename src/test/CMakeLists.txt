@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 2.8)
 
 add_executable(test_BNFParser test_BNFParser.cpp)
-target_link_libraries(test_BNFParser base parser)
+target_link_libraries(test_BNFParser base parser ohmu_til)
 add_dependencies(test_BNFParser parser_grammar)
 
-add_executable(test_TILParser test_TILParser.cpp)
-target_link_libraries(test_TILParser base parser ohmu_til tilpasslib)
-add_dependencies(test_TILParser ohmu_grammar)
+add_executable(test_parser test_parser.cpp)
+target_link_libraries(test_parser base parser ohmu_til tilpasslib)
+add_dependencies(test_parser ohmu_grammar)
 
 add_library(test_visitor test_visitor.cpp)
 

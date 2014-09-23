@@ -1,10 +1,9 @@
 
 // First rule for files
 definitions ::=
-  e=expr ";"           { (append [] e) }
-  |*[es] e=expr ";"    { (append es e) }
+  e=simple ";"           { (append [] e) }
+  |*[es] e=simple ";"    { (append es e) }
   ;
-
 
 // First rule for read-eval-print loop
 command ::=
@@ -92,6 +91,7 @@ postfix ::=
                   )
         | "." m= %TK_Identifier         { (project f m) }
         | "[" i=expr "]"                { (arrayIndex f i) }
+        | "^"                           { (load f) }
         )
   ;
 
@@ -129,7 +129,7 @@ expr40 ::=
 
 expr41 ::=
   expr40
-  |*[a] "^" b=expr40 { (binary "^" a b) }
+  |*[a] "^^" b=expr40 { (binary "^" a b) }
   ;
 
 expr42 ::=
@@ -158,15 +158,23 @@ expr61 ::=
   |*[a] "||" b=expr60 { (binary "||" a b) }
   ;
 
+expr70 ::= 
+  expr61
+  | "new" e1=expr61 { (alloc e1) }
+  ;
+
 expr90 ::=
-  a=expr61 (":=" b=expr { (store a b) }
-           |            { a }
+  a=expr70 (":=" b=expr70 { (store a b) }
+           |              { a }
            )
   ;
 
 expr ::=
-    expr90
-  | "let" s= %TK_Identifier "=" e1=expr ";" e2=expr   { (let s e1 e2) }
-  | "if" "(" c=expr ")" "then" e1=expr "else" e2=expr { (if c e1 e2)  }
+    e1=expr90 (";" e2=expr                                 { (let "" e1 e2) }
+              |                                            { e1 }
+              )
+  | "let" s= %TK_Identifier "=" e1=expr90 ";" e2=expr      { (let s e1 e2) }
+  | "var" s= %TK_Identifier "=" e1=expr90 ";" e2=expr      { (let s (alloc e1) e2) }
+  | "if" "(" c=expr ")" "then" e1=expr90 "else" e2=expr90  { (if c e1 e2)  }
   ;
 

@@ -746,7 +746,7 @@ private:
 /// Allocate memory for a new value on the heap or stack.
 class Alloc : public Instruction {
 public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Call; }
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Alloc; }
 
   enum AllocKind {
     AK_Stack,

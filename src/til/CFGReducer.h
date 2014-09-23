@@ -35,7 +35,7 @@ using namespace clang::threadSafety::til;
 
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
-  TILDebugPrinter() : PrettyPrinter(false, false) { }
+  TILDebugPrinter() : PrettyPrinter(false, false, false) { }
 };
 
 

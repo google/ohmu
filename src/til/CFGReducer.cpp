@@ -153,7 +153,7 @@ void CFGRewriteReducer::initCFG() {
 
 
 SCFG* CFGRewriteReducer::finishCFG() {
-  StdPrinter::print(currentCFG_, std::cout);
+  TILDebugPrinter::print(currentCFG_, std::cout);
   std::cout << "\n\n";
   currentCFG_->computeNormalForm();
   return currentCFG_;
