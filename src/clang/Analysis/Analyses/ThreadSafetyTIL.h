@@ -303,7 +303,12 @@ public:
 
   /// Return true if this is a trivial SExpr (constant or variable).
   bool isTrivial() {
-    return Opcode == COP_Literal || Opcode == COP_LiteralPtr;
+    switch (Opcode) {
+      case COP_Literal:    return true;
+      case COP_LiteralPtr: return true;
+      case COP_Variable:   return true;
+    }
+    return false;
   }
 
   /// Cast this SExpr to a CFG instruction, or return null if it is not one.
@@ -633,6 +638,25 @@ private:
   const clang::ValueDecl *Cvdecl;
 };
 
+
+/// A variable, which refers to a previously declared VarDecl.
+class Variable : public Instruction {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Variable; }
+
+  Variable(VarDecl *VD)
+     : Instruction(COP_Variable), VDecl(VD) { }
+  Variable(const Variable &V, VarDecl *VD)
+     : Instruction(V), VDecl(VD) { }
+
+  const VarDecl* variableDecl() const { return VDecl; }
+  VarDecl* variableDecl() { return VDecl; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Variable)
+
+private:
+  VarDecl* VDecl;
+};
 
 
 /// Apply an argument to a function.

@@ -62,18 +62,15 @@ protected:
   // Return the precedence of a given node, for use in pretty printing.
   unsigned precedence(const SExpr *E) {
     switch (E->opcode()) {
-      case COP_Future:     return Prec_Atom;
-      case COP_Undefined:  return Prec_Atom;
-      case COP_Wildcard:   return Prec_Atom;
-
-      case COP_Literal:    return Prec_Atom;
-      case COP_LiteralPtr: return Prec_Atom;
       case COP_VarDecl:    return Prec_Atom;
       case COP_Function:   return Prec_Decl;
       case COP_SFunction:  return Prec_Decl;
       case COP_Code:       return Prec_Decl;
       case COP_Field:      return Prec_Decl;
 
+      case COP_Literal:    return Prec_Atom;
+      case COP_LiteralPtr: return Prec_Atom;
+      case COP_Variable:   return Prec_Atom;
       case COP_Apply:      return Prec_Postfix;
       case COP_SApply:     return Prec_Postfix;
       case COP_Project:    return Prec_Postfix;
@@ -95,6 +92,10 @@ protected:
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
       case COP_Return:     return Prec_Other;
+
+      case COP_Future:     return Prec_Atom;
+      case COP_Undefined:  return Prec_Atom;
+      case COP_Wildcard:   return Prec_Atom;
 
       case COP_Identifier: return Prec_Atom;
       case COP_Let:        return Prec_Decl;
@@ -244,6 +245,12 @@ protected:
 
   void printLiteralPtr(const LiteralPtr *E, StreamType &SS) {
     SS << E->clangDecl()->getNameAsString();
+  }
+
+  void printVariable(const Variable *E, StreamType &SS) {
+    if (E->variableDecl()->name().length() > 0)
+      SS << E->variableDecl()->name();
+    SS << "_x";
   }
 
   void printVarDecl(const VarDecl *E, StreamType &SS) {

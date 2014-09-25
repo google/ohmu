@@ -45,7 +45,7 @@ class VarContext {
 public:
   VarContext() { }
 
-  SExpr* lookup(StringRef S);
+  VarDecl* lookup(StringRef S);
 
   void        push(VarDecl *V) { Vars.push_back(V); }
   void        pop()            { Vars.pop_back(); }
@@ -76,23 +76,39 @@ public:
     return b;
   }
 
+  /*
+  unsigned saveState() { return continuationStack_.size(); }
+
+  void restoreState(unsigned s) {
+    assert(s <= continuationStack_.size());
+    while (continuationStack_.size() > s)
+      continuationStack_.pop_back();
+  }
+  */
+
   bool enterSubExpr(SExpr *E, TraversalKind K) {
-    if (K == TRV_Tail)
+    //std::cout << "enter: " << getOpcodeString(E->opcode()) << " " << K
+    //          << " " << continuationStack_.size();
+    if (K == TRV_Tail) {
+      //std::cout << " " << (size_t)currentContinuation() << "\n";
       pushContinuation(currentContinuation());
-    else
+    } else {
+      //std::cout << " 0\n";
       pushContinuation(nullptr);
+    }
     return true;
   }
 
   template <class T>
   T* exitSubExpr(SExpr *E, T* Res, TraversalKind K) {
+    BasicBlock *b = popContinuation();
+    //std::cout << "exit: " << getOpcodeString(E->opcode()) << " " << K
+    //          << " " << continuationStack_.size() << " " << (size_t)b << "\n";
     if (!currentBB_)
       return Res;
 
     addInstruction(Res);
-
     // If we have a continuation, then jump to it.
-    BasicBlock *b = popContinuation();
     if (b) {
       assert(K == TRV_Tail);
       createGoto(b, Res);
@@ -113,12 +129,23 @@ public:
   void enterCFG(SCFG *Cfg, SCFG* NCfg) { }
   void exitCFG (SCFG *Cfg) { }
 
+  /*
+  SExpr* reduceCall(Call &Orig, SExpr *Targ) {
+    SExpr *T = Targ;
+    while (auto *A = dyn_cast<Apply>(T)) {
+      T = A->fun();
+    }
+  }
+  */
 
   SExpr* reduceIdentifier(Identifier &Orig) {
-    SExpr* E = varCtx_.lookup(Orig.name());
+    VarDecl* VD = varCtx_.lookup(Orig.name());
     // TODO: emit warning on name-not-found.
-    if (E)
-      return E;
+    if (VD) {
+      if (VD->kind() == VarDecl::VK_Let)
+        return VD->definition();
+      return new (Arena) Variable(VD);
+    }
     return new (Arena) Identifier(Orig);
   }
 
@@ -131,7 +158,7 @@ public:
 
 
   /// Add BB to the current CFG, and start working on it.
-  void startBlock(BasicBlock *BB, BasicBlock *Cont);
+  void startBlock(BasicBlock *BB);
 
   /// Terminate the current block with a branch instruction.
   /// This will create new blocks for the branches.

@@ -47,17 +47,6 @@ public:
   VarDecl*     reduceWeak(VarDecl *E)      { return E; }
   BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
 
-  SExpr* reduceLiteral(Literal &Orig) {
-    return &Orig;
-  }
-  template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
-    return &Orig;
-  }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return &Orig;
-  }
-
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return &Orig;
   }
@@ -71,6 +60,20 @@ public:
     return &Orig;
   }
   SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
+    return &Orig;
+  }
+
+  SExpr* reduceLiteral(Literal &Orig) {
+    return &Orig;
+  }
+  template<class T>
+  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
+    return &Orig;
+  }
+  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
+    return &Orig;
+  }
+  SExpr* reduceVariable(Variable &Orig) {
     return &Orig;
   }
 

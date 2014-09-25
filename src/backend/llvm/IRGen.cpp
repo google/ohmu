@@ -89,6 +89,8 @@ public:
     return lbb;
   }
 
+  std::nullptr_t reduceWeak(VarDecl *vd) { return nullptr; }
+
   llvm::Value* reduceVarDecl(VarDecl& orig, llvm::Value* v) {
     // Eliminate vardecls -- just return the definition.
     return v;

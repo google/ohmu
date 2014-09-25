@@ -51,17 +51,6 @@ public:
   VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
   BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
 
-  SExpr* reduceLiteral(Literal &Orig) {
-    return new (Arena) Literal(Orig);
-  }
-  template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
-    return new (Arena) LiteralT<T>(Orig);
-  }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return new (Arena) LiteralPtr(Orig);
-  }
-
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return new (Arena) VarDecl(Orig, E);
   }
@@ -69,7 +58,6 @@ public:
     VD->setDefinition(E);
     return VD;
   }
-
   SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
     return new (Arena) Function(Orig, Nvd, E0);
   }
@@ -81,6 +69,20 @@ public:
   }
   SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Field(Orig, E0, E1);
+  }
+
+  SExpr* reduceLiteral(Literal &Orig) {
+    return new (Arena) Literal(Orig);
+  }
+  template<class T>
+  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
+    return new (Arena) LiteralT<T>(Orig);
+  }
+  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
+    return new (Arena) LiteralPtr(Orig);
+  }
+  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
+    return new (Arena) Variable(Orig, VD);
   }
 
   SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {

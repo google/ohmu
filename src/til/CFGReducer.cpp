@@ -23,11 +23,11 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-SExpr* VarContext::lookup(StringRef S) {
+VarDecl* VarContext::lookup(StringRef S) {
   for (unsigned i=0,n=Vars.size(); i < n; ++i) {
-    VarDecl* V = Vars[n-i-1];
-    if (V->name() == S) {
-      return V->definition();
+    VarDecl* VD = Vars[n-i-1];
+    if (VD->name() == S) {
+      return VD;
     }
   }
   return nullptr;
@@ -83,7 +83,7 @@ BasicBlock* CFGRewriteReducer::makeContinuation() {
 }
 
 
-void CFGRewriteReducer::startBlock(BasicBlock *BB, BasicBlock *Cont) {
+void CFGRewriteReducer::startBlock(BasicBlock *BB) {
   assert(currentBB_ == nullptr && "Haven't finished current block.");
   assert(currentArgs_.empty());
   assert(currentInstrs_.empty());
@@ -92,7 +92,6 @@ void CFGRewriteReducer::startBlock(BasicBlock *BB, BasicBlock *Cont) {
   currentBB_ = BB;
   if (!BB->cfg())
     currentCFG_->add(BB);
-  pushContinuation(Cont);
 }
 
 
@@ -156,6 +155,7 @@ void CFGRewriteReducer::initCFG() {
 SCFG* CFGRewriteReducer::finishCFG() {
   TILDebugPrinter::print(currentCFG_, std::cout);
   std::cout << "\n\n";
+  popContinuation();
   currentCFG_->computeNormalForm();
   return currentCFG_;
 }
@@ -169,26 +169,29 @@ SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *E, CFGRewriteReducer *R,
     return E->traverse(*this->self(), R);
   }
 
+  // End current block with a branch
   SExpr* cond = E->condition();
   SExpr* Nc = this->self()->traverseDM(&cond, R);
-
-  // End current block with a branch
-  BasicBlock* CurrCont = R->popContinuation();
   Branch* Br = R->createBranch(Nc);
 
-  // If the continuation is null, then make a new one.
+  // If the current continuation is null, then make a new one.
+  BasicBlock* CurrCont = R->currentContinuation();
   BasicBlock* Cont = CurrCont;
   if (!Cont)
     Cont = R->makeContinuation();
 
   // Process the then and else blocks
   SExpr* thenE = E->thenExpr();
-  R->startBlock(Br->thenBlock(), Cont);
+  R->startBlock(Br->thenBlock());
+  R->pushContinuation(Cont);
   this->self()->traverseDM(&thenE, R, TRV_Tail);
+  R->popContinuation();
 
   SExpr* elseE = E->elseExpr();
-  R->startBlock(Br->elseBlock(), Cont);
+  R->startBlock(Br->elseBlock());
+  R->pushContinuation(Cont);
   this->self()->traverseDM(&elseE, R, TRV_Tail);
+  R->popContinuation();
 
   // If we had an existing continuation, then we're done.
   // The then/else blocks will call the continuation.
@@ -196,7 +199,7 @@ SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *E, CFGRewriteReducer *R,
     return nullptr;
 
   // Otherwise, if we created a new continuation, then start processing it.
-  R->startBlock(Cont, nullptr);
+  R->startBlock(Cont);
   assert(Cont->arguments().size() > 0);
   return Cont->arguments()[0];
 }

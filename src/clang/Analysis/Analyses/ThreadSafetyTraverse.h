@@ -247,16 +247,6 @@ public:
   R_VarDecl     reduceWeak(VarDecl *E)     { return RedT::reduceNull(); }
   R_BasicBlock  reduceWeak(BasicBlock *E)  { return RedT::reduceNull(); }
 
-  R_SExpr reduceLiteral(Literal &Orig) {
-    return self()->reduceInstruction(Orig);
-  }
-  template<class T>
-  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
-    return self()->reduceInstruction(Orig);
-  }
 
   R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
     return self()->reduceInstruction(Orig);
@@ -274,6 +264,20 @@ public:
   }
   R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
+  }
+
+  R_SExpr reduceLiteral(Literal &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  template<class T>
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceVariable(Variable &Orig, R_VarDecl VD) {
+    return self()->reduceInstruction(Orig);
   }
 
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
@@ -446,67 +450,6 @@ public:
 // traverse methods for all TIL classes.
 ////////////////////////////////////////
 
-
-template <class V>
-MAPTYPE(V::RedT, Literal) Literal::traverse(V &Vs, typename V::RedT *R) {
-  switch (ValType.Base) {
-  case ValueType::BT_Void:
-    break;
-  case ValueType::BT_Bool:
-    return R->reduceLiteralT(as<bool>());
-  case ValueType::BT_Int: {
-    switch (ValType.Size) {
-    case ValueType::ST_8:
-      if (ValType.Signed)
-        return R->reduceLiteralT(as<int8_t>());
-      else
-        return R->reduceLiteralT(as<uint8_t>());
-    case ValueType::ST_16:
-      if (ValType.Signed)
-        return R->reduceLiteralT(as<int16_t>());
-      else
-        return R->reduceLiteralT(as<uint16_t>());
-    case ValueType::ST_32:
-      if (ValType.Signed)
-        return R->reduceLiteralT(as<int32_t>());
-      else
-        return R->reduceLiteralT(as<uint32_t>());
-    case ValueType::ST_64:
-      if (ValType.Signed)
-        return R->reduceLiteralT(as<int64_t>());
-      else
-        return R->reduceLiteralT(as<uint64_t>());
-    default:
-      break;
-    }
-    break;
-  }
-  case ValueType::BT_Float: {
-    switch (ValType.Size) {
-    case ValueType::ST_32:
-      return R->reduceLiteralT(as<float>());
-    case ValueType::ST_64:
-      return R->reduceLiteralT(as<double>());
-    default:
-      break;
-    }
-    break;
-  }
-  case ValueType::BT_String:
-    return R->reduceLiteralT(as<StringRef>());
-  case ValueType::BT_Pointer:
-    return R->reduceLiteralT(as<void*>());
-  case ValueType::BT_ValueRef:
-    break;
-  }
-  return R->reduceLiteral(*this);
-}
-
-template <class V>
-MAPTYPE(V::RedT, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceLiteralPtr(*this);
-}
-
 template <class V>
 MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::RedT *R) {
   switch (kind()) {
@@ -571,6 +514,72 @@ MAPTYPE(V::RedT, Field) Field::traverse(V &Vs, typename V::RedT *R) {
   auto Nr = Vs.traverseDM(&Range, R, TRV_Type);
   auto Nb = Vs.traverseDM(&Body,  R, TRV_Lazy);
   return R->reduceField(*this, Nr, Nb);
+}
+
+
+template <class V>
+MAPTYPE(V::RedT, Literal) Literal::traverse(V &Vs, typename V::RedT *R) {
+  switch (ValType.Base) {
+  case ValueType::BT_Void:
+    break;
+  case ValueType::BT_Bool:
+    return R->reduceLiteralT(as<bool>());
+  case ValueType::BT_Int: {
+    switch (ValType.Size) {
+    case ValueType::ST_8:
+      if (ValType.Signed)
+        return R->reduceLiteralT(as<int8_t>());
+      else
+        return R->reduceLiteralT(as<uint8_t>());
+    case ValueType::ST_16:
+      if (ValType.Signed)
+        return R->reduceLiteralT(as<int16_t>());
+      else
+        return R->reduceLiteralT(as<uint16_t>());
+    case ValueType::ST_32:
+      if (ValType.Signed)
+        return R->reduceLiteralT(as<int32_t>());
+      else
+        return R->reduceLiteralT(as<uint32_t>());
+    case ValueType::ST_64:
+      if (ValType.Signed)
+        return R->reduceLiteralT(as<int64_t>());
+      else
+        return R->reduceLiteralT(as<uint64_t>());
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_Float: {
+    switch (ValType.Size) {
+    case ValueType::ST_32:
+      return R->reduceLiteralT(as<float>());
+    case ValueType::ST_64:
+      return R->reduceLiteralT(as<double>());
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_String:
+    return R->reduceLiteralT(as<StringRef>());
+  case ValueType::BT_Pointer:
+    return R->reduceLiteralT(as<void*>());
+  case ValueType::BT_ValueRef:
+    break;
+  }
+  return R->reduceLiteral(*this);
+}
+
+template <class V>
+MAPTYPE(V::RedT, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::RedT *R) {
+  return R->reduceLiteralPtr(*this);
+}
+
+template<class V>
+MAPTYPE(V::RedT, Variable) Variable::traverse(V &Vs, typename V::RedT *R) {
+  return R->reduceVariable(*this, Vs.traverseWeakDM(&VDecl, R));
 }
 
 template <class V>
@@ -797,18 +806,10 @@ public:
 ///////////////////////////////////////////
 
 template <class C>
-typename C::CType Literal::compare(const Literal* E, C& Cmp) const {
-  // TODO: defer actual comparison to LiteralT
-  return Cmp.trueResult();
-}
-
-template <class C>
-typename C::CType LiteralPtr::compare(const LiteralPtr* E, C& Cmp) const {
-  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
-}
-
-template <class C>
 typename C::CType VarDecl::compare(const VarDecl* E, C& Cmp) const {
+  auto Ct = Cmp.compareIntegers(kind(), E->kind());
+  if (Cmp.notTrue(Ct))
+    return Ct;
   // Note, we don't compare names, due to alpha-renaming.
   return Cmp.compare(Definition, E->Definition);
 }
@@ -850,13 +851,29 @@ typename C::CType Field::compare(const Field* E, C& Cmp) const {
 }
 
 template <class C>
+typename C::CType Literal::compare(const Literal* E, C& Cmp) const {
+  // TODO: defer actual comparison to LiteralT
+  return Cmp.trueResult();
+}
+
+template <class C>
+typename C::CType LiteralPtr::compare(const LiteralPtr* E, C& Cmp) const {
+  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
+}
+
+template <class C>
+typename C::CType Variable::compare(const Variable* E, C& Cmp) const {
+  // TODO: compare weak refs.
+  return Cmp.comparePointers(VDecl, E->VDecl);
+}
+
+template <class C>
 typename C::CType Apply::compare(const Apply* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(fun(), E->fun());
   if (Cmp.notTrue(Ct))
     return Ct;
   return Cmp.compare(arg(), E->arg());
 }
-
 
 template <class C>
 typename C::CType SApply::compare(const SApply* E, C& Cmp) const {
