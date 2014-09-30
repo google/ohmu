@@ -72,115 +72,300 @@ static int lowIndex(unsigned x) {
   return (int)a;
 }
 
+template <typename Type>
+struct RangeAdaptor {
+  RangeAdaptor(Type* data, size_t size) : _begin(data), _end(data + size) {}
+  RangeAdaptor(Type* begin, Type* end) : _begin(begin), _end(end) {}
+  Type* begin() const { return _begin; }
+  Type* end() const { return _end; }
+
+ private:
+  Type* _begin;
+  Type* _end;
+};
+
+template <typename Type>
+RangeAdaptor<Type> AdaptRange(Type* data, size_t size) {
+  return RangeAdaptor<Type>(data, size);
+}
+
+template <typename Type>
+RangeAdaptor<Type> AdaptRange(Type* begin, Type* end) {
+  return RangeAdaptor<Type>(begin, end);
+}
+
+struct LiveRange {
+  struct Iterator {
+    Iterator(Instruction* instr) : i(instr), skipUntil(i) {}
+    Instruction& operator*() const { return *i; }
+    Iterator& operator++() {
+      if (i->opcode.code == Opcode::HEADER) {
+        if (i->opcode.flags)
+          skipUntil = i + i->arg1;
+        else if (i <= skipUntil)
+          i = i + i->arg1;
+      }
+      i--;
+      return *this;
+    }
+    bool operator!=(const Iterator& a) const { return i != a.i; }
+
+   private:
+    Instruction* i;
+    Instruction* skipUntil;
+  };
+
+  LiveRange(Instruction* def, Instruction* use) : def(def), use(use) {}
+  Iterator begin() const { return use - 1; }
+  Iterator end() const { return def; }
+
+ private:
+  Instruction* def;
+  Instruction* use;
+};
+
 namespace Jagger {
 Instruction countedMarker;
 }  // namespace Jagger
 
-namespace {
+//namespace {
 struct InstructionStream {
   void encode(SCFG* const* cfg, size_t numCFGs);
 
   static size_t countInstrs(SExpr* expr);
-  Instruction* emitInstrs(Instruction* nextInstr, Block* block, SExpr* expr);
-  Instruction* emitRet(Instruction* nextInstr, Block* block);
-  //Instruction* emitInstrs(Instruction* nextInstr, SExpr* expr);
-  //Instruction* emitInstrs(Instruction* nextInstr, Phi* phi);
-  //Instruction* emitInstrs(Instruction* nextInstr, BasicBlock* basicBlock);
-  //Instruction* emitInstrs(Instruction* nextInstr, Literal* literal);
-  //Instruction* emitInstrs(Instruction* nextInstr, BinaryOp* binaryOp);
-  //Instruction* emitInstrs(Instruction* nextInstr, BasicBlock* basicBlock, Goto* jump);
-  //Instruction* emitInstrs(Instruction* nextInstr, BasicBlock* basicBlock, Branch* branch);
+  Instruction* emitBlockHeader(Instruction* nextInstr, Block* block);
+  Instruction* emitArgument(Instruction* nextInstr, Phi* phi);
+  Instruction* emitInstrs(Instruction* nextInstr, SExpr* expr);
+  Instruction* emitTerminator(Instruction* nextInstr, Terminator* term, BasicBlock* basicBlock);
+
+  void traverse(Instruction* use, Instruction* def);
 
   Block* blocks;
   Instruction* instrs;
+  size_t numBlocks;
+  size_t numInstrs;
+  std::vector<std::pair<int, int>> interactions;
 };
-}  // namespace
+//}  // namespace
+
+void InstructionStream::traverse(Instruction* use, Instruction* def) {
+  Instruction* skipUntil = use;
+  auto defIndex = (int)(def - instrs);
+  auto keyIndex = defIndex + def->key;
+#if 0
+  for (Instruction* i = use - 1; i > def; --i) {
+    if (i->opcode.code == Opcode::HEADER) {
+      if (i->opcode.flags)
+        skipUntil = i + i->arg1;
+      else if (i <= skipUntil)
+        i = i + i->arg1;
+      continue;
+    }
+    if (!i->opcode.hasResult) continue;
+    if (def->key == i->key) continue;
+    auto iKeyIndex = (int)(i->getKey() - instrs);
+    interactions.push_back(std::make_pair(std::min(keyIndex, iKeyIndex),
+                                          std::max(keyIndex, iKeyIndex)));
+  }
+#else
+  for (auto instr : LiveRange(def, use)) {
+    if (!instr.opcode.hasResult) continue;
+    if (def->key == instr.key) continue;
+    auto iKeyIndex = (int)(instr.getKey() - instrs);
+    interactions.push_back(std::make_pair(std::min(keyIndex, iKeyIndex),
+                                          std::max(keyIndex, iKeyIndex)));
+  }
+#endif
+}
 
 void InstructionStream::encode(SCFG* const* cfgs, size_t numCFGs) {
   if (!numCFGs) return;
 
-  // Count the blocks.d
-  size_t numBlocks = 0;
-  for (size_t i = 0; i < numCFGs; i++)
-    numBlocks += cfgs[i]->numBlocks();
+  {
+    // Count the blocks.
+    size_t numBlocks = 0;
+    for (auto cfg : AdaptRange(cfgs, numCFGs))
+      numBlocks += cfg->numBlocks();
+    this->numBlocks = numBlocks;
+  }
+
   assert(numBlocks);
   blocks = new Block[numBlocks];
 
-  // Count the instructions.
-  size_t numInstrs = 0;
-  Block* nextBlock = blocks;
-  for (size_t i = 0; i < numCFGs; i++)
-    for (auto basicBlock : *cfgs[i]) {
-      basicBlock->setBackendID(nextBlock);
-      BasicBlock* parent = basicBlock->parent();
-      // TODO: || parent is previous block
-      while (parent && basicBlock->PostDominates(*parent))
-        parent = parent->parent();
-      nextBlock->parent = parent ? (Block*)parent->getBackendID() : nullptr;
+  {
+    // Initialize blocks and count instructions.
+    Block* nextBlock = blocks;
+    size_t numInstrs = 0;
+    for (auto cfg : AdaptRange(cfgs, numCFGs))
+      for (auto basicBlock : *cfg) {
+        basicBlock->setBackendID(nextBlock);
+        nextBlock->dominator = nullptr;
+        nextBlock->head = nextBlock;
+        size_t size = 0;
+        if (BasicBlock* parent = basicBlock->parent()) {
+          size++;  // block header
+          nextBlock->dominator = (Block*)parent->getBackendID();
+          if (basicBlock->PostDominates(*parent) ||
+              nextBlock->dominator + 1 == nextBlock)
+            nextBlock->head = nextBlock->dominator->head;
+        }
+        for (auto arg : basicBlock->arguments()) size += countInstrs(arg);
+        for (auto instr : basicBlock->instructions())
+          size += countInstrs(instr);
+        size += countInstrs(basicBlock->terminator());
+        nextBlock->firstInstr = numInstrs;
+        nextBlock->numInstrs = size;
+        numInstrs += size;
+        nextBlock++;
+      }
+    this->numInstrs = numInstrs;
+  }
 
-      // ret instruction special case
-      auto terminator = basicBlock->terminator();
-      size_t size = terminator ? countInstrs(terminator) : 1;
-      for (auto arg : basicBlock->arguments()) size += countInstrs(arg);
-      for (auto instr : basicBlock->instructions()) size += countInstrs(instr);
-      nextBlock++->numInstrs = size;
-      numInstrs += size;
-    }
   assert(numInstrs);
   instrs = new Instruction[numInstrs];
 
-#if 0
-  Instruction* nextInstr = instrs;
-  nextBlock = blocks;
-  for (size_t i = 0; i < numCFGs; i++)
-    for (auto basicBlock : *cfgs[i]) {
-      nextBlock->instrs = nextInstr;
-      for (auto arg : basicBlock->arguments())
-        nextInstr = emitInstrs(nextInstr, nextBlock, arg);
-      for (auto instr : basicBlock->instructions())
-        nextInstr = emitInstrs(nextInstr, nextBlock, instr);
-      auto terminator = basicBlock->terminator();
-      nextInstr = terminator ? emitInstrs(nextInstr, nextBlock, terminator)
-                             : emitRet(nextInstr, nextBlock);
-      assert(nextInstr == nextBlock->instrs + nextBlock->numInstrs);
-      nextBlock++;
+  {
+    // Emit instructions.
+    Instruction* nextInstr = instrs;
+    Block* nextBlock = blocks;
+    for (auto cfg : AdaptRange(cfgs, numCFGs))
+      for (auto basicBlock : *cfg) {
+        nextInstr = emitBlockHeader(nextInstr, nextBlock);
+        for (auto arg : basicBlock->arguments())
+          nextInstr = emitArgument(nextInstr, cast<Phi>(arg));
+        for (auto instr : basicBlock->instructions())
+          nextInstr = emitInstrs(nextInstr, instr);
+        nextInstr =
+            emitTerminator(nextInstr, basicBlock->terminator(), basicBlock);
+        assert(nextInstr == nextBlock->instrs + nextBlock->numInstrs);
+        nextBlock++;
+      }
+  }
+
+  // Determine last uses.
+  for (auto uses : AdaptRange(instrs, numInstrs)) {
+    auto arg0 = uses.arg0;
+    auto arg1 = uses.arg1;
+    if (arg0 | arg1) {
+      if (arg0 == arg1)
+        uses.opcode.isArg0NotLastUse = true;
+      for (auto instr :
+           LiveRange(std::min(uses.getArg0(), uses.getArg1()), &uses)) {
+        if (instr.arg0 == arg0 || instr.arg0 == arg1)
+          instr.opcode.isArg0NotLastUse = true;
+        if (instr.arg1 == arg0 || instr.arg1 == arg1)
+          instr.opcode.isArg1NotLastUse = true;
+      }
     }
+  }
+
+#if 0
+  // Link phis
+  for (auto uses : AdaptRange(instrs, numInstrs)) {
+    if (uses.opcode.code == Opcode::COPY) uses.key = uses.arg0;
+    if (uses.opcode == Opcodes::phi) {
+      // TODO, FIX ME: could be coming from many places
+      auto key = i;
+      uses.getArg0()->updateKey(i);
+      uses.getArg1()->updateKey(i);
+      continue;
+    }
+  }
+#endif
+
+  //
+  for (auto instr : AdaptRange(instrs, numInstrs)) {
+    if (instr.opcode.code == Opcode::COPY)
+      if (instr.opcode.isArg0NotLastUse) instr.key = 0;
+  }
+
+  // Finalize the keys.
+  for (Instruction* i = instrs, *e = instrs + numInstrs; i != e; ++i)
+    i->updateKey();
+
+  for (Instruction* i = instrs, *e = instrs + numInstrs; i != e; ++i) {
+    if (i->opcode == &globalOpcodes.phi)
+      continue;
+    if (i->opcode->hasArg0 && !i->arg0Live) traverse(i, i->arg0);
+    if (i->opcode->hasArg1 && !i->arg1Live) traverse(i, i->arg1);
+  }
+
+  assert(!interactions.empty());
+  // We should really just return in this case.
+
+  std::sort(interactions.begin(), interactions.end());
+  std::vector<std::pair<int, int>> uniqued;
+  uniqued.push_back(*interactions.begin());
+  for (auto i = interactions.begin() + 1, e = interactions.end(); i != e; ++i)
+    if (*i != i[-1]) uniqued.push_back(*i);
+  for (auto i : uniqued) printf("> %d, %d\n", i.first, i.second);
+  for (auto i : uniqued) {
+    instrs[i.first].pressure++;
+    instrs[i.second].pressure++;
+  }
+
+  std::vector<std::<int, int>> shared;
+  for (Instruction* i = instrs, *e = instrs + numInstrs; i != e; ++i)
+    if (i->opcode == &globalOpcodes.add || i->opcode == &globalOpcodes.mul ||
+        i->opcode == &globalOpcodes.cmpeq) {
+    shared.push_back(std::make_pair());
+    }
+
+  std::vector<Instruction*> work;
+  for (auto i = instrs, e = instrs + numInstrs; i != e; ++i) work.push_back(i);
+  std::sort(work.begin(), work.end(), [](Instruction* a, Instruction* b) {
+    return a->pressure < b->pressure || a->pressure == b->pressure && a < b;
+  });
+  for (auto i : work) printf("%d : %d\n", i - instrs, i->pressure);
+
+  for (auto& i : uniqued)
+    if (instrs[i.first].pressure > instrs[i.second].pressure ||
+        instrs[i.first].pressure == instrs[i.second].pressure &&
+            i.first > i.second) {
+      i = std::make_pair(i.second, i.first);
+      printf("*");
+    } else
+      printf(".");
+  printf("\n");
+
+  // for (auto i : uniqued) printf("> %d, %d\n", i.first, i.second);
+  // printf("\n");
+  std::sort(uniqued.begin(), uniqued.end(),
+            [&](std::pair<int, int> a, std::pair<int, int> b) {
+    return instrs[a.first].pressure < instrs[b.first].pressure ||
+           instrs[a.first].pressure == instrs[b.first].pressure &&
+               a.first < b.first;
+  });
+  for (auto i : uniqued) printf("> %d, %d\n", i.first, i.second);
+
+  auto interaction = uniqued.begin();
+  for (auto i : work) {
+    i->reg = ~i->invalidRegs & -~i->invalidRegs;
+    while (interaction != uniqued.end() && instrs + interaction->first == i)
+      instrs[interaction++->second].invalidRegs |= i->reg;
+  }
+
+#if 1
+      // for debugging
+      std::vector<std::pair<int, int>> ranges;
+  auto point = uniqued.begin();
+  for (auto i = uniqued.begin() + 1, e = uniqued.end(); i != e; ++i)
+    if (i->first != i[-1].first) {
+      ranges.push_back(
+          std::make_pair(point - uniqued.begin(), i - uniqued.begin()));
+      point = i;
+    }
+  ranges.push_back(std::make_pair(point - uniqued.begin(), uniqued.size()));
+  for (auto i : ranges) printf("[%d, %d) : %d : %d\n", i.first, i.second, uniqued[i.first].first, i.second - i.first);
 #endif
 
   printf("blocks = %d\ninstrs = %d\n", (int)numBlocks, (int)numInstrs);
   for (size_t i = 0; i < numBlocks; i++)
     printf("block%d\n  parent = %d\n  first = %d\n  instrs = %d\n", (int)i,
-           blocks[i].parent ? (int)(blocks[i].parent - blocks) : -1,
-           (int)(blocks[i].instrs - instrs),
-           (int)blocks[i].numInstrs);
+           blocks[i].dominator ? (int)(blocks[i].dominator - blocks) : -1,
+           (int)(blocks[i].instrs - instrs), (int)blocks[i].numInstrs);
 
 #if 0
-  size_t numInstrs = 0;
-  for (auto block : *cfg) {
-    numBlocks++;
-    numInstrs += countInstrs(block);
-  }
-  printf("blocks = %d\ninstrs = %d\n", (int)numBlocks, (int)numInstrs);
-  size_t size = sizeof(Opcodes) + sizeof(Procedure) * numProcs +
-                sizeof(Block) * numBlocks + sizeof(Instruction) * numInstrs;
-  assert(size <= 0x8000000u);
-  buffer = (char*)malloc(size);
-  opcodes = (Opcodes*)buffer;
-  firstProc = nextProc = (Procedure*)(buffer + sizeof(Opcodes));
-  firstBlock = nextBlock =
-      (Block*)(buffer + sizeof(Opcodes) + sizeof(Procedure) * numProcs);
-  firstInstr = nextInstr =
-      (Instruction*)(buffer + sizeof(Opcodes) + sizeof(Procedure) * numProcs +
-                     sizeof(Instruction) * numInstrs);
-  memcpy(opcodes, &globalOpcodes, sizeof(Opcodes));
-
-  for (auto block : *cfg)
-    emitBlock(block);
-  for (auto block : *cfg) {
-    Block* b = new Block();
-    // TODO:b.init();
-    emitBlock(block);
-  }
   // Patch up all of the jump targets.
   for (auto block : *cfg) {
     if (!block->terminator())
@@ -200,7 +385,7 @@ void InstructionStream::encode(SCFG* const* cfgs, size_t numCFGs) {
 }
 
 size_t InstructionStream::countInstrs(SExpr* expr) {
-  if (expr->id()) return 0;
+  if (expr->getBackendID()) return 0;
   expr->setBackendID(&countedMarker);
   switch (expr->opcode()) {
     case COP_Literal:
@@ -213,11 +398,14 @@ size_t InstructionStream::countInstrs(SExpr* expr) {
     case COP_Phi:
       // Because phi instructions are binary we need n-1 of them to make a tree
       // of phi/tie instructions with n leaves.
+      assert(cast<Phi>(expr)->values().size() == 2);
       return cast<Phi>(expr)->values().size() - 1;
     case COP_Goto:
       return cast<Goto>(expr)->targetBlock()->arguments().size() + 1;
     case COP_Branch:
       return countInstrs(cast<Branch>(expr)->condition()) + 1;
+    case COP_Return:
+      return countInstrs(cast<Return>(expr)->returnValue()) + 1;
     default:
       printf("unknown opcode: %d\n", expr->opcode());
       assert(false);
@@ -225,122 +413,87 @@ size_t InstructionStream::countInstrs(SExpr* expr) {
   }
 }
 
-Instruction* InstructionStream::emitInstrs(Instruction* nextInstr, Block* block,
-                                           SExpr* expr) {
-  if (expr->getBackendID() != &countedMarker) return (Instruction*)expr->id();
-  expr->setBackendID(nextInstr);
-  switch (expr->opcode()) {
-  case COP_Literal: {
-    Literal* literal = cast<Literal>(expr);
-    switch (literal->valueType().Base) {
-    case ValueType::BT_Int:
-      *nextInstr = Instruction(block, &globalOpcodes.intValue,
-        (Instruction*)literal->as<int>().value());
-      break;
-    default:
-      assert(false);
-    }
-  }
-#if 0
-  case COP_Variable:
-    return countInstrs(cast<Variable>(expr)->definition());
-  case COP_BinaryOp:
-    return countInstrs(cast<BinaryOp>(expr)->expr0()) +
-      countInstrs(cast<BinaryOp>(expr)->expr1()) + 1;
-  case COP_Phi:
-    // Because phi instructions are binary we need n-1 of them to make a tree
-    // of phi/tie instructions with n leaves.
-    return cast<Phi>(expr)->values().size() - 1;
-  case COP_Goto:
-    return cast<Goto>(expr)->targetBlock()->arguments().size() + 1;
-  case COP_Branch:
-    return countInstrs(cast<Branch>(expr)->condition()) + 1;
-#endif
-  default:
-    printf("unknown opcode: %d\n", expr->opcode());
-    assert(false);
-    return 0;
-  }
-  return nextInstr;
+Instruction* InstructionStream::emitBlockHeader(Instruction* nextInstr,
+                                                Block* block) {
+  if (!block->dominator) return nextInstr;
+  if (block->head != block)
+    nextInstr->init(Opcodes::headerDominates, 0, block->head->instrs);
+  else
+    nextInstr->init(Opcodes::header, 0,
+                    block->dominator->instrs + block->dominator->numInstrs);
+  return ++nextInstr;
 }
 
-#if 0
-void InstructionStream::emitPhi(Phi* phi) {
-  int id = getNewID();
+Instruction* InstructionStream::emitArgument(Instruction* nextInstr, Phi* phi) {
+  // Because phi instructions are binary we need n-1 of them to make a tree
+  // of phi/tie instructions with n leaves.
   if (phi->values().size() == 1) {
     // TODO: eliminate this case in the middle-end
-    phi->setId((phi->values()[0])->id());
-    return;
+    phi->setBackendID(phi->values()[0]->getBackendID());
+    return nextInstr;
   }
   assert(phi->values().size() == 2);
-  instrs.push_back(Instruction(
-    currentBlock,
-    &OpCodes::phi,
-    cast<Variable>(phi->values()[0])->id() - id,
-    cast<Variable>(phi->values()[1])->id() - id));
-  phi->setId(id);
+  nextInstr->init(Opcodes::phi,
+    (Instruction*)phi->values()[0]->getBackendID(),
+    (Instruction*)phi->values()[1]->getBackendID());
+  phi->setBackendID(nextInstr);
+  return ++nextInstr;
 }
 
-void InstructionStream::emitLiteral(Literal* literal) {
-  switch (literal->valueType().Base) {
-  case ValueType::BT_Int:
-    instrs.push_back(Instruction(
-      currentBlock,
-      &OpCodes::intValue,
-      literal->as<int>().value()));
-    break;
-  default:
-    assert(false);
-  }
-}
-
-void InstructionStream::emitBinaryOp(BinaryOp* binaryOp) {
-  int expr0ID = emitExpression(binaryOp->expr0());
-  int expr1ID = emitExpression(binaryOp->expr1());
-  const OpCode* opcode = &OpCodes::nop;
-  switch (binaryOp->binaryOpcode()) {
-  case BOP_Add: opcode = &OpCodes::add; break;
-  case BOP_Mul: opcode = &OpCodes::mul; break;
-  case BOP_Eq: opcode = &OpCodes::cmpeq; break;
-  case BOP_Lt: opcode = &OpCodes::cmplt; break;
-  case BOP_Leq: opcode = &OpCodes::cmple; break;
-  default:
-    assert(false);
-  }
-  int site = getNewID();
-  instrs.push_back(Instruction(currentBlock, opcode, expr0ID - site, expr1ID - site));
-}
-
-int InstructionStream::emitExpression(SExpr* expr) {
-  if (expr->id())
-    return expr->id();
+Instruction* InstructionStream::emitInstrs(Instruction* nextInstr,
+                                           SExpr* expr) {
+  if (expr->getBackendID() != &countedMarker) return nextInstr;
+  expr->setBackendID(nextInstr);
   switch (expr->opcode()) {
-  case COP_Literal: emitLiteral(cast<Literal>(expr)); break;
-  case COP_Variable: emitExpression(cast<Variable>(expr)->definition()); break;
-  case COP_BinaryOp: emitBinaryOp(cast<BinaryOp>(expr)); break;
+    case COP_Literal: {
+      Literal* literal = cast<Literal>(expr);
+      switch (literal->valueType().Base) {
+        case ValueType::BT_Int:
+          nextInstr->init(Opcodes::intValue,
+                                   (Instruction*)literal->as<int>().value());
+          break;
+        default:
+          assert(false);
+      }
+      break;
+    }
+    case COP_Variable: {
+      auto instr = emitInstrs(nextInstr, cast<Variable>(expr)->definition());
+      expr->setBackendID(instr - 1);
+      return instr;
+    }
+    case COP_BinaryOp: {
+      auto binaryOp = cast<BinaryOp>(expr);
+      nextInstr = emitInstrs(nextInstr, binaryOp->expr0());
+      nextInstr = emitInstrs(nextInstr, binaryOp->expr1());
+      Opcode opcode = Opcodes::nop;
+      switch (binaryOp->binaryOpcode()) {
+        case BOP_Add: opcode = Opcodes::add; break;
+        case BOP_Mul: opcode = Opcodes::mul; break;
+        case BOP_Eq: opcode = Opcodes::cmpeq; break;
+        case BOP_Lt: opcode = Opcodes::cmplt; break;
+        case BOP_Leq: opcode = Opcodes::cmple; break;
+        default: assert(false);
+      }
+      printf("?? %d : %d %d\n", binaryOp->binaryOpcode(),
+             (Instruction*)binaryOp->expr0()->opcode(),
+             (Instruction*)binaryOp->expr1()->opcode());
+      nextInstr->init(opcode, 
+                      (Instruction*)binaryOp->expr0()->getBackendID(),
+                      (Instruction*)binaryOp->expr1()->getBackendID());
+      break;
+    }
+    default:
+      printf("unknown opcode: %d\n", expr->opcode());
+      assert(false);
+      return 0;
   }
-  expr->setId(getLastID());
-  return expr->id();
-}
-
-void InstructionStream::emitTerminator(BasicBlock* basicBlock) {
-  auto expr = basicBlock->terminator();
-  if (!expr) {
-    // Presently Ohmu IR doesn't have/use ret instructions.
-    // We should figure out how to differentiate functions that return values
-    // and those that don't.
-    //assert(!instrs.empty() && instrs.back().opcode->hasResult);
-    //assert(basicBlock->instructions().size() != 0);
-    instrs.push_back(Instruction(currentBlock, &OpCodes::ret, -1));
-    return;
-  }
-  switch (expr->opcode()) {
-  case COP_Goto: emitJump(basicBlock, cast<Goto>(expr)); break;
-  case COP_Branch: emitBranch(basicBlock, cast<Branch>(expr)); break;
-  }
+  expr->setBackendID(nextInstr);
+  return ++nextInstr;
 }
 
 // the index for this block in the target's phis
+// TODO: make this not a search;
 static size_t getPhiIndex(BasicBlock* basicBlock, BasicBlock* targetBlock) {
   auto& predecessors = targetBlock->predecessors();
   for (size_t i = 0, e = predecessors.size(); i != e; ++i)
@@ -349,28 +502,44 @@ static size_t getPhiIndex(BasicBlock* basicBlock, BasicBlock* targetBlock) {
   return 0;
 }
 
-void InstructionStream::emitJump(BasicBlock* basicBlock, Goto* jump) {
-  auto targetBlock = jump->targetBlock();
-  size_t phiIndex = getPhiIndex(basicBlock, targetBlock);
-  auto& arguments = targetBlock->arguments();
-  for (auto arg : arguments) {
-    SExpr* expr = cast<Phi>(arg->definition())->values()[phiIndex];
-    int argid = emitExpression(expr);
-    int echoid = getNewID();
-    instrs.push_back(Instruction(currentBlock, &OpCodes::echo, argid - echoid));
-    expr->setId(echoid);
+Instruction* InstructionStream::emitTerminator(Instruction* nextInstr,
+                                               Terminator* term,
+                                               BasicBlock* basicBlock) {
+  switch (term->opcode()) {
+    case COP_Goto: {
+      auto jump = cast<Goto>(term);
+      auto targetBlock = jump->targetBlock();
+      size_t phiIndex = getPhiIndex(basicBlock, targetBlock);
+      auto& arguments = targetBlock->arguments();
+      // This loop should emit nothing! TODO: validate and remove
+      for (auto arg : arguments)
+        nextInstr = emitInstrs(nextInstr, cast<Phi>(arg)->values()[phiIndex]);
+      for (auto arg : arguments) {
+        auto instr =
+            (Instruction*)cast<Phi>(arg)->values()[phiIndex]->getBackendID();
+        (nextInstr++)->init(&Opcodes::copy, instr, nextInstr, instr);
+      }
+      nextInstr->init(Opcodes::jump);
+      break;
+    }
+    case COP_Branch: {
+      auto branch = cast<Branch>(term);
+      auto condition = branch->condition();
+      nextInstr = emitInstrs(nextInstr, condition);
+      nextInstr->init(Opcodes::branch, (Instruction*)condition->getBackendID());
+      break;
+    }
+    case COP_Return: {
+      auto ret = cast<Return>(term);
+      auto value = ret->returnValue();
+      nextInstr = emitInstrs(nextInstr, value);
+      nextInstr->init(Opcodes::ret, (Instruction*)value->getBackendID());
+      break;
+    }
   }
-  instrs.push_back(Instruction(currentBlock, &OpCodes::jump));
+  term->setBackendID(nextInstr);
+  return ++nextInstr;
 }
-
-void InstructionStream::emitBranch(BasicBlock* basicBlock, Branch* branch) {
-  // There should be no critical edges.
-  emitExpression(branch->condition());
-  instrs.push_back(Instruction(currentBlock, &OpCodes::branch,
-    branch->condition()->id() - getNewID()));
-}
-#endif
-
 
 
 
@@ -877,9 +1046,9 @@ void InstructionStream::printWalks() {
 
 void encode(SCFG* cfg, char* output) {
   InstructionStream stream;
-  //stream.encode(&cfg, 1);
+  stream.encode(&cfg, 1);
 
-  //print(stream.instrs.data(), stream.instrs.size());
+  print(stream.instrs, stream.numInstrs);
   //stream.printWalks();
   //X64Builder builder;
   //emitASM(builder, InstructionStream.events.data(), InstructionStream.events.size());

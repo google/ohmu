@@ -294,10 +294,11 @@ public:
 
 protected:
   SExpr(TIL_Opcode Op)
-    : Opcode(Op), Reserved(0), Flags(0), SExprID(0), Block(nullptr) {}
+    : Opcode(Op), Reserved(0), Flags(0), SExprID(0), Block(nullptr),
+      BackendID(nullptr) {}
   SExpr(const SExpr &E)
     : Opcode(E.Opcode), Reserved(0), Flags(E.Flags), SExprID(0),
-      Block(nullptr) {}
+      Block(nullptr) , BackendID(nullptr) {}
 
   const unsigned char Opcode;
   unsigned char Reserved;
@@ -1780,6 +1781,7 @@ private:
   InstrArray  Instrs;        // Instructions.
   Terminator* TermInstr;     // Terminating instruction
 
+ public:
   TopologyNode DominatorNode;       // The dominator tree
   TopologyNode PostDominatorNode;   // The post-dominator tree
 };

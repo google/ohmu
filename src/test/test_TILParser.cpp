@@ -53,8 +53,8 @@ int main(int argc, const char** argv) {
 
   bool success = BNFParser::initParserFromFile(tilParser, file, false);
   std::cout << "\n";
-  if (success)
-    tilParser.printSyntax(std::cout);
+  //if (success)
+  //  tilParser.printSyntax(std::cout);
 
   fclose(file);
 
@@ -95,7 +95,7 @@ int main(int argc, const char** argv) {
     std::cout << "\nCFG:\n";
     SCFG* cfg = CFGLoweringPass::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
-    //encode(cfg, nullptr);
+    encode(cfg, nullptr);
   }
   delete v;
 

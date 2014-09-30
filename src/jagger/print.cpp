@@ -19,16 +19,22 @@
 #include <stdio.h>
 
 namespace Jagger {
-void Instruction::print(int index) {
-  const Opcode* opcode = opcode;
-  printf("%3d %-10s", index, opcode->name);
-  if (opcode->isJump) printf(" jump to %d", index + arg1);
+void Instruction::print(const Instruction* base) {
+  const Opcode* opcode = this->opcode;
+  printf("%3d %-10s", this - base, opcode->name);
+  if (opcode->isJump) printf(" jump to %d", arg1 - base);
   if (opcode->hasResult)
-    printf(" |%3d| {%04x (%04x) : %04x} [%2d]", index + key, ~invalidRegs, preferredRegs, reg, pressure);
+    printf(" |%3d| {%04x (%04x) : %04x} [%2d]", key - base, ~invalidRegs,
+           preferredRegs, reg, pressure);
   if (opcode->hasArg0) {
-    printf(" (%d", index + arg0);
-    if (opcode->hasArg1)
-      printf(", %d", index + arg1);
+    printf(" (%d", arg0 - base);
+    if (!arg0Live)
+      printf("*");
+    if (opcode->hasArg1) {
+      printf(", %d", arg1 - base);
+      if (!arg1Live)
+        printf("*");
+    }
     printf(")");
   }
   if (opcode->isIntLiteral)
@@ -37,8 +43,7 @@ void Instruction::print(int index) {
 }
 
 void print(Instruction* instrs, size_t numInstrs) {
-  int index = 0;
   for (auto i = instrs, e = instrs + numInstrs; i != e; ++i)
-    i->print(index++);
+    i->print(instrs);
 }
 }

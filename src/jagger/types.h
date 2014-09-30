@@ -25,51 +25,135 @@ struct Instruction;
 struct Use;
 
 struct Opcode {
+  enum {
+    NOP, PHI, HEADER, TIE, COPY,
+    VALUE, LOAD, STORE, GATHER, SCATTER,
+    SEXT, ZEXT, FCVT, /* ZEXT/FCVT used for truncation */
+    AND, OR, ANDN, ORN, XOR, XNOR, NOT,
+    SLL, SLR, SAR, ROL, ROR,
+    MIN, MAX,
+    ADD, SUB, SUBR, ADDN, ADC, SBB, NEG, ABS,
+    MUL, MULHI, DIV, MOD, RCP,
+    LEA,
+    MADD, MSUB, MSUBR, MADDN,
+    FMADD, FMSUB, FMSUBR, FMADDN,
+    EQ, LT, LE, UNORD, NEQ, NLT, NLE, ORD,
+    JUMP, BRANCH, CALL, RET,
+    BT, BTS, BTR, BTC,
+    CTZ, CLZ, POPCNT, /* other bit ops bmi1/bmi2 */
+    SQRT, RSQRT,
+    SHUFFLE, BROADCAST, EXTRACT, INSERT,
+  };
+  //   
+  // CRC, AES,
+  // MOVEMASK,
+  // RDTSC
+  // MEMCPY, MEMSET
+  // ATOMICS, EXCHAGE WITH MEMORY, CMPEXCH WITH MEMORY
+
+
+  unsigned code : 8;
+
+  unsigned hasResult : 1;
+  unsigned isDestructive : 1; // always destroys argument 0
+  unsigned isCommutative : 1;
+  unsigned flags : 3; // header kind, rounding mode, ordering
+
+  unsigned aliasSet : 2;
+  unsigned type : 2;
+  unsigned hasFixedReg : 1;
+  unsigned fixedReg : 3;
+
+  unsigned isArg0NotLastUse : 1;
+  unsigned isArg1NotLastUse : 1;
+  unsigned isUnused : 1;
+  unsigned _ : 5;
+
+  bool operator==(const Opcode& a) const { return *(int*)this == *(int*)this; }
+  bool operator!=(const Opcode& a) const { return *(int*)this != *(int*)this; }
+};
+
+struct OpcodeEx : Opcode {
+  unsigned hasFixedRegArg0 : 1;
+  unsigned hasFixedRegArg1 : 1;
+  unsigned registerFileArg0 : 3;
+  unsigned registerFileArg1 : 3;
+  unsigned fixedRegArg0 : 8;
+  unsigned fixedRegArg1 : 8;
   const char name[16];
-  bool hasResult;
-  bool hasArg0;
-  bool hasArg1;
-  bool isJump;
-  bool isIntLiteral;
-  unsigned reg;
-  unsigned arg0reg;
-  unsigned arg1reg;
 };
 
 struct Instruction {
-  Instruction() {}
-  Instruction(const Block* block, const Opcode* opcode,
-              const Instruction* arg0 = nullptr,
-              const Instruction* arg1 = nullptr)
-      : block(block),
-        opcode(opcode),
-        key(0),
-        arg0(arg0),
-        arg1(arg1),
-        invalidRegs(0),
-        preferredRegs(0),
-        reg(0),
-        pressure(0) {}
+  void init(Opcode opcode) { init(opcode, this); }
+  void init(Opcode opcode, Instruction* arg0) { init(opcode, arg0, this); }
+  void init(Opcode opcode, Instruction* arg0, Instruction* arg1) {
+    init(opcode, arg0, arg1, this);
+  }
+  void init(Opcode opcode, Instruction* arg0, Instruction* arg1,
+            Instruction* key) {
+    this->opcode = opcode;
+    this->key = key - this;
+    this->arg0 = arg0 - this;
+    this->arg1 = arg1 - this;
+    order = 0;
+  }
 
-  void print(int index);
+  Instruction* getKey() { return this + key; }
+  Instruction* getArg0() { return this + arg0; }
+  Instruction* getArg1() { return this + arg1; }
+  const Instruction* getKey() const { return this + key; }
+  const Instruction* getArg0() const { return this + arg0; }
+  const Instruction* getArg1() const { return this + arg1; }
+  const Instruction* updateKey() {
+    if (key) key = this[key].updateKey() - this;
+    return getKey();
+  }
+  const Instruction* updateKey(const Instruction* newKey) {
+    key = (key ? this[key].updateKey(newKey) : newKey) - this;
+    return getKey();
+  }
 
-  const Block* block;
-  const Opcode* opcode;
-  const Instruction* key;
-  const Instruction* arg0; // also literal
-  const Instruction* arg1; // jump target
-  unsigned invalidRegs;
-  unsigned preferredRegs;
-  unsigned reg;
-  int pressure;
+  void print(const Instruction* base);
+
+  Opcode opcode;
+  int key;
+  int arg0; // also literal
+  int arg1; // jump target
+  int order;
 };
 
 extern Instruction countedMarker;
 
 struct Block {
-  Block* parent;
-  Instruction* instrs;
+  //bool dominates(const Block& block) const {
+  //  return dominatorID <= block.dominatorID && block.dominatorID < dominatorID + dominatorSize;
+  //}
+  //bool postDominates(const Block& block) const {
+  //  return postDominatorID <= block.postDominatorID && block.postDominatorID < postDominatorID + postDominatorSize;
+  //}
+
+  Block* dominator;
+  Block* head;
+  //int dominatorID;
+  //int dominatorSize;
+  //Block* postDominator;
+  //int postDominatorID;
+  //int postDominatorSize;
+  //size_t local_size;
+  //size_t total_size;
+
+
+
+  //Block* parent;
+  //Instruction* instrs;
+  size_t firstInstr;;
   size_t numInstrs;
+  //size_t numPhis;
+  //size_t numEchos;
+  //Block** Preds;
+  //Block** Succs;
+  //size_t numPreds;
+  //size_t numSuccs;
 };
 
 //struct Procedure {
@@ -92,23 +176,22 @@ struct Block {
 //  int lastBlockOffset;
 //};
 
-struct Opcodes {
-  Opcode nop;
-  Opcode jump;
-  Opcode branch;
-  Opcode intValue;
-  Opcode ret;
-  Opcode echo;
-  Opcode copy;
-  Opcode phi;
-  Opcode add;
-  Opcode mul;
-  Opcode cmpeq;
-  Opcode cmplt;
-  Opcode cmple;
+namespace Opcodes {
+  extern OpcodeEx header;
+  extern OpcodeEx headerDominates;
+  extern OpcodeEx nop;
+  extern OpcodeEx jump;
+  extern OpcodeEx branch;
+  extern OpcodeEx intValue;
+  extern OpcodeEx ret;
+  extern OpcodeEx copy;
+  extern OpcodeEx phi;
+  extern OpcodeEx add;
+  extern OpcodeEx mul;
+  extern OpcodeEx cmpeq;
+  extern OpcodeEx cmplt;
+  extern OpcodeEx cmple;
 };
-
-extern const Opcodes globalOpcodes;
 
 void print(Instruction* instrs, size_t numInstrs);
 
