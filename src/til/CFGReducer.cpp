@@ -97,12 +97,15 @@ SExpr* CFGRewriteReducer::reduceCall(Call &orig, SExpr *e) {
         pb.continuation = cont;
 
       // End current block with a jump to the new one.
-      createGoto(pb.block, pendingPathArgs_);
+      assert(currentPathArgLen_ <= pendingPathArgs_.size());
+      unsigned nargs = pendingPathArgs_.size() - currentPathArgLen_;
+      createGoto(pb.block, pendingPathArgs_, nargs);
 
       // Add the pending block to the queue of reachable blocks, which will
       // be rewritten later.
       pendingBlockQueue_.push(pi);
-      pendingPathArgs_.clear();
+      for (unsigned i = 0; i < nargs; ++i)
+        pendingPathArgs_.pop_back();
       return nullptr;
     }
   }
@@ -183,7 +186,7 @@ void CFGRewriteReducer::addInstruction(SExpr* e) {
 
   if (Instruction* i = dyn_cast<Instruction>(e)) {
     if (!i->block()) {
-      i->setID(currentBB_, currentInstrNum_++);
+      i->setBlock(currentBB_);      // mark i as being in the current block
       currentInstrs_.push_back(i);
     }
   }
@@ -192,10 +195,8 @@ void CFGRewriteReducer::addInstruction(SExpr* e) {
 
 BasicBlock* CFGRewriteReducer::addBlock(unsigned nargs) {
   BasicBlock *b = new (Arena) BasicBlock(Arena);
-  b->setBlockID(currentBlockNum_++);
   for (unsigned i = 0; i < nargs; ++i) {
     auto *ph = new (Arena) Phi();
-    ph->setID(b, currentInstrNum_++);
     b->addArgument(ph);
   }
   return b;
@@ -261,7 +262,8 @@ Goto* CFGRewriteReducer::createGoto(BasicBlock *target, SExpr* result) {
 
 
 Goto* CFGRewriteReducer::createGoto(BasicBlock *target,
-                                    std::vector<SExpr*>& args) {
+                                    std::vector<SExpr*>& args,
+                                    unsigned len) {
   assert(currentBB_);
   if (target->arguments().size() != args.size()) {
     std::cerr << "target: " << target->arguments().size()
@@ -270,8 +272,9 @@ Goto* CFGRewriteReducer::createGoto(BasicBlock *target,
   }
 
   unsigned idx = target->addPredecessor(currentBB_);
-  for (unsigned pi = 0; pi < args.size(); ++pi) {
-    Phi *ph = target->arguments()[pi];
+  for (unsigned i = 0; i < len; ++i) {
+    unsigned pi = args.size() - len + i;
+    Phi *ph = target->arguments()[i];
     ph->values()[idx] = args[pi];
   }
 
@@ -285,15 +288,16 @@ void CFGRewriteReducer::initCFG() {
   assert(currentCFG_ == nullptr && currentBB_ == nullptr);
   currentCFG_ = new (Arena) SCFG(Arena, 0);
   currentBB_ = currentCFG_->entry();
-  pushContinuation(currentCFG_->exit());
+  setContinuation(currentCFG_->exit());
   assert(currentBB_->instructions().size() == 0);
 }
 
 
 SCFG* CFGRewriteReducer::finishCFG() {
+  currentCFG_->renumber();
   TILDebugPrinter::print(currentCFG_, std::cout);
   std::cout << "\n\n";
-  popContinuation();
+  setContinuation(nullptr);
   currentCFG_->computeNormalForm();
   return currentCFG_;
 }
@@ -322,15 +326,14 @@ SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *e, CFGRewriteReducer *r,
   // Process the then and else blocks
   SExpr* thenE = e->thenExpr();
   r->startBlock(br->thenBlock());
-  r->pushContinuation(cont);
+  r->setContinuation(cont);
   this->self()->traverseDM(&thenE, r, TRV_Tail);
-  r->popContinuation();
 
   SExpr* elseE = e->elseExpr();
   r->startBlock(br->elseBlock());
-  r->pushContinuation(cont);
+  r->setContinuation(cont);
   this->self()->traverseDM(&elseE, r, TRV_Tail);
-  r->popContinuation();
+  r->setContinuation(currCont);    // restore original continuation
 
   // If we had an existing continuation, then we're done.
   // The then/else blocks will call the continuation.
@@ -344,16 +347,37 @@ SExpr* CFGRewriter::traverseIfThenElse(IfThenElse *e, CFGRewriteReducer *r,
 }
 
 
+
+void CFGRewriter::traversePendingBlocks(CFGRewriteReducer *r) {
+  while (!r->pendingBlockQueue_.empty()) {
+    unsigned pi = r->pendingBlockQueue_.front();
+    r->pendingBlockQueue_.pop();
+
+    PendingBlock& pb = r->pendingBlocks_[pi];
+    if (!pb.continuation)
+      continue;   // unreachable or already processed block.
+
+    r->setContinuation(pb.continuation);
+    r->startBlock(pb.block);
+    r->varCtx_ = std::move(pb.ctx);
+    traverse(pb.expr, r, TRV_Tail);
+    r->setContinuation(nullptr);
+
+    pb.continuation = nullptr;  // mark block as processed.
+  }
+}
+
+
+
 SCFG* CFGRewriter::convertSExprToCFG(SExpr *e, MemRegionRef a) {
   CFGRewriteReducer reducer(a);
   CFGRewriter traverser;
 
   reducer.initCFG();
   traverser.traverse(e, &reducer, TRV_Tail);
-  reducer.finishLazyBlocks(traverser);
+  traverser.traversePendingBlocks(&reducer);
   return reducer.finishCFG();
 }
 
 
 }  // end namespace ohmu
-

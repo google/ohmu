@@ -1293,7 +1293,7 @@ public:
 private:
   friend class SCFG;
 
-  int  renumberInstrs(int id);  // assign unique ids to all instructions
+  unsigned  renumber(unsigned id);    // assign unique ids to all instructions
   int  topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
@@ -1387,12 +1387,10 @@ public:
   void setEntry(BasicBlock *BB) { Entry = BB; }
   void setExit(BasicBlock *BB)  { Exit = BB;  }
 
+  void renumber();         // assign unique ids to all instructions and blocks
   void computeNormalForm();
 
   DECLARE_TRAVERSE_AND_COMPARE(SCFG)
-
-private:
-  void renumberInstrs();       // assign unique ids to all instructions
 
 private:
   MemRegionRef Arena;

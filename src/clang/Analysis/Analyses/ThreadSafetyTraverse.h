@@ -108,11 +108,8 @@ public:
   /// Starting point for a traversal.
   /// Override this method to traverse SExprs of arbitrary type.
   template <class T>
-  MAPTYPE(RedT, T)
-  traverse(T* E, RedT *R, TraversalKind K) {
-    if (!R->enterSubExpr(E, K))
-      return R->skipTraverse(E);
-    return R->exitSubExpr(E, traverseByType(E, R, K), K);
+  MAPTYPE(RedT, T) traverse(T* E, RedT *R, TraversalKind K) {
+    return traverseByType(E, R, K);
   }
 
   /// Override these methods to traverse a particular type of SExpr.
@@ -127,8 +124,7 @@ public:
 
 protected:
   /// For generic SExprs, do dynamic dispatch by type.
-  MAPTYPE(RedT, SExpr)
-  traverseByType(SExpr* E, RedT *R, TraversalKind K) {
+  MAPTYPE(RedT, SExpr) traverseByType(SExpr* E, RedT *R, TraversalKind K) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                    \
     case COP_##X:                                                            \
@@ -141,8 +137,7 @@ protected:
 
   /// For SExprs of known type, do static dispatch by type.
 #define TIL_OPCODE_DEF(X)                                                    \
-  MAPTYPE(RedT, X)                                                           \
-  traverseByType(X* E, RedT *R, TraversalKind K) {              \
+  MAPTYPE(RedT, X) traverseByType(X* E, RedT *R, TraversalKind K) {          \
     return self()->traverse##X(E, R, K);                                     \
   }
 #include "ThreadSafetyOps.def"
@@ -180,21 +175,6 @@ public:
 template <class RedT>
 class DefaultScopeHandler {
 public:
-  /// Enter a new sub-expression E of traversal kind K.
-  /// Return true to continue traversal, false to skip E.
-  bool enterSubExpr(SExpr* E, TraversalKind K) { return true; }
-
-  /// Handle cases where the traversal chooses to skip E.
-  template <class T>
-  MAPTYPE(RedT, T) skipTraverse(T *E) { return RedT::reduceNull(); }
-
-  /// Finish traversing sub-expression E, with result Res, and return
-  /// the result.
-  template <class T>
-  MAPTYPE(RedT,T) exitSubExpr(SExpr *E, MAPTYPE(RedT,T) Res, TraversalKind K) {
-    return Res;
-  }
-
   /// Enter the lexical scope of Orig, which is rewritten to Nvd.
   void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) { }
 
@@ -397,31 +377,32 @@ public:
 template<class Self>
 class VisitReducer : public DefaultReadReducer<Self, VisitReducerMap> {
 public:
-  VisitReducer() : Success(true) { }
+  VisitReducer() { }
 
   bool reduceSExpr(SExpr &Orig) { return true; }
 
-  bool enterSubExpr(SExpr* E, TraversalKind K) {
-    return Success;  // Abort on failure.
-  }
+  class VisitTraversal : public Traversal<VisitTraversal, Self> {
+  public:
+    typedef Traversal<VisitTraversal, Self> Super;
 
-  bool exitSubExpr(SExpr *E, bool Res, TraversalKind K) {
-    Success = Success && Res;
-    return Success;
-  }
+    VisitTraversal() : Success(true) { }
 
-  bool skipTraverse(SExpr* E) { return false; }
+    /// Abort traversal on failure.
+    template <class T>
+    MAPTYPE(VisitReducerMap, T) traverse(T* E, Self *R, TraversalKind K) {
+      Success = Success && Super::traverse(E, R, K);
+      return Success;
+    }
 
-  class VisitTraversal : public Traversal<VisitTraversal, Self> { };
+  private:
+     bool Success;
+  };
 
   static bool visit(SExpr *E) {
     VisitTraversal Traverser;
     Self           Reducer;
     return Traverser.traverse(E, &Reducer, TRV_Tail);
   }
-
-private:
-  bool Success;
 };
 
 

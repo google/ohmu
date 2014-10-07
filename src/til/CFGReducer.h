@@ -66,54 +66,27 @@ private:
 };
 
 
+struct PendingBlock {
+  SExpr*      expr;
+  BasicBlock* block;
+  BasicBlock* continuation;
+  std::unique_ptr<VarContext> ctx;
+
+  PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
+    : expr(e), block(b), continuation(nullptr), ctx(c)
+  { }
+};
+
+
 
 class CFGRewriteReducer : public CopyReducer {
 public:
-  BasicBlock* currentContinuation() {
-    return continuationStack_.back();
-  }
+  BasicBlock* currentContinuation()   { return currentContinuation_; }
+  void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }
 
-  void pushContinuation(BasicBlock* b) {
-    continuationStack_.push_back(b);
-  }
-
-  BasicBlock* popContinuation() {
-    BasicBlock* b = continuationStack_.back();
-    continuationStack_.pop_back();
-    return b;
-  }
-
-
-  bool enterSubExpr(SExpr *e, TraversalKind k) {
-    if (k == TRV_Lazy)  // Skip lazy terms -- we'll handle them specially.
-      return false;
-
-    if (k == TRV_Tail) {
-      pushContinuation(currentContinuation());
-    } else {
-      pushContinuation(nullptr);
-    }
-    return true;
-  }
-
-  template <class T>
-  T* exitSubExpr(SExpr *e, T* res, TraversalKind k) {
-    BasicBlock *b = popContinuation();
-    if (!currentBB_)
-      return res;
-
-    addInstruction(res);
-    // If we have a continuation, then jump to it.
-    if (b) {
-      assert(k == TRV_Tail);
-      createGoto(b, res);
-      return nullptr;
-    }
-    return res;
-  }
-
-  std::nullptr_t skipTraverse(SExpr *E) { return nullptr; }
-
+  unsigned currentPathLen() { return currentPathArgLen_; }
+  void setPathLen(unsigned i) { currentPathArgLen_ = i; }
+  void clearPathLen() { currentPathArgLen_ = pendingPathArgs_.size(); }
 
   void enterScope(VarDecl *orig, VarDecl *Nv);
   void exitScope(const VarDecl *orig);
@@ -132,11 +105,17 @@ public:
   SExpr* reduceLet(Let &orig, VarDecl *nvd, SExpr *b);
 
 
+  // Add a new instruction to the current basic block.
+  void addInstruction(SExpr* e);
+
   // Create a new basic block.
   BasicBlock* addBlock(unsigned nargs = 0);
 
   /// Add BB to the current CFG, and start working on it.
   void startBlock(BasicBlock *bb);
+
+  // Finish the current basic block, terminating it with Term.
+  void finishBlock(Terminator* term);
 
   /// Terminate the current block with a branch instruction.
   /// This will create new blocks for the branches.
@@ -146,42 +125,22 @@ public:
   Goto* createGoto(BasicBlock *target, SExpr* result);
 
   /// Terminate the current block with a Goto instruction.
-  Goto* createGoto(BasicBlock *target, std::vector<SExpr*>& args);
+  /// Takes the top len arguments from args.
+  Goto* createGoto(BasicBlock *target, std::vector<SExpr*>& args, unsigned len);
 
   /// Creates a new CFG.
   /// Returns the exit block, for use as a continuation.
   void initCFG();
 
-  /// Finish lazy traversals.
-  template<class V>
-  void finishLazyBlocks(V& visitor);
-
   /// Completes the CFG and returns it.
   SCFG* finishCFG();
-
-protected:
-  struct PendingBlock {
-    SExpr*      expr;
-    BasicBlock* block;
-    BasicBlock* continuation;
-    std::unique_ptr<VarContext> ctx;
-
-    PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
-      : expr(e), block(b), continuation(nullptr), ctx(c)
-    { }
-  };
-
-  // Add a new instruction to the current basic block.
-  void addInstruction(SExpr* e);
-
-  // Finish the current basic block, terminating it with Term.
-  void finishBlock(Terminator* term);
 
 public:
   CFGRewriteReducer(MemRegionRef a)
       : CopyReducer(a), varCtx_(new VarContext()),
         currentCFG_(nullptr), currentBB_(nullptr),
-        currentInstrNum_(0), currentBlockNum_(2) { }
+        currentContinuation_(nullptr), currentPathArgLen_(0)
+  { }
 
 private:
   friend class CFGRewriter;
@@ -190,55 +149,75 @@ private:
   std::vector<SExpr*> instructionMap_;
   std::vector<SExpr*> blockMap_;
 
-  SCFG*       currentCFG_;                       //< the current SCFG
-  BasicBlock* currentBB_;                        //< the current basic block
-  unsigned    currentInstrNum_;
-  unsigned    currentBlockNum_;
+  SCFG*       currentCFG_;                      //< the current SCFG
+  BasicBlock* currentBB_;                       //< the current basic block
+  BasicBlock* currentContinuation_;      //< continuation for current block.
+  unsigned    currentPathArgLen_;
 
-  std::vector<Phi*>         currentArgs_;        //< arguments in currentBB.
-  std::vector<Instruction*> currentInstrs_;      //< instructions in currentBB.
-
-  std::vector<BasicBlock*>  continuationStack_;
-  std::vector<SExpr*>       pendingPathArgs_;
-
-  DenseMap<Code*, unsigned> codeMap_;
-  std::vector<PendingBlock> pendingBlocks_;
-  std::queue<unsigned>      pendingBlockQueue_;
+  std::vector<Phi*>          currentArgs_;      //< arguments in currentBB.
+  std::vector<Instruction*>  currentInstrs_;    //< instructions in currentBB.
+  std::vector<SExpr*>        pendingPathArgs_;
+  DenseMap<Code*, unsigned>  codeMap_;
+  std::vector<PendingBlock>  pendingBlocks_;
+  std::queue<unsigned>       pendingBlockQueue_;
 };
 
 
 
 class CFGRewriter : public Traversal<CFGRewriter, CFGRewriteReducer> {
 public:
+  typedef Traversal<CFGRewriter, CFGRewriteReducer> Super;
+
+  template <class T>
+  MAPTYPE(CFGRewriteReducer, T)
+  traverse(T* e, CFGRewriteReducer *r, TraversalKind k) {
+    if (k == TRV_Lazy)  // Skip lazy terms -- we'll handle them specially.
+      return nullptr;
+
+    // This is a CPS transform, so we track the current continuation.
+    BasicBlock* cont = r->currentContinuation();
+    if (k != TRV_Tail)
+      r->setContinuation(nullptr);
+
+    // Save any pending arguments
+    // unsigned plen = r->currentPathLen();
+    // r->clearPathLen();
+
+    // Do the traversal
+    auto* result = Super::traverse(e, r, k);
+
+    // Restore pending arguments, and ensure the traversal didn't add any.
+    // if (k != TRV_Path) {
+    //   r->setPathLen(plen);
+    //  assert(plen == r->pendingPathArgs_.size() && "Unhandled arguments.");
+    // }
+    // Restore continuation.
+    r->setContinuation(cont);
+
+    if (!r->currentBB_)
+      return result;
+
+    // Add instructions to the current basic block
+    r->addInstruction(result);
+
+    // If we have a continuation, then jump to it.
+    if (cont && k == TRV_Tail) {
+      r->createGoto(cont, result);
+      return nullptr;
+    }
+    return result;
+  }
+
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *e, CFGRewriteReducer *r,
                             TraversalKind k);
 
+  // Implement lazy block traversal.
+  void traversePendingBlocks(CFGRewriteReducer *r);
+
   static SCFG* convertSExprToCFG(SExpr *e, MemRegionRef a);
 };
-
-
-
-
-template<class V>
-void CFGRewriteReducer::finishLazyBlocks(V& visitor) {
-  while (!pendingBlockQueue_.empty()) {
-    unsigned pi = pendingBlockQueue_.front();
-    pendingBlockQueue_.pop();
-    PendingBlock& pb = pendingBlocks_[pi];
-    if (!pb.continuation)
-      continue;   // unreachable or already processed block.
-
-    pushContinuation(pb.continuation);
-    startBlock(pb.block);
-    varCtx_ = std::move(pb.ctx);
-    visitor.traverse(pb.expr, this, TRV_Tail);
-    popContinuation();
-
-    pb.continuation = nullptr;  // mark block as processed.
-  }
-}
 
 
 }  // end namespace ohmu

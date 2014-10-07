@@ -168,7 +168,7 @@ void simplifyIncompleteArg(til::Phi *Ph) {
 
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
-int BasicBlock::renumberInstrs(int ID) {
+unsigned BasicBlock::renumber(unsigned ID) {
   for (auto *Arg : Args)
     Arg->setID(this, ID++);
   for (auto *Instr : Instrs)
@@ -275,10 +275,13 @@ void BasicBlock::computePostDominator() {
 
 
 // Renumber instructions in all blocks
-void SCFG::renumberInstrs() {
-  int InstrID = 0;
-  for (auto *Block : Blocks)
-    InstrID = Block->renumberInstrs(InstrID);
+void SCFG::renumber() {
+  unsigned InstrID = 0;
+  unsigned BlockID = 0;
+  for (auto *Block : Blocks) {
+    InstrID = Block->renumber(InstrID);
+    Block->setBlockID(BlockID++);
+  }
   NumInstructions = InstrID;
 }
 
@@ -331,8 +334,8 @@ void SCFG::computeNormalForm() {
   // assert(static_cast<size_t>(NumBlocks) == Blocks.size());
   // (void) NumBlocks;
 
-  // Renumber the instructions now that we have a final sort.
-  renumberInstrs();
+  // Renumber blocks and instructions now that we have a final sort.
+  renumber();
 
   // Compute post-dominators and compute the sizes of each node in the
   // dominator tree.
