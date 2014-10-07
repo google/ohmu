@@ -58,67 +58,67 @@ public:
     VD->setDefinition(E);
     return VD;
   }
-  SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
+  Function* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
     return new (Arena) Function(Orig, Nvd, E0);
   }
-  SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
+  SFunction* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
     return new (Arena) SFunction(Orig, Nvd, E0);
   }
-  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
+  Code* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Code(Orig, E0, E1);
   }
-  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
+  Field* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Field(Orig, E0, E1);
   }
 
-  SExpr* reduceLiteral(Literal &Orig) {
+  Literal* reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);
   }
   template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
+  LiteralT<T>* reduceLiteralT(LiteralT<T> &Orig) {
     return new (Arena) LiteralT<T>(Orig);
   }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
+  LiteralPtr* reduceLiteralPtr(LiteralPtr &Orig) {
     return new (Arena) LiteralPtr(Orig);
   }
-  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
+  Variable* reduceVariable(Variable &Orig, VarDecl* VD) {
     return new (Arena) Variable(Orig, VD);
   }
 
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
+  Apply* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Apply(Orig, E0, E1);
   }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
+  SApply* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) SApply(Orig, E0, E1);
   }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
+  Project* reduceProject(Project &Orig, SExpr* E0) {
     return new (Arena) Project(Orig, E0);
   }
-  SExpr* reduceCall(Call &Orig, SExpr* E0) {
+  Call* reduceCall(Call &Orig, SExpr* E0) {
     return new (Arena) Call(Orig, E0);
   }
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
+  Alloc* reduceAlloc(Alloc &Orig, SExpr* E0) {
     return new (Arena) Alloc(Orig, E0);
   }
-  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
+  Load* reduceLoad(Load &Orig, SExpr* E0) {
     return new (Arena) Load(Orig, E0);
   }
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
+  Store* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Store(Orig, E0, E1);
   }
-  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
+  ArrayIndex* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) ArrayIndex(Orig, E0, E1);
   }
-  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
+  ArrayAdd* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) ArrayAdd(Orig, E0, E1);
   }
-  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
+  UnaryOp* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
     return new (Arena) UnaryOp(Orig, E0);
   }
-  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
+  BinaryOp* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) BinaryOp(Orig, E0, E1);
   }
-  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
+  Cast* reduceCast(Cast &Orig, SExpr* E0) {
     return new (Arena) Cast(Orig, E0);
   }
 
@@ -130,13 +130,13 @@ public:
   }
   Phi* reducePhi(Phi* Ph) { return Ph; }
 
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
+  Goto* reduceGoto(Goto &Orig, BasicBlock *B) {
     return new (Arena) Goto(Orig, B, 0);
   }
-  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
+  Branch* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return new (Arena) Branch(O, C, B0, B1);
   }
-  SExpr* reduceReturn(Return &O, SExpr* E) {
+  Return* reduceReturn(Return &O, SExpr* E) {
     return new (Arena) Return(O, E);
   }
 

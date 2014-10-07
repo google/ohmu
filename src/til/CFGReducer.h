@@ -27,6 +27,8 @@
 #include "til/CopyReducer.h"
 
 #include <cstddef>
+#include <memory>
+#include <queue>
 #include <vector>
 
 namespace ohmu {
@@ -36,7 +38,7 @@ using namespace clang::threadSafety::til;
 
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
-  TILDebugPrinter() : PrettyPrinter(false, false, false) { }
+  TILDebugPrinter() : PrettyPrinter(true, false, false) { }
 };
 
 
@@ -45,17 +47,22 @@ class VarContext {
 public:
   VarContext() { }
 
-  VarDecl* lookup(StringRef S);
+  VarDecl*&   operator[](unsigned i) {
+    assert(i < size() && "Array out of bounds.");
+    return vars_[size()-1-i];
+  }
 
-  void        push(VarDecl *V) { Vars.push_back(V); }
-  void        pop()            { Vars.pop_back(); }
-  VarDecl*    back()           { return Vars.back(); }
-  VarContext* clone()          { return new VarContext(Vars); }
+  VarDecl*    lookup(StringRef s);
+  size_t      size() const      { return vars_.size(); }
+  void        push(VarDecl *vd) { vars_.push_back(vd); }
+  void        pop()             { vars_.pop_back(); }
+  VarDecl*    back()            { return vars_.back(); }
+  VarContext* clone()           { return new VarContext(*this); }
 
 private:
-  VarContext(const std::vector<VarDecl*>& Vs) : Vars(Vs) { }
+  VarContext(const VarContext& ctx) : vars_(ctx.vars_) { }
 
-  std::vector<VarDecl*> Vars;
+  std::vector<VarDecl*> vars_;
 };
 
 
@@ -76,140 +83,127 @@ public:
     return b;
   }
 
-  /*
-  unsigned saveState() { return continuationStack_.size(); }
 
-  void restoreState(unsigned s) {
-    assert(s <= continuationStack_.size());
-    while (continuationStack_.size() > s)
-      continuationStack_.pop_back();
-  }
-  */
+  bool enterSubExpr(SExpr *e, TraversalKind k) {
+    if (k == TRV_Lazy)  // Skip lazy terms -- we'll handle them specially.
+      return false;
 
-  bool enterSubExpr(SExpr *E, TraversalKind K) {
-    //std::cout << "enter: " << getOpcodeString(E->opcode()) << " " << K
-    //          << " " << continuationStack_.size();
-    if (K == TRV_Tail) {
-      //std::cout << " " << (size_t)currentContinuation() << "\n";
+    if (k == TRV_Tail) {
       pushContinuation(currentContinuation());
     } else {
-      //std::cout << " 0\n";
       pushContinuation(nullptr);
     }
     return true;
   }
 
   template <class T>
-  T* exitSubExpr(SExpr *E, T* Res, TraversalKind K) {
+  T* exitSubExpr(SExpr *e, T* res, TraversalKind k) {
     BasicBlock *b = popContinuation();
-    //std::cout << "exit: " << getOpcodeString(E->opcode()) << " " << K
-    //          << " " << continuationStack_.size() << " " << (size_t)b << "\n";
     if (!currentBB_)
-      return Res;
+      return res;
 
-    addInstruction(Res);
+    addInstruction(res);
     // If we have a continuation, then jump to it.
     if (b) {
-      assert(K == TRV_Tail);
-      createGoto(b, Res);
+      assert(k == TRV_Tail);
+      createGoto(b, res);
       return nullptr;
     }
-    return Res;
+    return res;
   }
 
   std::nullptr_t skipTraverse(SExpr *E) { return nullptr; }
 
 
-  void enterScope(VarDecl *Orig, VarDecl *Nv);
-  void exitScope(const VarDecl *Orig);
+  void enterScope(VarDecl *orig, VarDecl *Nv);
+  void exitScope(const VarDecl *orig);
 
-  void enterBasicBlock(BasicBlock *BB, BasicBlock *Nbb) { }
-  void exitBasicBlock (BasicBlock *BB) { }
+  void enterBasicBlock(BasicBlock *bb, BasicBlock *nbb) { }
+  void exitBasicBlock (BasicBlock *bb) { }
 
-  void enterCFG(SCFG *Cfg, SCFG* NCfg) { }
-  void exitCFG (SCFG *Cfg) { }
+  void enterCFG(SCFG *cfg, SCFG* ncfg) { }
+  void exitCFG (SCFG *cfg) { }
 
-  /*
-  SExpr* reduceCall(Call &Orig, SExpr *Targ) {
-    SExpr *T = Targ;
-    while (auto *A = dyn_cast<Apply>(T)) {
-      T = A->fun();
-    }
-  }
-  */
 
-  SExpr* reduceIdentifier(Identifier &Orig) {
-    VarDecl* VD = varCtx_.lookup(Orig.name());
-    // TODO: emit warning on name-not-found.
-    if (VD) {
-      if (VD->kind() == VarDecl::VK_Let)
-        return VD->definition();
-      return new (Arena) Variable(VD);
-    }
-    return new (Arena) Identifier(Orig);
-  }
+  SExpr* reduceApply(Apply &orig, SExpr* e, SExpr *a);
+  SExpr* reduceCall(Call &orig, SExpr *e);
+  SExpr* reduceCode(Code& orig, SExpr* e0, SExpr* e1);
+  SExpr* reduceIdentifier(Identifier &orig);
+  SExpr* reduceLet(Let &orig, VarDecl *nvd, SExpr *b);
 
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr *B) {
-    if (currentCFG_)
-      return B;   // eliminate the let
-    else
-      return new (Arena) Let(Orig, Nvd, B);
-  }
 
+  // Create a new basic block.
+  BasicBlock* addBlock(unsigned nargs = 0);
 
   /// Add BB to the current CFG, and start working on it.
-  void startBlock(BasicBlock *BB);
+  void startBlock(BasicBlock *bb);
 
   /// Terminate the current block with a branch instruction.
   /// This will create new blocks for the branches.
-  Branch* createBranch(SExpr *Cond);
+  Branch* createBranch(SExpr *cond);
 
   /// Terminate the current block with a Goto instruction.
-  Goto* createGoto(BasicBlock *Target, SExpr* Result);
+  Goto* createGoto(BasicBlock *target, SExpr* result);
+
+  /// Terminate the current block with a Goto instruction.
+  Goto* createGoto(BasicBlock *target, std::vector<SExpr*>& args);
 
   /// Creates a new CFG.
   /// Returns the exit block, for use as a continuation.
   void initCFG();
 
+  /// Finish lazy traversals.
+  template<class V>
+  void finishLazyBlocks(V& visitor);
+
   /// Completes the CFG and returns it.
   SCFG* finishCFG();
 
-
 protected:
-  // Add a new instruction to the current basic block.
-  void addInstruction(SExpr* E);
+  struct PendingBlock {
+    SExpr*      expr;
+    BasicBlock* block;
+    BasicBlock* continuation;
+    std::unique_ptr<VarContext> ctx;
 
-  // Create a new basic block.
-  BasicBlock* addBlock();
+    PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
+      : expr(e), block(b), continuation(nullptr), ctx(c)
+    { }
+  };
+
+  // Add a new instruction to the current basic block.
+  void addInstruction(SExpr* e);
 
   // Finish the current basic block, terminating it with Term.
-  void finishBlock(Terminator* Term);
-
-  // Make a new continuation
-  BasicBlock* makeContinuation();
+  void finishBlock(Terminator* term);
 
 public:
-  CFGRewriteReducer(MemRegionRef A)
-    : CopyReducer(A), currentCFG_(nullptr), currentBB_(nullptr),
-      currentInstrNum_(0), currentBlockNum_(2)
-  { }
+  CFGRewriteReducer(MemRegionRef a)
+      : CopyReducer(a), varCtx_(new VarContext()),
+        currentCFG_(nullptr), currentBB_(nullptr),
+        currentInstrNum_(0), currentBlockNum_(2) { }
 
 private:
-  friend class ContextT;
   friend class CFGRewriter;
 
-  VarContext varCtx_;
+  std::unique_ptr<VarContext> varCtx_;
   std::vector<SExpr*> instructionMap_;
   std::vector<SExpr*> blockMap_;
 
-  SCFG*       currentCFG_;              //< the current SCFG
-  BasicBlock* currentBB_;               //< the current basic block
+  SCFG*       currentCFG_;                       //< the current SCFG
+  BasicBlock* currentBB_;                        //< the current basic block
   unsigned    currentInstrNum_;
   unsigned    currentBlockNum_;
 
   std::vector<Phi*>         currentArgs_;        //< arguments in currentBB.
   std::vector<Instruction*> currentInstrs_;      //< instructions in currentBB.
+
   std::vector<BasicBlock*>  continuationStack_;
+  std::vector<SExpr*>       pendingPathArgs_;
+
+  DenseMap<Code*, unsigned> codeMap_;
+  std::vector<PendingBlock> pendingBlocks_;
+  std::queue<unsigned>      pendingBlockQueue_;
 };
 
 
@@ -218,12 +212,33 @@ class CFGRewriter : public Traversal<CFGRewriter, CFGRewriteReducer> {
 public:
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
-  SExpr* traverseIfThenElse(IfThenElse *E, CFGRewriteReducer *R,
-                            TraversalKind K);
+  SExpr* traverseIfThenElse(IfThenElse *e, CFGRewriteReducer *r,
+                            TraversalKind k);
 
-  static SCFG* convertSExprToCFG(SExpr *E, MemRegionRef A);
+  static SCFG* convertSExprToCFG(SExpr *e, MemRegionRef a);
 };
 
+
+
+
+template<class V>
+void CFGRewriteReducer::finishLazyBlocks(V& visitor) {
+  while (!pendingBlockQueue_.empty()) {
+    unsigned pi = pendingBlockQueue_.front();
+    pendingBlockQueue_.pop();
+    PendingBlock& pb = pendingBlocks_[pi];
+    if (!pb.continuation)
+      continue;   // unreachable or already processed block.
+
+    pushContinuation(pb.continuation);
+    startBlock(pb.block);
+    varCtx_ = std::move(pb.ctx);
+    visitor.traverse(pb.expr, this, TRV_Tail);
+    popContinuation();
+
+    pb.continuation = nullptr;  // mark block as processed.
+  }
+}
 
 
 }  // end namespace ohmu

@@ -121,8 +121,7 @@ protected:
   StringRef printableName(StringRef N) {
     if (N.length() > 0)
       return N;
-    else
-      return StringRef("_x", 2);
+    return StringRef("_x", 2);
   }
 
 
@@ -248,8 +247,10 @@ protected:
   }
 
   void printVariable(const Variable *E, StreamType &SS) {
-    if (E->variableDecl()->name().length() > 0)
+    if (E->variableDecl()->name().length() > 0) {
       SS << E->variableDecl()->name();
+      return;
+    }
     SS << "_x";
   }
 
@@ -324,7 +325,7 @@ protected:
     }
     self()->printSExpr(E->arg(), SS, Prec_MAX);
     if (!sugared)
-      SS << ")$";
+      SS << ")";
   }
 
   void printSApply(const SApply *E, StreamType &SS) {
@@ -369,6 +370,8 @@ protected:
     if (T->opcode() == COP_Apply) {
       self()->printApply(cast<Apply>(T), SS, true);
       SS << ")";
+      if (Verbose)
+        SS << "()";
     }
     else {
       self()->printSExpr(T, SS, Prec_Postfix);
@@ -449,9 +452,18 @@ protected:
   }
 
   void printBasicBlock(const BasicBlock *E, StreamType &SS) {
-    SS << "BB_" << E->blockID() << ":";
-    if (E->parent())
-      SS << " BB_" << E->parent()->blockID();
+    printBlockLabel(SS, E, -1);
+    SS << " : ";
+    printBlockLabel(SS, E->parent(), -1);
+    SS << " {";
+    bool First = true;
+    for (auto *B : E->predecessors()) {
+      if (!First)
+        SS << ", ";
+      printBlockLabel(SS, B, -1);
+      First = false;
+    }
+    SS << "}";
     newline(SS);
 
     for (auto *A : E->arguments())

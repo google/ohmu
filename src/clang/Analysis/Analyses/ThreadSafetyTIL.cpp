@@ -327,9 +327,9 @@ void SCFG::computeNormalForm() {
     Block->computeDominator();
 
   // Once dominators have been computed, the final sort may be performed.
-  int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
-  assert(static_cast<size_t>(NumBlocks) == Blocks.size());
-  (void) NumBlocks;
+  // int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
+  // assert(static_cast<size_t>(NumBlocks) == Blocks.size());
+  // (void) NumBlocks;
 
   // Renumber the instructions now that we have a final sort.
   renumberInstrs();
@@ -337,18 +337,18 @@ void SCFG::computeNormalForm() {
   // Compute post-dominators and compute the sizes of each node in the
   // dominator tree.
   for (auto *Block : Blocks.reverse()) {
-    Block->computePostDominator();
+  //  Block->computePostDominator();
     computeNodeSize(Block, &BasicBlock::DominatorNode);
   }
   // Compute the sizes of each node in the post-dominator tree and assign IDs in
   // the dominator tree.
   for (auto *Block : Blocks) {
     computeNodeID(Block, &BasicBlock::DominatorNode);
-    computeNodeSize(Block, &BasicBlock::PostDominatorNode);
+  //  computeNodeSize(Block, &BasicBlock::PostDominatorNode);
   }
   // Assign IDs in the post-dominator tree.
   for (auto *Block : Blocks.reverse()) {
-    computeNodeID(Block, &BasicBlock::PostDominatorNode);
+  //  computeNodeID(Block, &BasicBlock::PostDominatorNode);
   }
 }
 

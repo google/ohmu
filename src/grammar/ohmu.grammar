@@ -1,8 +1,8 @@
 
 // First rule for files
 definitions ::=
-  e=simple ";"           { (append [] e) }
-  |*[es] e=simple ";"    { (append es e) }
+  e=expr ";"           { (append [] e) }
+  |*[es] e=expr ";"    { (append es e) }
   ;
 
 // First rule for read-eval-print loop
@@ -40,7 +40,7 @@ funRest ::=
   ;
 
 funBody ::=
-    "=" value
+    "->" value
   | ":" t=expr "->" ( e=expr   { (code t e)         }
                     | "_"      { (code t (litNull)) }
                     )
@@ -72,8 +72,8 @@ exprList ::=
 
 simple ::=
     value
-  | s= %TK_Identifier  { (identifier s) }
-  | "(" e=expr ")"     { e }
+  | s= %TK_Identifier    { (identifier s) }
+  | "(" e=statement ")"  { e }
   ;
 
 mkApply[f,a] ::=
@@ -163,19 +163,24 @@ expr70 ::=
   | "new" e1=expr61 { (alloc e1) }
   ;
 
-expr90 ::=
+expr ::=
   a=expr70 (":=" b=expr70 { (store a b) }
            |              { a }
            )
   ;
 
-expr ::=
-    e1=expr90 (";" e2=expr                                 { (let "" e1 e2) }
-              |                                            { e1 }
-              )
-  | "let" s= %TK_Identifier "=" e1=expr90 ";" e2=expr      { (let s e1 e2) }
-  | "letrec" s= %TK_Identifier "=" e1=expr90 ";" e2=expr   { (let s e1 e2) }  
-  | "var" s= %TK_Identifier "=" e1=expr90 ";" e2=expr      { (let s (alloc e1) e2) }
-  | "if" "(" c=expr ")" "then" e1=expr90 "else" e2=expr90  { (if c e1 e2)  }
+statement ::=
+    e1=expr (";" e2=statement                                { (let "" e1 e2) }
+            |                                                { e1 }
+            )
+  | "let"    s= %TK_Identifier e1=letbody  ";" e2=statement  { (let s e1 e2) }
+  | "letrec" s= %TK_Identifier e1=letbody  ";" e2=statement  { (letrec s e1 e2) }
+  | "var"    s= %TK_Identifier "=" e1=expr ";" e2=statement  { (let s (alloc e1) e2) }
+  | "if" "(" c=expr ")" "then" e1=expr "else" e2=expr        { (if c e1 e2)  }
   ;
 
+
+letbody ::= 
+    "=" expr
+  | "(" function
+  ;

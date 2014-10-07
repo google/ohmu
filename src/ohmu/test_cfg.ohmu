@@ -35,3 +35,27 @@
                     if (z < 4) then z+z else z*z)
 );
 
+// First version of locally defined functions.
+( let a = 1+0;
+  let b = 2+0;
+  let f(y: Int): Int -> y+1;
+  let g(z: Int): Int -> f(z*2);
+  g(a*b)
+);
+
+// Locally defined functions with multiple arguments.
+( let a = 1+0;
+  let b = 2+0;
+  let f(y: Int, z: Int): Int -> y*z+1;
+  let g(c: Int, d: Int): Int -> f(c*2, d*2);
+  g(a,b)
+);
+
+// The first real code, with a loop!.
+(let n = 100 + 0;
+ letrec loop(i: Int, total: Int): Int -> (
+   if (i == n) then total else loop(i-1, total+i)
+ );
+ loop(0,0)
+);
+

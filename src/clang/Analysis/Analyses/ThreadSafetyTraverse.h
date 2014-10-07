@@ -29,6 +29,7 @@ namespace til {
 enum TraversalKind {
   TRV_Weak,     ///< un-owned (weak) reference to subexpression
   TRV_SubExpr,  ///< owned subexpression
+  TRV_Path,     ///< owned subexpression on spine of path
   TRV_Tail,     ///< owned subexpression in tail position
   TRV_Lazy,     ///< owned subexpression in lazy position
   TRV_Type      ///< owned subexpression in type position
@@ -78,15 +79,6 @@ public:
   /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
-  /// Invoked by SExpr class to traverse owned data members.
-  /// K should not be TRV_Weak; use traverseWeakDM instead.
-  /// Possibly weak instructions should use traversDM(SExpr*, R).
-  /// Do not override.
-  template <class T>
-  MAPTYPE(RedT, T) traverseDM(T** Eptr, RedT *R, TraversalKind K) {
-    return R->handleResult(Eptr, self()->traverse(*Eptr, R, K));
-  }
-
   /// Invoked by SExpr classes to traverse data members.
   /// Do not override.
   MAPTYPE(RedT, SExpr) traverseDM(SExpr** Eptr, RedT *R) {
@@ -95,6 +87,15 @@ public:
     if (Instruction *I = E->asCFGInstruction())
       return R->handleResult(Eptr, R->reduceWeak(I));
     return R->handleResult(Eptr, self()->traverse(E, R, TRV_SubExpr));
+  }
+
+  /// Invoked by SExpr class to traverse owned data members.
+  /// K should not be TRV_Weak; use traverseWeakDM instead.
+  /// Possibly weak instructions should use traversDM(SExpr*, R).
+  /// Do not override.
+  template <class T>
+  MAPTYPE(RedT, T) traverseDM(T** Eptr, RedT *R, TraversalKind K) {
+    return R->handleResult(Eptr, self()->traverse(*Eptr, R, K));
   }
 
   /// Invoked by SExpr classes to traverse weak data members.
@@ -115,10 +116,10 @@ public:
   }
 
   /// Override these methods to traverse a particular type of SExpr.
-#define TIL_OPCODE_DEF(X)                                                     \
-  MAPTYPE(RedT,X)                                                             \
-  traverse##X(X *e, RedT *R, TraversalKind K) {                  \
-    return e->traverse(*self(), R);                                           \
+#define TIL_OPCODE_DEF(X)                                                 \
+  MAPTYPE(RedT,X)                                                         \
+  traverse##X(X *e, RedT *R, TraversalKind K) {                           \
+    return e->traverse(*self(), R);                                       \
   }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
@@ -474,7 +475,6 @@ MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::RedT *R) {
       // Traverse the definition, and hope recursive references are lazy.
       auto D = Vs.traverseDM(&Definition, R, TRV_SubExpr);
       R->exitScope(this);
-      // Tie the knot, by setting Nvd->Definition to D.
       return R->reduceVarDeclLetrec(Nvd, D);
     }
   }
@@ -584,27 +584,27 @@ MAPTYPE(V::RedT, Variable) Variable::traverse(V &Vs, typename V::RedT *R) {
 
 template <class V>
 MAPTYPE(V::RedT, Apply) Apply::traverse(V &Vs, typename V::RedT *R) {
-  auto Nf = Vs.traverseDM(&Fun, R);
+  auto Nf = Vs.traverseDM(&Fun, R, TRV_Path);
   auto Na = Vs.traverseDM(&Arg, R);
   return R->reduceApply(*this, Nf, Na);
 }
 
 template <class V>
 MAPTYPE(V::RedT, SApply) SApply::traverse(V &Vs, typename V::RedT *R) {
-  auto Nf = Vs.traverseDM(&Sfun, R);
+  auto Nf = Vs.traverseDM(&Sfun, R, TRV_Path);
   auto Na = Arg ? Vs.traverseDM(&Arg, R) : V::RedT::reduceNull();
   return R->reduceSApply(*this, Nf, Na);
 }
 
 template <class V>
 MAPTYPE(V::RedT, Project) Project::traverse(V &Vs, typename V::RedT *R) {
-  auto Nr = Vs.traverseDM(&Rec, R);
+  auto Nr = Vs.traverseDM(&Rec, R, TRV_Path);
   return R->reduceProject(*this, Nr);
 }
 
 template <class V>
 MAPTYPE(V::RedT, Call) Call::traverse(V &Vs, typename V::RedT *R) {
-  auto Nt = Vs.traverseDM(&Target, R);
+  auto Nt = Vs.traverseDM(&Target, R, TRV_Path);
   return R->reduceCall(*this, Nt);
 }
 
