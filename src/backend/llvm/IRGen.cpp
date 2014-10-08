@@ -63,7 +63,7 @@ public:
   template <class T>
   llvm::Value* exitSubExpr(T *e, llvm::Value* v, TraversalKind K) {
     if (Instruction *inst = e->asCFGInstruction())
-      currentValues_[inst->id()] = v;
+      currentValues_[inst->instrID()] = v;
     return v;
   }
   llvm::PHINode* exitSubExpr(Phi *e, llvm::Value* v, TraversalKind K) {
@@ -75,7 +75,7 @@ public:
   }
 
   llvm::Value* reduceWeak(Instruction* e) {
-    return currentValues_[e->id()];
+    return currentValues_[e->instrID()];
   }
 
   llvm::BasicBlock* reduceWeak(BasicBlock* b) {

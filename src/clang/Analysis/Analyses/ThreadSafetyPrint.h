@@ -132,7 +132,7 @@ protected:
     }
     if (Sub) {
       if (const Instruction *I = E->asCFGInstruction()) {
-        SS << printableName(I->name()) << I->id();
+        SS << printableName(I->name()) << I->instrID();
         return;
       }
     }
@@ -381,7 +381,7 @@ protected:
 
   void printAlloc(const Alloc *E, StreamType &SS) {
     SS << "new ";
-    self()->printSExpr(E->dataType(), SS, Prec_Other-1);
+    self()->printSExpr(E->initializer(), SS, Prec_Other-1);
   }
 
   void printLoad(const Load *E, StreamType &SS) {
@@ -444,7 +444,7 @@ protected:
 
   void printBBInstr(const Instruction *E, StreamType &SS) {
     if (E->opcode() != COP_Store) {
-      SS << "let " << printableName(E->name()) << E->id() << " = ";
+      SS << "let " << printableName(E->name()) << E->instrID() << " = ";
     }
     self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";

@@ -298,10 +298,9 @@ public:
   //   compare all subexpressions, following the comparator interface
   // }
 
-
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
-  /// Return true if this is a trivial SExpr (constant or variable).
+  /// Return true if this is a trivial SExpr (constant or variable name).
   bool isTrivial() {
     switch (Opcode) {
       case COP_Literal:    return true;
@@ -317,7 +316,6 @@ public:
   const Instruction* asCFGInstruction() const {
     return const_cast<SExpr*>(this)->asCFGInstruction();
   }
-
 
   void *operator new(size_t S, MemRegionRef &R) {
     return ::operator new(S, R);
@@ -351,6 +349,7 @@ private:
 class Function;
 class SFunction;
 class Let;
+class Letrec;
 
 
 /// A declaration for a named variable.
@@ -399,8 +398,8 @@ public:
 private:
   friend class Function;
   friend class SFunction;
-  friend class BasicBlock;
   friend class Let;
+  friend class Letrec;
 
   StringRef Name;          // The name of the variable.
   SExpr*    Definition;    // The TIL type or definition
@@ -529,18 +528,18 @@ public:
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
 
   Instruction(TIL_Opcode Op, ValueType VT = ValueType::getValueType<void>())
-      : SExpr(Op), ValType(VT), SExprID(0), Depth(0), Block(nullptr),
+      : SExpr(Op), ValType(VT), InstrID(0), Depth(0), Block(nullptr),
         Name("", 0) { }
   Instruction(const Instruction &E)
       : SExpr(E), ValType(E.ValType),
-        SExprID(0), Depth(0), Block(nullptr), Name(E.Name) { }
+        InstrID(0), Depth(0), Block(nullptr), Name(E.Name) { }
 
   /// Return the type of this instruction
   ValueType valueType() const { return ValType; }
 
   /// Returns the instruction ID for this expression.
   /// All basic block instructions have an ID that is unique within the CFG.
-  unsigned id() const { return SExprID; }
+  unsigned instrID() const { return InstrID; }
 
   /// Returns the depth of this instruction on the stack.
   /// This is used when interpreting a program using a stack machine.
@@ -554,7 +553,7 @@ public:
   StringRef name() const { return Name; }
 
   /// Set the basic block and instruction ID for this instruction.
-  void setID(BasicBlock *B, unsigned id) { Block = B; SExprID = id; }
+  void setID(BasicBlock *B, unsigned id) { Block = B; InstrID = id; }
 
   /// Set the basic block for this instruction.
   void setBlock(BasicBlock *B) { Block = B; }
@@ -567,7 +566,7 @@ public:
 
 protected:
   ValueType    ValType;
-  unsigned     SExprID;
+  unsigned     InstrID;
   unsigned     Depth;
   BasicBlock*  Block;
   StringRef    Name;
@@ -781,25 +780,29 @@ public:
     AK_Heap
   };
 
-  Alloc(SExpr *D, AllocKind K)
-      : Instruction(COP_Alloc), Dtype(D) {
+  Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc), InitExpr(E) {
     Flags = K;
   }
-
-  Alloc(const Alloc &A, SExpr *Dt)
-      : Instruction(A), Dtype(Dt) {
+  Alloc(const Alloc &A, SExpr *E) : Instruction(A), InitExpr(E) {
     Flags = A.kind();
   }
 
   AllocKind kind() const { return static_cast<AllocKind>(Flags); }
 
-  SExpr *dataType() { return Dtype; }
-  const SExpr *dataType() const { return Dtype; }
+  SExpr *initializer() { return InitExpr; }
+  const SExpr *initializer() const { return InitExpr; }
+
+  // For an alloca, return an index into a virtual stack.
+  // Used for SSA renaming and abstract interpretation.
+  unsigned allocID() const { return AllocID; }
+
+  void setAllocID(unsigned I) { AllocID = I; }
 
   DECLARE_TRAVERSE_AND_COMPARE(Alloc)
 
 private:
-  SExpr* Dtype;
+  SExpr*   InitExpr;
+  unsigned AllocID;
 };
 
 

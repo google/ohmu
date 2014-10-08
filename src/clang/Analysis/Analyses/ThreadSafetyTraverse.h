@@ -180,18 +180,6 @@ public:
 
   /// Exit the lexical scope of Orig.
   void exitScope(VarDecl* Orig) { }
-
-  /// Enter the basic block Orig, which will be rewritten to Nbb
-  void enterBasicBlock(BasicBlock* Orig, MAPTYPE(RedT, BasicBlock) Nbb) { }
-
-  /// Exit the basic block Orig.
-  void exitBasicBlock(BasicBlock* Orig) { }
-
-  /// Enter the SCFG Orig, which will be rewritten to Ns
-  void enterCFG(SCFG* Orig, MAPTYPE(RedT, SCFG) Ns) { }
-
-  /// Exit the lexical scope of Orig
-  void exitCFG(SCFG* Orig) { }
 };
 
 
@@ -591,7 +579,7 @@ MAPTYPE(V::RedT, Call) Call::traverse(V &Vs, typename V::RedT *R) {
 
 template <class V>
 MAPTYPE(V::RedT, Alloc) Alloc::traverse(V &Vs, typename V::RedT *R) {
-  auto Nd = Vs.traverseDM(&Dtype, R, TRV_SubExpr);
+  auto Nd = Vs.traverseDM(&InitExpr, R);
   return R->reduceAlloc(*this, Nd);
 }
 
@@ -675,7 +663,6 @@ MAPTYPE(V::RedT, Return) Return::traverse(V &Vs, typename V::RedT *R) {
 template <class V>
 MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::RedT *R) {
   auto Nb = R->reduceBasicBlockBegin(*this);
-  R->enterBasicBlock(this, Nb);
   unsigned i = 0;
   for (Phi* &A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
@@ -688,24 +675,19 @@ MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::RedT *R) {
     R->reduceBasicBlockInstr(Nb, i, Vs.traverseDM(&I, R, TRV_SubExpr));
     ++i;
   }
-  R->exitBasicBlock(this);
   R->reduceBasicBlockTerm(Nb, Vs.traverseDM(&TermInstr, R, TRV_SubExpr));
-
   return R->reduceBasicBlock(Nb);
 }
 
 template <class V>
 MAPTYPE(V::RedT, SCFG) SCFG::traverse(V &Vs, typename V::RedT *R) {
   auto Ns = R->reduceSCFGBegin(*this);
-  R->enterCFG(this, Ns);
-
   unsigned i = 0;
   for (BasicBlock *&B : Blocks) {
     auto Nb = Vs.traverseDM(&B, R, TRV_SubExpr);
     R->reduceSCFGBlock(Ns, i, Nb);
     ++i;
   }
-  R->exitCFG(this);
   return R->reduceSCFG(Ns);
 }
 
@@ -883,7 +865,7 @@ typename C::CType Alloc::compare(const Alloc* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compareIntegers(kind(), E->kind());
   if (Cmp.notTrue(Ct))
     return Ct;
-  return Cmp.compare(dataType(), E->dataType());
+  return Cmp.compare(initializer(), E->initializer());
 }
 
 template <class C>
