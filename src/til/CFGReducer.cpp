@@ -362,17 +362,26 @@ void CFGRewriter::traversePendingBlocks(CFGRewriteReducer *r) {
     unsigned pi = r->pendingBlockQueue_.front();
     r->pendingBlockQueue_.pop();
 
-    PendingBlock& pb = r->pendingBlocks_[pi];
-    if (!pb.continuation)
+    PendingBlock* pb = &r->pendingBlocks_[pi];
+    if (!pb->continuation || pb->processed)
       continue;   // unreachable or already processed block.
 
-    r->setContinuation(pb.continuation);
-    r->startBlock(pb.block);
-    r->varCtx_ = std::move(pb.ctx);
-    traverse(pb.expr, r, TRV_Tail);
-    r->setContinuation(nullptr);
+    // std::cerr << "processing pending block " << pi << "\n";
+    // TILDebugPrinter::print(pb->expr, std::cerr);
+    // std::cerr << "\n";
 
-    pb.continuation = nullptr;  // mark block as processed.
+    r->varCtx_ = std::move(pb->ctx);
+    r->setContinuation(pb->continuation);
+    r->startBlock(pb->block);
+    SExpr *e = pb->expr;
+
+    traverse(e, r, TRV_Tail);  // may invalidate pb
+
+    r->setContinuation(nullptr);
+    r->varCtx_ = nullptr;
+
+    // traversal may have invalidated pb
+    r->pendingBlocks_[pi].processed = true;  // mark block as processed.
   }
 }
 

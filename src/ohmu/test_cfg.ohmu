@@ -115,3 +115,25 @@
   m+1;
 };
 
+
+// Nested loops.
+{
+  let n = 100 + 0;
+  let m = 100 + 0;
+  letrec loop_m(j: Int, total_m: Int): Int -> {
+    letrec loop_n(i: Int, total_n: Int): Int -> {
+      if (i < n) then {
+        let tn = total_n + i + j;
+        loop_n(i+1, tn);
+      }
+      else total_n;
+    };
+    if (j < m) then {
+      let tm = loop_n(0, total_m);
+      loop_m(j+1, tm);
+    }
+    else total_m;
+  };
+  loop_m(0, 0);
+};
+

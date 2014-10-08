@@ -71,9 +71,10 @@ struct PendingBlock {
   BasicBlock* block;
   BasicBlock* continuation;
   std::unique_ptr<VarContext> ctx;
+  bool processed;
 
   PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
-    : expr(e), block(b), continuation(nullptr), ctx(c)
+    : expr(e), block(b), continuation(nullptr), ctx(c), processed(false)
   { }
 };
 
