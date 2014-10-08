@@ -97,8 +97,7 @@ SExpr* CFGRewriteReducer::reduceCall(Call &orig, SExpr *e) {
         pb.continuation = cont;
 
       // End current block with a jump to the new one.
-      assert(currentPathArgLen_ <= pendingPathArgs_.size());
-      unsigned nargs = pendingPathArgs_.size() - currentPathArgLen_;
+      unsigned nargs = numPendingArgs();
       createGoto(pb.block, pendingPathArgs_, nargs);
 
       // Add the pending block to the queue of reachable blocks, which will
@@ -106,6 +105,13 @@ SExpr* CFGRewriteReducer::reduceCall(Call &orig, SExpr *e) {
       pendingBlockQueue_.push(pi);
       for (unsigned i = 0; i < nargs; ++i)
         pendingPathArgs_.pop_back();
+
+      // If this was a newly-created continuation, then continue where we
+      // left off.
+      if (!currentContinuation()) {
+        startBlock(cont);
+        return cont->arguments()[0];
+      }
       return nullptr;
     }
   }
@@ -175,6 +181,9 @@ SExpr* CFGRewriteReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
 
 
 void CFGRewriteReducer::addInstruction(SExpr* e) {
+  if (!e)
+    return;
+
   switch (e->opcode()) {
     case COP_Literal:  return;
     case COP_Variable: return;
@@ -263,19 +272,19 @@ Goto* CFGRewriteReducer::createGoto(BasicBlock *target, SExpr* result) {
 
 Goto* CFGRewriteReducer::createGoto(BasicBlock *target,
                                     std::vector<SExpr*>& args,
-                                    unsigned len) {
+                                    unsigned nargs) {
   assert(currentBB_);
-  if (target->arguments().size() != args.size()) {
+  if (target->arguments().size() != nargs) {
     std::cerr << "target: " << target->arguments().size()
-              << " goto: "   << args.size() << "\n";
+              << " goto: "   << nargs << "\n";
     assert(false);
   }
 
   unsigned idx = target->addPredecessor(currentBB_);
-  for (unsigned i = 0; i < len; ++i) {
-    unsigned pi = args.size() - len + i;
+  unsigned first = args.size() - nargs;
+  for (unsigned i = 0; i < nargs; ++i) {
     Phi *ph = target->arguments()[i];
-    ph->values()[idx] = args[pi];
+    ph->values()[idx] = args[first + i];
   }
 
   auto *nt = new (Arena) Goto(target, idx);

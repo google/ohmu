@@ -84,9 +84,17 @@ public:
   BasicBlock* currentContinuation()   { return currentContinuation_; }
   void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }
 
-  unsigned currentPathLen() { return currentPathArgLen_; }
-  void setPathLen(unsigned i) { currentPathArgLen_ = i; }
-  void clearPathLen() { currentPathArgLen_ = pendingPathArgs_.size(); }
+  unsigned numPendingArgs() {
+    return pendingPathArgs_.size() - pendingPathArgLen_;
+  }
+  unsigned savePendingArgs() {
+    unsigned plen = pendingPathArgLen_;
+    pendingPathArgLen_ = pendingPathArgs_.size();
+    return plen;
+  }
+  void restorePendingArgs(unsigned plen) {
+    pendingPathArgLen_ = plen;
+  }
 
   void enterScope(VarDecl *orig, VarDecl *Nv);
   void exitScope(const VarDecl *orig);
@@ -139,7 +147,7 @@ public:
   CFGRewriteReducer(MemRegionRef a)
       : CopyReducer(a), varCtx_(new VarContext()),
         currentCFG_(nullptr), currentBB_(nullptr),
-        currentContinuation_(nullptr), currentPathArgLen_(0)
+        currentContinuation_(nullptr), pendingPathArgLen_(0)
   { }
 
 private:
@@ -152,7 +160,7 @@ private:
   SCFG*       currentCFG_;                      //< the current SCFG
   BasicBlock* currentBB_;                       //< the current basic block
   BasicBlock* currentContinuation_;      //< continuation for current block.
-  unsigned    currentPathArgLen_;
+  unsigned    pendingPathArgLen_;
 
   std::vector<Phi*>          currentArgs_;      //< arguments in currentBB.
   std::vector<Instruction*>  currentInstrs_;    //< instructions in currentBB.
@@ -174,25 +182,22 @@ public:
     if (k == TRV_Lazy)  // Skip lazy terms -- we'll handle them specially.
       return nullptr;
 
+    unsigned plen = r->savePendingArgs();
     // This is a CPS transform, so we track the current continuation.
     BasicBlock* cont = r->currentContinuation();
     if (k != TRV_Tail)
       r->setContinuation(nullptr);
 
-    // Save any pending arguments
-    // unsigned plen = r->currentPathLen();
-    // r->clearPathLen();
-
     // Do the traversal
     auto* result = Super::traverse(e, r, k);
 
-    // Restore pending arguments, and ensure the traversal didn't add any.
-    // if (k != TRV_Path) {
-    //   r->setPathLen(plen);
-    //  assert(plen == r->pendingPathArgs_.size() && "Unhandled arguments.");
-    // }
     // Restore continuation.
     r->setContinuation(cont);
+    // Restore pending arguments, and ensure the traversal didn't add any.
+    if (k != TRV_Path) {
+      assert(r->numPendingArgs() == 0 && "Unhandled arguments.");
+      r->restorePendingArgs(plen);
+    }
 
     if (!r->currentBB_)
       return result;

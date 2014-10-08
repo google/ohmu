@@ -59,3 +59,12 @@
  loop(0,0)
 );
 
+// Handling of nested function calls.
+(let n = 100 + 0;
+ let foo(z: Int): Int -> z*z;
+ let bar(w: Int): Int -> w+0;
+ letrec loop(i: Int, total: Int): Int -> (
+   if (i == n) then total else loop(i-1, total+i)
+ );
+ loop(foo(0), bar(0))
+);
