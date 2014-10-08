@@ -177,15 +177,24 @@ unsigned BasicBlock::renumber(unsigned ID) {
   return ID;
 }
 
-// Sorts the CFGs blocks using a reverse post-order depth-first traversal.
+
+// Sorts blocks in topological order, by following successors.
+// If post-dominators have been computed, it takes that into account.
 // Each block will be written into the Blocks array in order, and its BlockID
 // will be set to the index in the array.  Sorting should start from the entry
 // block, and ID should be the total number of blocks.
 int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (Visited) return ID;
-  Visited = 1;
+  Visited = true;
+
+  // First sort the post-dominator, if it exists.
+  // This gives us a topological order where post-dominators always come last.
+  if (PostDominatorNode.Parent)
+    ID = PostDominatorNode.Parent->topologicalSort(Blocks, ID);
+
   for (auto *Block : successors())
     ID = Block->topologicalSort(Blocks, ID);
+
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
@@ -194,49 +203,26 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   return ID;
 }
 
-// Performs a reverse topological traversal, starting from the exit block and
-// following back-edges.  The dominator is serialized before any predecessors,
-// which guarantees that all blocks are serialized after their dominator and
-// before their post-dominator (because it's a reverse topological traversal).
-// ID should be initially set to 0.
-//
-// This sort assumes that (1) dominators have been computed, (2) there are no
-// critical edges, and (3) the entry block is reachable from the exit block
-// and no blocks are accessable via traversal of back-edges from the exit that
-// weren't accessable via forward edges from the entry.
-//
-// Note that this sort does not set BlockID, so SCFG::renumber() must be called
-// immediately afterward.
-int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
-  // Visited is assumed to have been set by the topologicalSort.  This pass
-  // assumes !Visited means that we've visited this node before.
-  if (!Visited) return ID;
-  Visited = 0;
 
-  // First sort the dominator.
-  if (DominatorNode.Parent)
-    ID = DominatorNode.Parent->topologicalFinalSort(Blocks, ID);
+// Sorts blocks in post-topological order, by following predecessors.
+// Each block will be written into the Blocks array in order, and PostBlockID
+// will be set to the index in the array.  Sorting should start from the exit
+// block, and ID should be the total number of blocks.
+int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+  if (Visited) return ID;
+  Visited = true;
 
-  // The sort all predecessors that are not back-edges.
-  for (auto *Pred : Predecessors) {
-    if (Pred->BlockID >= BlockID)
-      continue;
-    ID = Pred->topologicalFinalSort(Blocks, ID);
-  }
+  for (auto *Block : predecessors())
+    ID = Block->postTopologicalSort(Blocks, ID);
 
-  // Place this block in the sorted array.
-  assert(static_cast<size_t>(ID) < Blocks.size());
-  Blocks[ID] = this;
-  ID++;
-
-  // Now sort all back-edges, which come topologically after this block.
-  for (auto *Pred : Predecessors) {
-    if (Pred->BlockID <= BlockID)
-      continue;
-    ID = Pred->topologicalFinalSort(Blocks, ID);
-  }
+  // set ID and update block array in place.
+  // We may lose pointers to unreachable blocks.
+  assert(ID > 0);
+  PostBlockID = --ID;
+  Blocks[PostBlockID] = this;
   return ID;
 }
+
 
 // Computes the immediate dominator of the current block.  Assumes that all of
 // its predecessors have already computed their dominators.  This is achieved
@@ -244,7 +230,7 @@ int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
 void BasicBlock::computeDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk backwards from each predecessor to find the common dominator node.
-  for (auto *Pred : Predecessors) {
+  for (auto *Pred : predecessors()) {
     // Skip back-edges
     if (Pred->BlockID >= BlockID) continue;
     // If we don't yet have a candidate for dominator yet, take this one.
@@ -265,6 +251,7 @@ void BasicBlock::computeDominator() {
   DominatorNode.SizeOfSubTree = 1;
 }
 
+
 // Computes the immediate post-dominator of the current block.  Assumes that all
 // of its successors have already computed their post-dominators.  This is
 // achieved visiting the nodes in reverse topological order.
@@ -273,7 +260,7 @@ void BasicBlock::computePostDominator() {
   // Walk forward from each successor to find the common post-dominator node.
   for (auto *Succ : successors()) {
     // Skip back-edges
-    if (Succ->BlockID <= BlockID) continue;
+    if (Succ->PostBlockID >= PostBlockID) continue;
     // If we don't yet have a candidate for post-dominator yet, take this one.
     if (Candidate == nullptr) {
       Candidate = Succ;
@@ -282,7 +269,7 @@ void BasicBlock::computePostDominator() {
     // Walk the alternate and current candidate back to find a common ancestor.
     auto *Alternate = Succ;
     while (Alternate != Candidate) {
-      if (Candidate->BlockID < Alternate->BlockID)
+      if (Candidate->PostBlockID > Alternate->PostBlockID)
         Candidate = Candidate->PostDominatorNode.Parent;
       else
         Alternate = Alternate->PostDominatorNode.Parent;
@@ -331,47 +318,36 @@ static inline void computeNodeID(BasicBlock *B,
 // 2) Computing dominators and post-dominators
 // 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
-  // Topologically sort the blocks starting from the entry block.
-  int NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
-  if (NumUnreachableBlocks > 0) {
-    // If there were unreachable blocks shift everything down, and delete them.
-    for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I) {
-      size_t NI = I - NumUnreachableBlocks;
-      Blocks[NI] = Blocks[I];
-      Blocks[NI]->BlockID = NI;
-      // FIXME: clean up predecessor pointers to unreachable blocks?
-    }
-    Blocks.drop(NumUnreachableBlocks);
+  // Sort the blocks in post-topological order, starting from the exit.
+  int NumUnreachableBlocks = Exit->postTopologicalSort(Blocks, Blocks.size());
+  assert(NumUnreachableBlocks == 0);
+
+  // Compute post-dominators, which improves the topological sort.
+  for (auto *Block : Blocks) {
+    Block->computePostDominator();
+    Block->Visited = false;
   }
 
-  // Compute dominators.
-  for (auto *Block : Blocks)
-    Block->computeDominator();
+  // Now re-sort the blocks in topological order, starting from the entry.
+  NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
+  assert(NumUnreachableBlocks == 0);
 
-  // Once dominators have been computed, the final sort may be performed.
-  int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
-  assert(static_cast<size_t>(NumBlocks) == Blocks.size());
-  (void) NumBlocks;
-
-  // The final sort reordered the block array, but did not set BlockIDs.
   // Renumber blocks and instructions now that we have a final sort.
   renumber();
 
-  // Compute post-dominators and compute the sizes of each node in the
-  // dominator tree.
+  // Compute the sizes of each node in the dominator tree.
   for (auto *Block : Blocks.reverse()) {
-    // Block->computePostDominator();
     computeNodeSize(Block, &BasicBlock::DominatorNode);
   }
-  // Compute the sizes of each node in the post-dominator tree and assign IDs in
-  // the dominator tree.
+  // Compute the sizes of each node in the post-dominator tree.
+  // and assign IDs in the dominator tree.
   for (auto *Block : Blocks) {
     computeNodeID(Block, &BasicBlock::DominatorNode);
-    // computeNodeSize(Block, &BasicBlock::PostDominatorNode);
+    computeNodeSize(Block, &BasicBlock::PostDominatorNode);
   }
   // Assign IDs in the post-dominator tree.
   for (auto *Block : Blocks.reverse()) {
-    // computeNodeID(Block, &BasicBlock::PostDominatorNode);
+    computeNodeID(Block, &BasicBlock::PostDominatorNode);
   }
 }
 

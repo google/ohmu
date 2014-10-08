@@ -1197,14 +1197,6 @@ public:
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
 
-  explicit BasicBlock(MemRegionRef A)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        TermInstr(nullptr), Depth(0), LoopDepth(0), Visited(false) { }
-  BasicBlock(BasicBlock &B, MemRegionRef A)
-      : SExpr(B), Arena(A), CFGPtr(nullptr), BlockID(0),
-        Args(A, B.Args.size()), Instrs(A, B.Instrs.size()),
-        TermInstr(nullptr), Depth(0), LoopDepth(0), Visited(false) { }
-
   /// Returns the block ID.  Every block has a unique ID in the CFG.
   size_t blockID() const { return BlockID; }
   void setBlockID(size_t i) { BlockID = i; }
@@ -1290,12 +1282,22 @@ public:
 
   DECLARE_TRAVERSE_AND_COMPARE(BasicBlock)
 
+  explicit BasicBlock(MemRegionRef A)
+      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
+        TermInstr(nullptr),
+        PostBlockID(0), Depth(0), LoopDepth(0), Visited(false) { }
+  BasicBlock(BasicBlock &B, MemRegionRef A)
+      : SExpr(B), Arena(A), CFGPtr(nullptr), BlockID(0),
+        Args(A, B.Args.size()), Instrs(A, B.Instrs.size()), TermInstr(nullptr),
+        PostBlockID(0), Depth(0), LoopDepth(0), Visited(false) { }
+
 private:
   friend class SCFG;
 
-  unsigned  renumber(unsigned id);    // assign unique ids to all instructions
+  unsigned renumber(unsigned id);   // assign unique ids to all instructions
   int  topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
+  int  postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
   void computeDominator();
   void computePostDominator();
 
@@ -1309,6 +1311,7 @@ private:
   InstrArray  Instrs;        // Instructions.
   Terminator* TermInstr;     // Terminating instruction
 
+  unsigned     PostBlockID;  // ID in post-topological order
   unsigned     Depth;        // The instruction Depth of the first instruction.
   unsigned     LoopDepth;    // The level of nesting within loops.
   bool         Visited;      // Bit to determine if a block has been visited
@@ -1577,11 +1580,6 @@ private:
   SExpr* ThenExpr;
   SExpr* ElseExpr;
 };
-
-
-
-
-
 
 
 const SExpr *getCanonicalVal(const SExpr *E);
