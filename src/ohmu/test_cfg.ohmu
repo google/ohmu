@@ -3,81 +3,102 @@
 (1 + 2 + 3);
 
 // Let-expressions:
-( let x = 1+0;
+{ 
+  let x = 1+0;
   let y = 2+0;
-  x*y
-);
+  x*y;
+};
 
 // If-expressions:
-( let x = 1+0;
+{ 
+  let x = 1+0;
   let y = 2+0;
-  if (1 == 2) then x*x else y*y
-);
+  if (1 == 2) then x*x else y*y;
+};
 
 // Check for correct continuation of nested if.
-( let a = 1+0;
+{ 
+  let a = 1+0;
   let b = a + (1 + (if (a==2) then 3 else 4));
-  if (b == a) then a+5 else b+5
-);
+  if (b == a) then a+5 else b+5;
+};
 
 // Ensure that the Lets don't introduce empty blocks.
-( let x = 1+0;
-  let y = (let z = (let a = x; a+a); z*z);
-  y/y
-);
+{ 
+  let x = 1+0;
+  let y = {
+    let z = {
+      let a = x; 
+      a+a;
+    };
+    z*z;
+  };
+  y/y;
+};
 
 // Continuation passing between if and let
 // Make the z branches continue directly to x/x, without empty blocks.
-( let a = 1+0;
+{ 
+  let a = 1+0;
   let b = 2+0;
-  if (a == b) then (let y = a+3; y*y)
-              else (let z = b+3;
-                    if (z < 4) then z+z else z*z)
-);
+  if (a == b) then {
+    let y = a+3; 
+    y*y;
+  }
+  else {
+    let z = b+3;
+    if (z < 4) then z+z else z*z;
+  };
+};
 
 // First version of locally defined functions.
-( let a = 1+0;
+{ 
+  let a = 1+0;
   let b = 2+0;
   let f(y: Int): Int -> y+1;
   let g(z: Int): Int -> f(z*2);
-  g(a*b)
-);
+  g(a*b);
+};
 
 // Locally defined functions with multiple arguments.
-( let a = 1+0;
+{
+  let a = 1+0;
   let b = 2+0;
   let f(y: Int, z: Int): Int -> y*z+1;
   let g(c: Int, d: Int): Int -> f(c*2, d*2);
-  g(a,b)
-);
+  g(a,b);
+};
 
 // The first real code, with a loop!.
-(let n = 100 + 0;
- letrec loop(i: Int, total: Int): Int -> (
-   if (i == n) then total else loop(i-1, total+i)
- );
- loop(0,0)
-);
+{
+  let n = 100 + 0;
+  letrec loop(i: Int, total: Int): Int -> {
+    if (i == n) then total else loop(i-1, total+i);
+  };
+  loop(0,0);
+};
 
 // Handling of nested function calls.
-(let n = 100 + 0;
- let foo(z: Int): Int -> z*z;
- let bar(w: Int): Int -> w+0;
- letrec loop(i: Int, total: Int): Int -> (
-   if (i == n) then total else loop(i-1, total+i)
- );
- loop(foo(0), bar(0))
-);
+{
+  let n = 100 + 0;
+  let foo(z: Int): Int -> z*z;
+  let bar(w: Int): Int -> w+0;
+  letrec loop(i: Int, total: Int): Int -> {
+    if (i == n) then total else loop(i-1, total+i);
+  };
+  loop(foo(0), bar(0));
+};
 
 // More handling of nested functions.
-(let n = 100 + 0;
- let foo(z: Int): Int -> z*z;
- letrec loop(i: Int, total: Int): Int -> (
-   if (i == n) then total else loop(i-1, total+i)
- );
- let w = foo(loop(0,0) + 3);
- w*n
-);
+{ 
+  let n = 100 + 0;
+  let foo(z: Int): Int -> z*z;
+  letrec loop(i: Int, total: Int): Int -> {
+    if (i == n) then total else loop(i-1, total+i);
+  };
+  let w = foo(loop(0,0) + 3);
+  w*n;
+};
 
 
 // Handle multiple function calls
@@ -85,11 +106,12 @@
 // so long as the CPS transform can convert them to tail calls.
 // It can convert them so long as all calls to the function return to the 
 // same point in the code.
-(let n = 100 + 0;
- letrec loop(i: Int, total: Int): Int -> (
-   if (i == n) then total else loop(i-1, total+i)
- );
- let m = (if (n < 50) then loop(0, 0) else loop(0, n+1));
- m+1
-);
+{ 
+  let n = 100 + 0;
+  letrec loop(i: Int, total: Int): Int -> {
+    if (i == n) then total else loop(i-1, total+i);
+  };
+  let m = if (n < 50) then loop(0, 0) else loop(0, n+1);
+  m+1;
+};
 

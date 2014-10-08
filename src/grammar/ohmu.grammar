@@ -25,7 +25,7 @@ value ::=
     literal
   | "\\" "(" function
   | "\\@" x= %TK_Identifier v=value   { (sfunction x v) }
-  | "{" ss=slotList "}"               { (record ss)     }
+  | "struct" "{" ss=slotList "}"      { (record ss)     }
   | "[" es=exprList "]"               { (array es)      }
   ;
 
@@ -72,8 +72,9 @@ exprList ::=
 
 simple ::=
     value
-  | s= %TK_Identifier    { (identifier s) }
-  | "(" e=statement ")"  { e }
+  | s= %TK_Identifier        { (identifier s) }
+  | "(" e=expr ")"           { e }
+  | "{" e=statement "}"      { e }
   ;
 
 mkApply[f,a] ::=
@@ -163,20 +164,24 @@ expr70 ::=
   | "new" e1=expr61 { (alloc e1) }
   ;
 
-expr ::=
+expr90 ::=
   a=expr70 (":=" b=expr70 { (store a b) }
            |              { a }
            )
   ;
 
+expr ::=
+  expr90
+  | "if" "(" c=expr90 ")" "then" e1=expr90 "else" e2=expr90  { (if c e1 e2) }
+  ; 
+
 statement ::=
-    e1=expr (";" e2=statement                                { (let "" e1 e2) }
-            |                                                { e1 }
-            )
+    e1=expr ";" (e2=statement                                { (let "" e1 e2) }
+                |                                            { e1 }
+                )
   | "let"    s= %TK_Identifier e1=letbody  ";" e2=statement  { (let s e1 e2) }
   | "letrec" s= %TK_Identifier e1=letbody  ";" e2=statement  { (letrec s e1 e2) }
   | "var"    s= %TK_Identifier "=" e1=expr ";" e2=statement  { (let s (alloc e1) e2) }
-  | "if" "(" c=expr ")" "then" e1=expr "else" e2=expr        { (if c e1 e2)  }
   ;
 
 
