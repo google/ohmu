@@ -204,18 +204,37 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
 // critical edges, and (3) the entry block is reachable from the exit block
 // and no blocks are accessable via traversal of back-edges from the exit that
 // weren't accessable via forward edges from the entry.
+//
+// Note that this sort does not set BlockID, so SCFG::renumber() must be called
+// immediately afterward.
 int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   // Visited is assumed to have been set by the topologicalSort.  This pass
   // assumes !Visited means that we've visited this node before.
   if (!Visited) return ID;
   Visited = 0;
+
+  // First sort the dominator.
   if (DominatorNode.Parent)
     ID = DominatorNode.Parent->topologicalFinalSort(Blocks, ID);
-  for (auto *Pred : Predecessors)
+
+  // The sort all predecessors that are not back-edges.
+  for (auto *Pred : Predecessors) {
+    if (Pred->BlockID >= BlockID)
+      continue;
     ID = Pred->topologicalFinalSort(Blocks, ID);
+  }
+
+  // Place this block in the sorted array.
   assert(static_cast<size_t>(ID) < Blocks.size());
-  BlockID = ID++;
-  Blocks[BlockID] = this;
+  Blocks[ID] = this;
+  ID++;
+
+  // Now sort all back-edges, which come topologically after this block.
+  for (auto *Pred : Predecessors) {
+    if (Pred->BlockID <= BlockID)
+      continue;
+    ID = Pred->topologicalFinalSort(Blocks, ID);
+  }
   return ID;
 }
 
@@ -251,7 +270,7 @@ void BasicBlock::computeDominator() {
 // achieved visiting the nodes in reverse topological order.
 void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
-  // Walk back from each predecessor to find the common post-dominator node.
+  // Walk forward from each successor to find the common post-dominator node.
   for (auto *Succ : successors()) {
     // Skip back-edges
     if (Succ->BlockID <= BlockID) continue;
@@ -330,28 +349,29 @@ void SCFG::computeNormalForm() {
     Block->computeDominator();
 
   // Once dominators have been computed, the final sort may be performed.
-  // int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
-  // assert(static_cast<size_t>(NumBlocks) == Blocks.size());
-  // (void) NumBlocks;
+  int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
+  assert(static_cast<size_t>(NumBlocks) == Blocks.size());
+  (void) NumBlocks;
 
+  // The final sort reordered the block array, but did not set BlockIDs.
   // Renumber blocks and instructions now that we have a final sort.
   renumber();
 
   // Compute post-dominators and compute the sizes of each node in the
   // dominator tree.
   for (auto *Block : Blocks.reverse()) {
-  //  Block->computePostDominator();
+    // Block->computePostDominator();
     computeNodeSize(Block, &BasicBlock::DominatorNode);
   }
   // Compute the sizes of each node in the post-dominator tree and assign IDs in
   // the dominator tree.
   for (auto *Block : Blocks) {
     computeNodeID(Block, &BasicBlock::DominatorNode);
-  //  computeNodeSize(Block, &BasicBlock::PostDominatorNode);
+    // computeNodeSize(Block, &BasicBlock::PostDominatorNode);
   }
   // Assign IDs in the post-dominator tree.
   for (auto *Block : Blocks.reverse()) {
-  //  computeNodeID(Block, &BasicBlock::PostDominatorNode);
+    // computeNodeID(Block, &BasicBlock::PostDominatorNode);
   }
 }
 
