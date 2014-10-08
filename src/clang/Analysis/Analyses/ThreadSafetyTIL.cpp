@@ -335,19 +335,18 @@ void SCFG::computeNormalForm() {
   // Renumber blocks and instructions now that we have a final sort.
   renumber();
 
-  // Compute the sizes of each node in the dominator tree.
-  for (auto *Block : Blocks.reverse()) {
-    computeNodeSize(Block, &BasicBlock::DominatorNode);
-  }
-  // Compute the sizes of each node in the post-dominator tree.
-  // and assign IDs in the dominator tree.
+  // Calculate dominators.
+  // Compute sizes and IDs for the (post)dominator trees.
   for (auto *Block : Blocks) {
-    computeNodeID(Block, &BasicBlock::DominatorNode);
+    Block->computeDominator();
     computeNodeSize(Block, &BasicBlock::PostDominatorNode);
   }
-  // Assign IDs in the post-dominator tree.
   for (auto *Block : Blocks.reverse()) {
+    computeNodeSize(Block, &BasicBlock::DominatorNode);
     computeNodeID(Block, &BasicBlock::PostDominatorNode);
+  }
+  for (auto *Block : Blocks) {
+    computeNodeID(Block, &BasicBlock::DominatorNode);
   }
 }
 

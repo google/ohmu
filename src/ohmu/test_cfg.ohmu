@@ -73,7 +73,7 @@
 {
   let n = 100 + 0;
   letrec loop(i: Int, total: Int): Int -> {
-    if (i == n) then total else loop(i-1, total+i);
+    if (i < n) then loop(i-1, total+i) else total;
   };
   loop(0,0);
 };
@@ -84,7 +84,7 @@
   let foo(z: Int): Int -> z*z;
   let bar(w: Int): Int -> w+0;
   letrec loop(i: Int, total: Int): Int -> {
-    if (i == n) then total else loop(i-1, total+i);
+    if (i < n) then loop(i-1, total+i) else total;
   };
   loop(foo(0), bar(0));
 };
@@ -94,7 +94,7 @@
   let n = 100 + 0;
   let foo(z: Int): Int -> z*z;
   letrec loop(i: Int, total: Int): Int -> {
-    if (i == n) then total else loop(i-1, total+i);
+    if (i < n) then loop(i-1, total+i) else total;
   };
   let w = foo(loop(0,0) + 3);
   w*n;
@@ -109,7 +109,7 @@
 { 
   let n = 100 + 0;
   letrec loop(i: Int, total: Int): Int -> {
-    if (i == n) then total else loop(i-1, total+i);
+    if (i < n) then loop(i-1, total+i) else total;
   };
   let m = if (n < 50) then loop(0, 0) else loop(0, n+1);
   m+1;

@@ -455,6 +455,8 @@ protected:
     printBlockLabel(SS, E, -1);
     SS << " : ";
     printBlockLabel(SS, E->parent(), -1);
+    SS << "|";
+    printBlockLabel(SS, E->postDominator(), -1);
     SS << " {";
     bool First = true;
     for (auto *B : E->predecessors()) {

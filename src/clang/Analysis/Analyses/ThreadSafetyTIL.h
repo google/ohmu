@@ -1210,6 +1210,8 @@ public:
 
   const BasicBlock *parent() const { return DominatorNode.Parent; }
   BasicBlock *parent() { return DominatorNode.Parent; }
+  const BasicBlock *postDominator() const { return PostDominatorNode.Parent; }
+  BasicBlock *postDominator() { return PostDominatorNode.Parent; }
 
   const ArgArray &arguments() const { return Args; }
   ArgArray &arguments() { return Args; }
