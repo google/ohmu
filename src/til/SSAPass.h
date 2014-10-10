@@ -32,7 +32,7 @@ namespace ohmu {
 
 using namespace clang::threadSafety::til;
 
-
+// Map from local variables (allocID) to their definitions (SExpr*).
 typedef std::vector<SExpr*> LocalVarMap;
 
 struct BlockInfo {
@@ -58,6 +58,7 @@ public:
 
   BasicBlock* reduceBasicBlock(BasicBlock *BB) {
     assert(CurrentBB == BB && "Internal traversal error.");
+    CurrentBB = nullptr;
     return BB;
   }
 
@@ -89,6 +90,7 @@ public:
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
     SSAPassBase::reduceBasicBlockBegin(Orig);
+
     // warning -- make sure you don't add blocks to BlockInfo.
     CurrentVarMap = &BInfoMap[CurrentBlockID].AllocVarMap;
 
@@ -98,8 +100,10 @@ public:
     if (CurrentBB->parent())
       PSize = BInfoMap[CurrentBB->parent()->blockID()].AllocVarMap.size();
     CurrentVarMap->resize(PSize, nullptr);
+
     return &Orig;
   }
+
 
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
     if (CurrentBB) {
@@ -143,20 +147,29 @@ public:
   SSALookupPass(std::vector<BlockInfo>& BMap) : BInfoMap(BMap) { }
 
   // Lookup value of local variable at the beginning of basic block B
-  SExpr* lookupBegin(BasicBlock *B, unsigned LvarID) {
-    return nullptr;
+  SExpr* lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
+    SExpr* E = nullptr;
+    Phi* Ph = nullptr;
+    for (auto* P : B->predecessors()) {
+      SExpr* E2 = lookup(B, LvarID);
+      if (E2 != E) {
+
+      }
+    }
+    if (Ph) E = Ph;
+    // auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
+    return E;
   }
 
   // Lookup value of local variable at the end of basic block B
-  SExpr* lookupEnd(BasicBlock *B, unsigned LvarID) {
+  SExpr* lookup(BasicBlock *B, unsigned LvarID) {
     auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
-    if (LvarID >= LvarMap->size())
-      return nullptr;
+    assert(LvarID < LvarMap->size());
     // Check to see if the variable was set in this block.
     if (auto* E = LvarMap->at(LvarID))
       return E;
     // Lookup variable in predecessor blocks, and store in the end map.
-    auto* E = lookupBegin(B, LvarID);
+    auto* E = lookupInPredecessors(B, LvarID);
     LvarMap->at(LvarID) = E;
     return E;
   }
