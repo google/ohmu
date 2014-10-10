@@ -66,6 +66,7 @@ protected:
   SCFG*        CurrentCFG;
   BasicBlock*  CurrentBB;
   unsigned     CurrentBlockID;
+  MemRegionRef Arena;
 };
 
 
@@ -150,11 +151,24 @@ public:
   SExpr* lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
     SExpr* E = nullptr;
     Phi* Ph = nullptr;
+    unsigned i = 0;
     for (auto* P : B->predecessors()) {
       SExpr* E2 = lookup(B, LvarID);
-      if (E2 != E) {
-
+      if (Ph) {
+        // We know we need a phi node, so just copy E2 into it.
+        Ph->values().push_back(E2);
       }
+      else if (E && E2 != E) {
+        // Values don't match, so make a new phi node.
+        Ph = new (Arena) Phi(Arena, B->numPredecessors());
+        // Fill it with the original value E
+        for (unsigned j = 0; j < i; ++j) {
+          Ph->values().push_back(E);
+        }
+        // And add new value.
+        Ph->values().push_back(E2);
+      }
+      E = E2;
     }
     if (Ph) E = Ph;
     // auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
