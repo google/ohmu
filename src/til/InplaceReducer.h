@@ -40,12 +40,18 @@ using namespace clang::threadSafety::til;
 ///
 /// It is intended to be used as a basic class for destructive in-place
 /// transformations.
-class InplaceReducer : public SExprReducerMap,
-                       public WriteBackReducer<SExprReducerMap> {
+class InplaceReducer  {
 public:
   Instruction* reduceWeak(Instruction* E)  { return E; }
   VarDecl*     reduceWeak(VarDecl *E)      { return E; }
   BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
+
+  // Destructively update SExprs by writing results.
+  template <class T>
+  T* handleResult(T** Eptr, T* Res) {
+    *Eptr = Res;
+    return Res;
+  }
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return &Orig;

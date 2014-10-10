@@ -43,50 +43,56 @@ enum TraversalKind {
 ///
 /// The Traversal class is responsible for traversing the AST in some order.
 /// The default is a depth first traversal, but other orders are possible,
-/// such as lazy or parallel traversals.
+/// such as BFS, lazy or parallel traversals.
 ///
 /// The AST distinguishes between owned sub-expressions, which form a spanning
 /// tree, and weak subexpressions, which are internal and possibly cyclic
 /// references.  A traversal will recursively traverse owned sub-expressions.
 ///
-/// A traversal keeps a pointer to a Reducer object, which processes the AST
-/// in some way.  The Reducer is responsible for two tasks:
+/// Subclasses can override the following in order to insert pre and post-visit
+/// code around a traversal.  Overridden versions should call the parent.
 ///
-/// (1) Tracking the current lexical scope via enterX/exitX methods.
-/// (2) Implementing reduceX methods to rewrite the AST.
+///   * traverse<T>(...) is the entry point for a traversal of an SExpr*.
+///   * traverseX(...) is the entry point for a taversal of node X.
 ///
-/// Lexical scope consists of information such as the types of variables,
-/// the current CFG, and basic block, etc.
+/// This class must be combined with other classes to implement the full
+/// traversal interface:
 ///
-/// The reduceX methods are responsible for rewriting terms.  After an SExpr
-/// has been traversed, the traversal results are passed to reduceX(...), which
-/// essentially implements an SExpr builder API.  A transform pass will
-/// use this API to build a rewritten SExpr, but other passes may build
-/// an object of some other type.  In functional programming terms, reduceX
-/// implements a fold operation over the AST.
+///   * A Reducer class, e.g. VisitReducer, CopyReducer, or InplaceReducer.
+///   * A ScopeHandler (DefaultScopeHandler) to handle lexical scope.
 ///
-/// Because scope and rewriting are somewhat orthogonal, the traversal
-/// infrastructure provides default implementations of the enter/exit methods,
-/// and reduceX methods, in separate classes.  A reducer object should be
-/// constructed via multiple inheritance.
+/// The Reducer class implements reduceX methods, which are responsible for
+/// rewriting terms.  After an SExpr has been traversed, the traversal results
+/// are passed to reduceX(...), which essentially implements an SExpr builder
+/// API.  A transform pass will use this API to build a rewritten SExpr, but
+/// other passes may build an object of some other type.  In functional
+/// programming terms, reduceX implements a fold operation over the AST.
 ///
-template <class Self, class ReducerT>
+/// ReducerMapType is a trait class for the Reducer, which defines a TypeMap
+/// function that describes what type of results the reducer will produce.
+/// A rewrite pass will rewrite SExpr -> SExpr, while a visitor pass will just
+/// return a bool.
+///
+/// Reducers must also implement handleResult(...).  Destructive rewrite
+/// passes can use this method to modify SExprs in place.
+///
+template <class Self, class ReducerMapType>
 class Traversal {
 public:
   /// The underlying reducer interface, which implements TypeMap (for MAPTYPE).
-  typedef ReducerT RedT;
+  typedef ReducerMapType RMap;
 
   /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
   /// Invoked by SExpr classes to traverse data members.
   /// Do not override.
-  MAPTYPE(RedT, SExpr) traverseDM(SExpr** Eptr, RedT *R) {
+  MAPTYPE(RMap, SExpr) traverseDM(SExpr** Eptr) {
     SExpr *E = *Eptr;
     // Detect weak references to other instructions in the CFG.
     if (Instruction *I = E->asCFGInstruction())
-      return R->handleResult(Eptr, R->reduceWeak(I));
-    return R->handleResult(Eptr, self()->traverse(E, R, TRV_SubExpr));
+      return self()->handleResult(Eptr, self()->reduceWeak(I));
+    return self()->handleResult(Eptr, self()->traverse(E, TRV_SubExpr));
   }
 
   /// Invoked by SExpr class to traverse owned data members.
@@ -94,29 +100,28 @@ public:
   /// Possibly weak instructions should use traversDM(SExpr*, R).
   /// Do not override.
   template <class T>
-  MAPTYPE(RedT, T) traverseDM(T** Eptr, RedT *R, TraversalKind K) {
-    return R->handleResult(Eptr, self()->traverse(*Eptr, R, K));
+  MAPTYPE(RMap, T) traverseDM(T** Eptr, TraversalKind K) {
+    return self()->handleResult(Eptr, self()->traverse(*Eptr, K));
   }
 
   /// Invoked by SExpr classes to traverse weak data members.
   /// Do not override.
   template <class T>
-  MAPTYPE(RedT, T) traverseWeakDM(T** Eptr, RedT *R) {
-    return R->handleResult(Eptr, R->reduceWeak(*Eptr));
+  MAPTYPE(RMap, T) traverseWeakDM(T** Eptr) {
+    return self()->handleResult(Eptr, self()->reduceWeak(*Eptr));
   }
 
   /// Starting point for a traversal.
   /// Override this method to traverse SExprs of arbitrary type.
   template <class T>
-  MAPTYPE(RedT, T) traverse(T* E, RedT *R, TraversalKind K) {
-    return traverseByType(E, R, K);
+  MAPTYPE(RMap, T) traverse(T* E, TraversalKind K) {
+    return traverseByType(E, K);
   }
 
   /// Override these methods to traverse a particular type of SExpr.
 #define TIL_OPCODE_DEF(X)                                                 \
-  MAPTYPE(RedT,X)                                                         \
-  traverse##X(X *e, RedT *R, TraversalKind K) {                           \
-    return e->traverse(*self(), R);                                       \
+  MAPTYPE(RMap,X) traverse##X(X *e, TraversalKind K) {                    \
+    return e->traverse(*self());                                          \
   }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
@@ -124,59 +129,35 @@ public:
 
 protected:
   /// For generic SExprs, do dynamic dispatch by type.
-  MAPTYPE(RedT, SExpr) traverseByType(SExpr* E, RedT *R, TraversalKind K) {
+  MAPTYPE(RMap, SExpr) traverseByType(SExpr* E, TraversalKind K) {
     switch (E->opcode()) {
-#define TIL_OPCODE_DEF(X)                                                    \
-    case COP_##X:                                                            \
-      return self()->traverse##X(cast<X>(E), R, K);
+#define TIL_OPCODE_DEF(X)                                                 \
+    case COP_##X:                                                         \
+      return self()->traverse##X(cast<X>(E), K);
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
     }
-    return RedT::reduceNull();
+    return RMap::reduceNull();
   }
 
   /// For SExprs of known type, do static dispatch by type.
-#define TIL_OPCODE_DEF(X)                                                    \
-  MAPTYPE(RedT, X) traverseByType(X* E, RedT *R, TraversalKind K) {          \
-    return self()->traverse##X(E, R, K);                                     \
+#define TIL_OPCODE_DEF(X)                                                 \
+  MAPTYPE(RMap, X) traverseByType(X* E, TraversalKind K) {                \
+    return self()->traverse##X(E, K);                                     \
   }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-};
-
-
-
-// A ReadReducer simply returns each result.
-template <class RedT>
-class ReadReducer {
-public:
-  template <class T>
-  MAPTYPE(RedT,T) handleResult(T** Eptr, MAPTYPE(RedT,T) Res) { return Res; }
-};
-
-
-// A WriteBackReducer will write traversal results back into the SExpr,
-// thus performing an in-place destructive rewrite.
-// RedT::TypeMap must be a type that can be assigned to an SExpr*.
-template <class RedT>
-class WriteBackReducer {
-public:
-  template <class T>
-  MAPTYPE(RedT,T) handleResult(T** Eptr, MAPTYPE(RedT,T) Res) {
-    *Eptr = Res;
-    return Res;
-  }
 };
 
 
 
 /// Implements default versions of the enter/exit routines for lexical scope.
 /// for the reducer interface.
-template <class RedT>
+template <class RMap>
 class DefaultScopeHandler {
 public:
   /// Enter the lexical scope of Orig, which is rewritten to Nvd.
-  void enterScope(VarDecl* Orig, MAPTYPE(RedT, VarDecl) Nvd) { }
+  void enterScope(VarDecl* Orig, MAPTYPE(RMap, VarDecl) Nvd) { }
 
   /// Exit the lexical scope of Orig.
   void exitScope(VarDecl* Orig) { }
@@ -186,39 +167,43 @@ public:
 
 /// Implements the reducer interface, with default versions for all methods.
 /// R is a base class that defines the TypeMap.
-template <class Self, class RedT>
+template <class Self, class RMap>
 class DefaultReducer {
 public:
-  typedef MAPTYPE(RedT, SExpr)       R_SExpr;
-  typedef MAPTYPE(RedT, Instruction) R_Instruction;
-  typedef MAPTYPE(RedT, Phi)         R_Phi;
-  typedef MAPTYPE(RedT, VarDecl)     R_VarDecl;
-  typedef MAPTYPE(RedT, BasicBlock)  R_BasicBlock;
-  typedef MAPTYPE(RedT, SCFG)        R_SCFG;
+  typedef MAPTYPE(RMap, SExpr)       R_SExpr;
+  typedef MAPTYPE(RMap, Instruction) R_Instruction;
+  typedef MAPTYPE(RMap, Terminator)  R_Terminator;
+  typedef MAPTYPE(RMap, Phi)         R_Phi;
+  typedef MAPTYPE(RMap, VarDecl)     R_VarDecl;
+  typedef MAPTYPE(RMap, BasicBlock)  R_BasicBlock;
+  typedef MAPTYPE(RMap, SCFG)        R_SCFG;
 
   Self* self() { return static_cast<Self*>(this); }
 
+  /// Default implementation is just to return the result.
+  template <class T>
+  MAPTYPE(RMap,T) handleResult(T** Eptr, MAPTYPE(RMap,T) Res) { return Res; }
 
   R_SExpr reduceSExpr(SExpr& Orig) {
-    return RedT::reduceNull();
+    return RMap::reduceNull();
   }
-  R_SExpr reduceInstruction(SExpr& Orig) {
+  R_Instruction reduceInstruction(SExpr& Orig) {
     return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceTerminator(Terminator& Orig) {
+  R_Terminator reduceTerminator(Terminator& Orig) {
     return self()->reduceInstruction(Orig);
   }
   R_SExpr reducePseudoTerm(SExpr& Orig) {
     return self()->reduceSExpr(Orig);
   }
 
-  R_Instruction reduceWeak(Instruction* E) { return RedT::reduceNull(); }
-  R_VarDecl     reduceWeak(VarDecl *E)     { return RedT::reduceNull(); }
-  R_BasicBlock  reduceWeak(BasicBlock *E)  { return RedT::reduceNull(); }
+  R_Instruction reduceWeak(Instruction* E) { return RMap::reduceNull(); }
+  R_VarDecl     reduceWeak(VarDecl *E)     { return RMap::reduceNull(); }
+  R_BasicBlock  reduceWeak(BasicBlock *E)  { return RMap::reduceNull(); }
 
 
   R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
-    return self()->reduceInstruction(Orig);
+    return self()->reduceSExpr(Orig);
   }
   R_VarDecl reduceVarDeclLetrec(R_VarDecl VD, R_SExpr E) { return VD; }
 
@@ -235,54 +220,54 @@ public:
     return self()->reduceSExpr(Orig);
   }
 
-  R_SExpr reduceLiteral(Literal &Orig) {
+  R_Instruction reduceLiteral(Literal &Orig) {
     return self()->reduceInstruction(Orig);
   }
   template<class T>
-  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
+  R_Instruction reduceLiteralT(LiteralT<T> &Orig) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
+  R_Instruction reduceLiteralPtr(LiteralPtr &Orig) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceVariable(Variable &Orig, R_VarDecl VD) {
+  R_Instruction reduceVariable(Variable &Orig, R_VarDecl VD) {
     return self()->reduceInstruction(Orig);
   }
 
-  R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
+  R_Instruction reduceProject(Project &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
+  R_Instruction reduceCall(Call &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
+  R_Instruction reduceAlloc(Alloc &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
+  R_Instruction reduceLoad(Load &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
+  R_Instruction reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
+  R_Instruction reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceInstruction(Orig);
   }
-  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
+  R_Instruction reduceCast(Cast &Orig, R_SExpr E0) {
     return self()->reduceInstruction(Orig);
   }
 
@@ -310,13 +295,13 @@ public:
   R_BasicBlock reduceBasicBlock(R_BasicBlock BB) { return BB; }
 
 
-  R_SExpr reduceGoto(Goto &Orig, R_BasicBlock B) {
+  R_Terminator reduceGoto(Goto &Orig, R_BasicBlock B) {
     return self()->reduceTerminator(Orig);
   }
-  R_SExpr reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
+  R_Terminator reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
     return self()->reduceTerminator(O);
   }
-  R_SExpr reduceReturn(Return &O, R_SExpr E) {
+  R_Terminator reduceReturn(Return &O, R_SExpr E) {
     return self()->reduceTerminator(O);
   }
 
@@ -341,15 +326,7 @@ public:
 };
 
 
-/// Builds a ReadReducer with default versions of all methods.
-template <class Self, class RedT>
-class DefaultReadReducer : public RedT,
-                           public ReadReducer<RedT>,
-                           public DefaultScopeHandler<RedT>,
-                           public DefaultReducer<Self, RedT> { };
-
-
-/// Defines the TypeMap for VisitReducerBase
+/// Defines the TypeMap for VisitReducer
 class VisitReducerMap {
 public:
   /// A visitor maps all expression types to bool.
@@ -363,36 +340,31 @@ public:
 /// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
 /// SExprs to booleans: it returns true on success, and false on failure.
 template<class Self>
-class VisitReducer : public DefaultReadReducer<Self, VisitReducerMap> {
+class VisitReducer : public Traversal<Self, VisitReducerMap>,
+                     public DefaultReducer<Self, VisitReducerMap>,
+                     public DefaultScopeHandler<VisitReducerMap> {
 public:
-  VisitReducer() { }
+  typedef Traversal<Self, VisitReducerMap> SuperTv;
+
+  VisitReducer() : Success(true) { }
 
   bool reduceSExpr(SExpr &Orig) { return true; }
 
-  class VisitTraversal : public Traversal<VisitTraversal, Self> {
-  public:
-    typedef Traversal<VisitTraversal, Self> Super;
-
-    VisitTraversal() : Success(true) { }
-
-    /// Abort traversal on failure.
-    template <class T>
-    MAPTYPE(VisitReducerMap, T) traverse(T* E, Self *R, TraversalKind K) {
-      Success = Success && Super::traverse(E, R, K);
-      return Success;
-    }
-
-  private:
-     bool Success;
-  };
+  /// Abort traversal on failure.
+  template <class T>
+  MAPTYPE(VisitReducerMap, T) traverse(T* E, TraversalKind K) {
+    Success = Success && SuperTv::traverse(E, K);
+    return Success;
+  }
 
   static bool visit(SExpr *E) {
-    VisitTraversal Traverser;
-    Self           Reducer;
-    return Traverser.traverse(E, &Reducer, TRV_Tail);
+    Self Visitor;
+    return Visitor.traverse(E, TRV_Tail);
   }
-};
 
+private:
+  bool Success;
+};
 
 
 // Used by SExprReducerMap.  Most terms map to SExpr*.
@@ -403,7 +375,8 @@ template <class T> struct SExprTypeMap { typedef SExpr* Ty; };
 template<> struct SExprTypeMap<VarDecl>    { typedef VarDecl* Ty; };
 template<> struct SExprTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
 
-/// Defines the TypeMap for travesals that return SExprs.
+/// Defines the TypeMap for traversals that return SExprs.
+/// See CopyReducer and InplaceReducer for details.
 class SExprReducerMap {
 public:
   // An SExpr reducer rewrites one SExpr to another.
@@ -421,100 +394,100 @@ public:
 ////////////////////////////////////////
 
 template <class V>
-MAPTYPE(V::RedT, VarDecl) VarDecl::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
   switch (kind()) {
     case VK_Fun: {
-      auto D = Vs.traverseDM(&Definition, R, TRV_Type);
-      return R->reduceVarDecl(*this, D);
+      auto D = Vs.traverseDM(&Definition, TRV_Type);
+      return Vs.reduceVarDecl(*this, D);
     }
     case VK_SFun: {
       // Don't traverse the definition, since it cyclicly points back to self.
       // Just create a new (dummy) definition.
-      return R->reduceVarDecl(*this, V::RedT::reduceNull());
+      return Vs.reduceVarDecl(*this, V::RMap::reduceNull());
     }
     case VK_Let: {
-      auto D = Vs.traverseDM(&Definition, R, TRV_SubExpr);
-      return R->reduceVarDecl(*this, D);
+      auto D = Vs.traverseDM(&Definition, TRV_SubExpr);
+      return Vs.reduceVarDecl(*this, D);
     }
     case VK_Letrec: {
       // Create a new (empty) definition.
-      auto Nvd = R->reduceVarDecl(*this, V::RedT::reduceNull());
+      auto Nvd = Vs.reduceVarDecl(*this, V::RMap::reduceNull());
       // Enter the scope of the empty definition.
-      R->enterScope(this, Nvd);
+      Vs.enterScope(this, Nvd);
       // Traverse the definition, and hope recursive references are lazy.
-      auto D = Vs.traverseDM(&Definition, R, TRV_SubExpr);
-      R->exitScope(this);
-      return R->reduceVarDeclLetrec(Nvd, D);
+      auto D = Vs.traverseDM(&Definition, TRV_SubExpr);
+      Vs.exitScope(this);
+      return Vs.reduceVarDeclLetrec(Nvd, D);
     }
   }
 }
 
 template <class V>
-MAPTYPE(V::RedT, Function) Function::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
+  auto E0 = Vs.traverseDM(&VDecl, TRV_SubExpr);
   // Tell the rewriter to enter the scope of the function.
-  R->enterScope(VDecl, E0);
-  auto E1 = Vs.traverseDM(&Body, R, TRV_SubExpr);
-  R->exitScope(VDecl);
-  return R->reduceFunction(*this, E0, E1);
+  Vs.enterScope(VDecl, E0);
+  auto E1 = Vs.traverseDM(&Body, TRV_SubExpr);
+  Vs.exitScope(VDecl);
+  return Vs.reduceFunction(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V::RedT, SFunction) SFunction::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, SFunction) SFunction::traverse(V &Vs) {
   // Traversing an self-definition is a no-op.
-  auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
-  R->enterScope(VDecl, E0);
-  auto E1 = Vs.traverseDM(&Body, R, TRV_SubExpr);
-  R->exitScope(VDecl);
+  auto E0 = Vs.traverseDM(&VDecl, TRV_SubExpr);
+  Vs.enterScope(VDecl, E0);
+  auto E1 = Vs.traverseDM(&Body, TRV_SubExpr);
+  Vs.exitScope(VDecl);
   // The SFun constructor will set E0->Definition to E1.
-  return R->reduceSFunction(*this, E0, E1);
+  return Vs.reduceSFunction(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Code) Code::traverse(V &Vs, typename V::RedT *R) {
-  auto Nt = Vs.traverseDM(&ReturnType, R, TRV_Type);
-  auto Nb = Vs.traverseDM(&Body,       R, TRV_Lazy);
-  return R->reduceCode(*this, Nt, Nb);
+MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
+  auto Nt = Vs.traverseDM(&ReturnType, TRV_Type);
+  auto Nb = Vs.traverseDM(&Body, TRV_Lazy);
+  return Vs.reduceCode(*this, Nt, Nb);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Field) Field::traverse(V &Vs, typename V::RedT *R) {
-  auto Nr = Vs.traverseDM(&Range, R, TRV_Type);
-  auto Nb = Vs.traverseDM(&Body,  R, TRV_Lazy);
-  return R->reduceField(*this, Nr, Nb);
+MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
+  auto Nr = Vs.traverseDM(&Range, TRV_Type);
+  auto Nb = Vs.traverseDM(&Body, TRV_Lazy);
+  return Vs.reduceField(*this, Nr, Nb);
 }
 
 
 template <class V>
-MAPTYPE(V::RedT, Literal) Literal::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, Literal) Literal::traverse(V &Vs) {
   switch (ValType.Base) {
   case ValueType::BT_Void:
     break;
   case ValueType::BT_Bool:
-    return R->reduceLiteralT(as<bool>());
+    return Vs.reduceLiteralT(as<bool>());
   case ValueType::BT_Int: {
     switch (ValType.Size) {
     case ValueType::ST_8:
       if (ValType.Signed)
-        return R->reduceLiteralT(as<int8_t>());
+        return Vs.reduceLiteralT(as<int8_t>());
       else
-        return R->reduceLiteralT(as<uint8_t>());
+        return Vs.reduceLiteralT(as<uint8_t>());
     case ValueType::ST_16:
       if (ValType.Signed)
-        return R->reduceLiteralT(as<int16_t>());
+        return Vs.reduceLiteralT(as<int16_t>());
       else
-        return R->reduceLiteralT(as<uint16_t>());
+        return Vs.reduceLiteralT(as<uint16_t>());
     case ValueType::ST_32:
       if (ValType.Signed)
-        return R->reduceLiteralT(as<int32_t>());
+        return Vs.reduceLiteralT(as<int32_t>());
       else
-        return R->reduceLiteralT(as<uint32_t>());
+        return Vs.reduceLiteralT(as<uint32_t>());
     case ValueType::ST_64:
       if (ValType.Signed)
-        return R->reduceLiteralT(as<int64_t>());
+        return Vs.reduceLiteralT(as<int64_t>());
       else
-        return R->reduceLiteralT(as<uint64_t>());
+        return Vs.reduceLiteralT(as<uint64_t>());
     default:
       break;
     }
@@ -523,224 +496,224 @@ MAPTYPE(V::RedT, Literal) Literal::traverse(V &Vs, typename V::RedT *R) {
   case ValueType::BT_Float: {
     switch (ValType.Size) {
     case ValueType::ST_32:
-      return R->reduceLiteralT(as<float>());
+      return Vs.reduceLiteralT(as<float>());
     case ValueType::ST_64:
-      return R->reduceLiteralT(as<double>());
+      return Vs.reduceLiteralT(as<double>());
     default:
       break;
     }
     break;
   }
   case ValueType::BT_String:
-    return R->reduceLiteralT(as<StringRef>());
+    return Vs.reduceLiteralT(as<StringRef>());
   case ValueType::BT_Pointer:
-    return R->reduceLiteralT(as<void*>());
+    return Vs.reduceLiteralT(as<void*>());
   case ValueType::BT_ValueRef:
     break;
   }
-  return R->reduceLiteral(*this);
+  return Vs.reduceLiteral(*this);
 }
 
 template <class V>
-MAPTYPE(V::RedT, LiteralPtr) LiteralPtr::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceLiteralPtr(*this);
+MAPTYPE(V::RMap, LiteralPtr) LiteralPtr::traverse(V &Vs) {
+  return Vs.reduceLiteralPtr(*this);
 }
 
 template<class V>
-MAPTYPE(V::RedT, Variable) Variable::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceVariable(*this, Vs.traverseWeakDM(&VDecl, R));
+MAPTYPE(V::RMap, Variable) Variable::traverse(V &Vs) {
+  return Vs.reduceVariable(*this, Vs.traverseWeakDM(&VDecl));
 }
 
 template <class V>
-MAPTYPE(V::RedT, Apply) Apply::traverse(V &Vs, typename V::RedT *R) {
-  auto Nf = Vs.traverseDM(&Fun, R, TRV_Path);
-  auto Na = Vs.traverseDM(&Arg, R);
-  return R->reduceApply(*this, Nf, Na);
+MAPTYPE(V::RMap, Apply) Apply::traverse(V &Vs) {
+  auto Nf = Vs.traverseDM(&Fun, TRV_Path);
+  auto Na = Vs.traverseDM(&Arg);
+  return Vs.reduceApply(*this, Nf, Na);
 }
 
 template <class V>
-MAPTYPE(V::RedT, SApply) SApply::traverse(V &Vs, typename V::RedT *R) {
-  auto Nf = Vs.traverseDM(&Sfun, R, TRV_Path);
-  auto Na = Arg ? Vs.traverseDM(&Arg, R) : V::RedT::reduceNull();
-  return R->reduceSApply(*this, Nf, Na);
+MAPTYPE(V::RMap, SApply) SApply::traverse(V &Vs) {
+  auto Nf = Vs.traverseDM(&Sfun, TRV_Path);
+  auto Na = Arg ? Vs.traverseDM(&Arg) : V::RMap::reduceNull();
+  return Vs.reduceSApply(*this, Nf, Na);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Project) Project::traverse(V &Vs, typename V::RedT *R) {
-  auto Nr = Vs.traverseDM(&Rec, R, TRV_Path);
-  return R->reduceProject(*this, Nr);
+MAPTYPE(V::RMap, Project) Project::traverse(V &Vs) {
+  auto Nr = Vs.traverseDM(&Rec, TRV_Path);
+  return Vs.reduceProject(*this, Nr);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Call) Call::traverse(V &Vs, typename V::RedT *R) {
-  auto Nt = Vs.traverseDM(&Target, R, TRV_Path);
-  return R->reduceCall(*this, Nt);
+MAPTYPE(V::RMap, Call) Call::traverse(V &Vs) {
+  auto Nt = Vs.traverseDM(&Target, TRV_Path);
+  return Vs.reduceCall(*this, Nt);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Alloc) Alloc::traverse(V &Vs, typename V::RedT *R) {
-  auto Nd = Vs.traverseDM(&InitExpr, R);
-  return R->reduceAlloc(*this, Nd);
+MAPTYPE(V::RMap, Alloc) Alloc::traverse(V &Vs) {
+  auto Nd = Vs.traverseDM(&InitExpr);
+  return Vs.reduceAlloc(*this, Nd);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Load) Load::traverse(V &Vs, typename V::RedT *R) {
-  auto Np = Vs.traverseDM(&Ptr, R);
-  return R->reduceLoad(*this, Np);
+MAPTYPE(V::RMap, Load) Load::traverse(V &Vs) {
+  auto Np = Vs.traverseDM(&Ptr);
+  return Vs.reduceLoad(*this, Np);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Store) Store::traverse(V &Vs, typename V::RedT *R) {
-  auto Np = Vs.traverseDM(&Dest,   R);
-  auto Nv = Vs.traverseDM(&Source, R);
-  return R->reduceStore(*this, Np, Nv);
+MAPTYPE(V::RMap, Store) Store::traverse(V &Vs) {
+  auto Np = Vs.traverseDM(&Dest);
+  auto Nv = Vs.traverseDM(&Source);
+  return Vs.reduceStore(*this, Np, Nv);
 }
 
 template <class V>
-MAPTYPE(V::RedT, ArrayIndex) ArrayIndex::traverse(V &Vs, typename V::RedT *R) {
-  auto Na = Vs.traverseDM(&Array, R);
-  auto Ni = Vs.traverseDM(&Index, R);
-  return R->reduceArrayIndex(*this, Na, Ni);
+MAPTYPE(V::RMap, ArrayIndex) ArrayIndex::traverse(V &Vs) {
+  auto Na = Vs.traverseDM(&Array);
+  auto Ni = Vs.traverseDM(&Index);
+  return Vs.reduceArrayIndex(*this, Na, Ni);
 }
 
 template <class V>
-MAPTYPE(V::RedT, ArrayAdd) ArrayAdd::traverse(V &Vs, typename V::RedT *R) {
-  auto Na = Vs.traverseDM(&Array, R);
-  auto Ni = Vs.traverseDM(&Index, R);
-  return R->reduceArrayAdd(*this, Na, Ni);
+MAPTYPE(V::RMap, ArrayAdd) ArrayAdd::traverse(V &Vs) {
+  auto Na = Vs.traverseDM(&Array);
+  auto Ni = Vs.traverseDM(&Index);
+  return Vs.reduceArrayAdd(*this, Na, Ni);
 }
 
 template <class V>
-MAPTYPE(V::RedT, UnaryOp) UnaryOp::traverse(V &Vs, typename V::RedT *R) {
-  auto Ne = Vs.traverseDM(&Expr0, R);
-  return R->reduceUnaryOp(*this, Ne);
+MAPTYPE(V::RMap, UnaryOp) UnaryOp::traverse(V &Vs) {
+  auto Ne = Vs.traverseDM(&Expr0);
+  return Vs.reduceUnaryOp(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V::RedT, BinaryOp) BinaryOp::traverse(V &Vs, typename V::RedT *R) {
-  auto Ne0 = Vs.traverseDM(&Expr0, R);
-  auto Ne1 = Vs.traverseDM(&Expr1, R);
-  return R->reduceBinaryOp(*this, Ne0, Ne1);
+MAPTYPE(V::RMap, BinaryOp) BinaryOp::traverse(V &Vs) {
+  auto Ne0 = Vs.traverseDM(&Expr0);
+  auto Ne1 = Vs.traverseDM(&Expr1);
+  return Vs.reduceBinaryOp(*this, Ne0, Ne1);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Cast) Cast::traverse(V &Vs, typename V::RedT *R) {
-  auto Ne = Vs.traverseDM(&Expr0, R);
-  return R->reduceCast(*this, Ne);
+MAPTYPE(V::RMap, Cast) Cast::traverse(V &Vs) {
+  auto Ne = Vs.traverseDM(&Expr0);
+  return Vs.reduceCast(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Phi) Phi::traverse(V &Vs, typename V::RedT *R) {
-  auto Np = R->reducePhiBegin(*this);
+MAPTYPE(V::RMap, Phi) Phi::traverse(V &Vs) {
+  auto Np = Vs.reducePhiBegin(*this);
   unsigned i = 0;
   for (auto *Va : Values) {
-    R->reducePhiArg(*this, Np, i, Vs.traverseDM(&Va, R));
+    Vs.reducePhiArg(*this, Np, i, Vs.traverseDM(&Va));
     ++i;
   }
-  return R->reducePhi(Np);
+  return Vs.reducePhi(Np);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Goto) Goto::traverse(V &Vs, typename V::RedT *R) {
-  auto Ntb = Vs.traverseWeakDM(&TargetBlock, R);
-  return R->reduceGoto(*this, Ntb);
+MAPTYPE(V::RMap, Goto) Goto::traverse(V &Vs) {
+  auto Ntb = Vs.traverseWeakDM(&TargetBlock);
+  return Vs.reduceGoto(*this, Ntb);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Branch) Branch::traverse(V &Vs, typename V::RedT *R) {
-  auto Nc  = Vs.traverseDM(&Condition, R);
-  auto Ntb = Vs.traverseWeakDM(&Branches[0], R);
-  auto Nte = Vs.traverseWeakDM(&Branches[1], R);
-  return R->reduceBranch(*this, Nc, Ntb, Nte);
+MAPTYPE(V::RMap, Branch) Branch::traverse(V &Vs) {
+  auto Nc  = Vs.traverseDM(&Condition);
+  auto Ntb = Vs.traverseWeakDM(&Branches[0]);
+  auto Nte = Vs.traverseWeakDM(&Branches[1]);
+  return Vs.reduceBranch(*this, Nc, Ntb, Nte);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Return) Return::traverse(V &Vs, typename V::RedT *R) {
-  auto Ne = Vs.traverseDM(&Retval, R);
-  return R->reduceReturn(*this, Ne);
+MAPTYPE(V::RMap, Return) Return::traverse(V &Vs) {
+  auto Ne = Vs.traverseDM(&Retval);
+  return Vs.reduceReturn(*this, Ne);
 }
 
 template <class V>
-MAPTYPE(V::RedT, BasicBlock) BasicBlock::traverse(V &Vs, typename V::RedT *R) {
-  auto Nb = R->reduceBasicBlockBegin(*this);
+MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
+  auto Nb = Vs.reduceBasicBlockBegin(*this);
   unsigned i = 0;
   for (Phi* &A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
-    R->reduceBasicBlockArg(Nb, i, Vs.traverseDM(&A, R, TRV_SubExpr));
+    Vs.reduceBasicBlockArg(Nb, i, Vs.traverseDM(&A, TRV_SubExpr));
     ++i;
   }
   i = 0;
   for (Instruction* &I : Instrs) {
     // Use TRV_SubExpr to force traversal of instructions
-    R->reduceBasicBlockInstr(Nb, i, Vs.traverseDM(&I, R, TRV_SubExpr));
+    Vs.reduceBasicBlockInstr(Nb, i, Vs.traverseDM(&I, TRV_SubExpr));
     ++i;
   }
-  R->reduceBasicBlockTerm(Nb, Vs.traverseDM(&TermInstr, R, TRV_SubExpr));
-  return R->reduceBasicBlock(Nb);
+  Vs.reduceBasicBlockTerm(Nb, Vs.traverseDM(&TermInstr, TRV_SubExpr));
+  return Vs.reduceBasicBlock(Nb);
 }
 
 template <class V>
-MAPTYPE(V::RedT, SCFG) SCFG::traverse(V &Vs, typename V::RedT *R) {
-  auto Ns = R->reduceSCFGBegin(*this);
+MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
+  auto Ns = Vs.reduceSCFGBegin(*this);
   unsigned i = 0;
   for (BasicBlock *&B : Blocks) {
-    auto Nb = Vs.traverseDM(&B, R, TRV_SubExpr);
-    R->reduceSCFGBlock(Ns, i, Nb);
+    auto Nb = Vs.traverseDM(&B, TRV_SubExpr);
+    Vs.reduceSCFGBlock(Ns, i, Nb);
     ++i;
   }
-  return R->reduceSCFG(Ns);
+  return Vs.reduceSCFG(Ns);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Future) Future::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, Future) Future::traverse(V &Vs) {
   assert(Result && "Cannot traverse Future that has not been forced.");
-  return Vs.traverseDM(&Result, R);
+  return Vs.traverseDM(&Result);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Undefined) Undefined::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceUndefined(*this);
+MAPTYPE(V::RMap, Undefined) Undefined::traverse(V &Vs) {
+  return Vs.reduceUndefined(*this);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Wildcard) Wildcard::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceWildcard(*this);
+MAPTYPE(V::RMap, Wildcard) Wildcard::traverse(V &Vs) {
+  return Vs.reduceWildcard(*this);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Identifier)
-Identifier::traverse(V &Vs, typename V::RedT *R) {
-  return R->reduceIdentifier(*this);
+MAPTYPE(V::RMap, Identifier)
+Identifier::traverse(V &Vs) {
+  return Vs.reduceIdentifier(*this);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Let) Let::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
+  auto E0 = Vs.traverseDM(&VDecl, TRV_SubExpr);
   // Tell the rewriter to enter the scope of the let variable.
-  R->enterScope(VDecl, E0);
-  auto E1 = Vs.traverseDM(&Body, R, TRV_Tail);
-  R->exitScope(VDecl);
-  return R->reduceLet(*this, E0, E1);
+  Vs.enterScope(VDecl, E0);
+  auto E1 = Vs.traverseDM(&Body, TRV_Tail);
+  Vs.exitScope(VDecl);
+  return Vs.reduceLet(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V::RedT, Letrec) Letrec::traverse(V &Vs, typename V::RedT *R) {
+MAPTYPE(V::RMap, Letrec) Letrec::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverseDM(&VDecl, R, TRV_SubExpr);
+  auto E0 = Vs.traverseDM(&VDecl, TRV_SubExpr);
   // Tell the rewriter to enter the scope of the let variable.
-  R->enterScope(VDecl, E0);
-  auto E1 = Vs.traverseDM(&Body, R, TRV_Tail);
-  R->exitScope(VDecl);
-  return R->reduceLetrec(*this, E0, E1);
+  Vs.enterScope(VDecl, E0);
+  auto E1 = Vs.traverseDM(&Body, TRV_Tail);
+  Vs.exitScope(VDecl);
+  return Vs.reduceLetrec(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V::RedT, IfThenElse) IfThenElse::traverse(V &Vs, typename V::RedT *R) {
-  auto Nc = Vs.traverseDM(&Condition, R);
-  auto Nt = Vs.traverseDM(&ThenExpr,  R, TRV_Tail);
-  auto Ne = Vs.traverseDM(&ElseExpr,  R, TRV_Tail);
-  return R->reduceIfThenElse(*this, Nc, Nt, Ne);
+MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
+  auto Nc = Vs.traverseDM(&Condition);
+  auto Nt = Vs.traverseDM(&ThenExpr, TRV_Tail);
+  auto Ne = Vs.traverseDM(&ElseExpr, TRV_Tail);
+  return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
 }
 
 

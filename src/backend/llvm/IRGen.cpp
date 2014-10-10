@@ -45,7 +45,9 @@ public:
 };
 
 
-class LLVMReducer : public DefaultReadReducer<LLVMReducer, LLVMReducerMap> {
+class LLVMReducer : public Traversal<LLVMReducer, LLVMReducerMap>,
+                    public DefaultReducer<LLVMReducer, LLVMReducerMap>,
+                    public DefaultScopeHandler<LLVMReducerMap> {
 public:
   LLVMReducer() :  currentFunction_(nullptr), builder_(ctx()) {
     // The module holds all of the llvm output.
@@ -60,6 +62,9 @@ public:
   llvm::Module* module() { return outModule_; }
 
 public:
+  /*
+   * FIXME -- move into traverse
+   *
   template <class T>
   llvm::Value* exitSubExpr(T *e, llvm::Value* v, TraversalKind K) {
     if (Instruction *inst = e->asCFGInstruction())
@@ -73,6 +78,7 @@ public:
                                 TraversalKind K) {
     return v;
   }
+  */
 
   llvm::Value* reduceWeak(Instruction* e) {
     return currentValues_[e->instrID()];
@@ -235,13 +241,10 @@ private:
 };
 
 
-class IRGen : public Traversal<IRGen, LLVMReducer> { };
-
 
 void generate_LLVM_IR(SExpr* E) {
-  IRGen Traverser;
   LLVMReducer Reducer;
-  Traverser.traverse(E, &Reducer, TRV_Tail);
+  Reducer.traverse(E, TRV_Tail);
   // Reducer.module()->dump();
 }
 

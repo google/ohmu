@@ -93,7 +93,7 @@ int main(int argc, const char** argv) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
     std::cout << "\nCFG:\n";
-    SCFG* cfg = CFGRewriter::convertSExprToCFG(e, tilParser.arena());
+    SCFG* cfg = CFGReducer::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
 
     backend_llvm::generate_LLVM_IR(cfg);

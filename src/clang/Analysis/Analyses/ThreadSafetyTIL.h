@@ -267,11 +267,11 @@ inline ValueType ValueType::getValueType<void*>() {
 
 
 /// Macro for the ugly template return type of SExpr::traverse
-#define MAPTYPE(V, X) typename V::template TypeMap<X>::Ty
+#define MAPTYPE(R, X) typename R::template TypeMap<X>::Ty
 
 #define DECLARE_TRAVERSE_AND_COMPARE(X)                       \
   template <class V>                                          \
-  MAPTYPE(V::RedT, X) traverse(V &Vs, typename V::RedT *R);   \
+  MAPTYPE(V::RMap, X) traverse(V &Vs);                        \
                                                               \
   template <class C>                                          \
   typename C::CType compare(const X* E, C& Cmp) const;

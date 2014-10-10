@@ -38,8 +38,7 @@ using namespace clang::threadSafety::til;
 /// CopyReducer implements the reducer interface to build a new SExpr.
 /// In other words, it makes a deep copy of a term.
 /// It is also useful as a base class for non-destructive rewrites.
-class CopyReducer : public SExprReducerMap,
-                    public ReadReducer<SExprReducerMap> {
+class CopyReducer {
 public:
   CopyReducer() {}
   CopyReducer(MemRegionRef A) : Arena(A) { }
@@ -50,6 +49,9 @@ public:
   Instruction* reduceWeak(Instruction* E)  { return nullptr; }
   VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
   BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
+
+  template <class T, class U>
+  T* handleResult(U** Eptr, T* Res) { return Res; }
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return new (Arena) VarDecl(Orig, E);
