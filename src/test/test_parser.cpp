@@ -21,7 +21,7 @@
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
 #include "til/CFGReducer.h"
-#include "jagger/interface.h"
+#include "til/SSAPass.h"
 
 #include <iostream>
 
@@ -91,6 +91,9 @@ int main(int argc, const char** argv) {
     SCFG* cfg = CFGReducer::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
     //encode(cfg, nullptr);
+    std::cout << "Doing SSA Pass:\n";
+    SSAPass::ssaTransform(cfg, tilParser.arena());
+    printSExpr(cfg);
   }
   delete v;
 

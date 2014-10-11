@@ -35,6 +35,28 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
+// Used by SExprReducerMap.  Most terms map to SExpr*.
+template <class T> struct InplaceTypeMap { typedef SExpr* Ty; };
+
+// These kinds of SExpr must map to the same kind.
+// We define these here b/c template specializations cannot be class members.
+template<> struct InplaceTypeMap<VarDecl>     { typedef VarDecl* Ty; };
+template<> struct InplaceTypeMap<BasicBlock>  { typedef BasicBlock* Ty; };
+
+
+/// Defines the TypeMap for traversals that return SExprs.
+/// See CopyReducer and InplaceReducer for details.
+class InplaceReducerMap {
+public:
+  // An SExpr reducer rewrites one SExpr to another.
+  template <class T> struct TypeMap : public SExprTypeMap<T> { };
+
+  typedef std::nullptr_t NullType;
+
+  static NullType reduceNull() { return nullptr; }
+};
+
+
 /// InplaceReducer implements the reducer interface so that each reduce simply
 /// returns a pointer to the original term.
 ///
@@ -47,8 +69,8 @@ public:
   BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
 
   // Destructively update SExprs by writing results.
-  template <class T>
-  T* handleResult(T** Eptr, T* Res) {
+  template <class T, class U>
+  T* handleResult(U** Eptr, T* Res) {
     *Eptr = Res;
     return Res;
   }
@@ -56,6 +78,8 @@ public:
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return &Orig;
   }
+  VarDecl* reduceVarDeclLetrec(VarDecl* Nvd, SExpr* D) { return Nvd; }
+
   SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
     return &Orig;
   }
@@ -69,54 +93,54 @@ public:
     return &Orig;
   }
 
-  SExpr* reduceLiteral(Literal &Orig) {
+  Instruction* reduceLiteral(Literal &Orig) {
     return &Orig;
   }
   template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
+  Instruction* reduceLiteralT(LiteralT<T> &Orig) {
     return &Orig;
   }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
+  Instruction* reduceLiteralPtr(LiteralPtr &Orig) {
     return &Orig;
   }
-  SExpr* reduceVariable(Variable &Orig) {
+  Instruction* reduceVariable(Variable &Orig, VarDecl* VD) {
     return &Orig;
   }
 
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
+  Instruction* reduceProject(Project &Orig, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceCall(Call &Orig, SExpr* E0) {
+  Instruction* reduceCall(Call &Orig, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
+  Instruction* reduceAlloc(Alloc &Orig, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
+  Instruction* reduceLoad(Load &Orig, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
+  Instruction* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
+  Instruction* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
+  Instruction* reduceCast(Cast &Orig, SExpr* E0) {
     return &Orig;
   }
 
@@ -126,13 +150,13 @@ public:
   void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) { }
   Phi* reducePhi(Phi* Ph) { return Ph; }
 
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
+  Terminator* reduceGoto(Goto &Orig, BasicBlock *B) {
     return &Orig;
   }
-  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
+  Terminator* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return &O;
   }
-  SExpr* reduceReturn(Return &Orig, SExpr* E) {
+  Terminator* reduceReturn(Return &Orig, SExpr* E) {
     return &Orig;
   }
 
@@ -164,6 +188,9 @@ public:
     return &Orig;
   }
   SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
+    return &Orig;
+  }
+  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
     return &Orig;
   }
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {

@@ -40,40 +40,39 @@ struct BlockInfo {
 };
 
 
-/// Base class for SSA Passes.
-/// Conversion to SSA is done in two passes.  The first populates the
-/// initial lookup tables for each block, while the second
-class SSAPassBase : public InplaceReducer {
+class SSAPass : public InplaceReducer,
+                public Traversal<SSAPass, InplaceReducerMap>,
+                public DefaultScopeHandler<InplaceReducerMap> {
 public:
-  SSAPassBase()
-    : CurrentCFG(nullptr), CurrentBB(nullptr), CurrentBlockID(0)
+  SSAPass(MemRegionRef A)
+    : Arena(A), CurrentCFG(nullptr), CurrentBB(nullptr), CurrentBlockID(0),
+      CurrentVarMap(nullptr), CurrentPL(nullptr)
   { }
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    assert(CurrentBB == nullptr && "Already in a basic block.");
-    CurrentBB = &Orig;
-    CurrentBlockID = CurrentBB->blockID();
-    return &Orig;
+  static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
+    SSAPass Pass(A);
+    Pass.traverse(Scfg, TRV_Tail);
   }
 
-  BasicBlock* reduceBasicBlock(BasicBlock *BB) {
-    assert(CurrentBB == BB && "Internal traversal error.");
-    CurrentBB = nullptr;
-    return BB;
+
+  // Destructively update SExprs by writing results.
+  template <class T>
+  T* handleResult(SExpr** Eptr, T* Res) {
+    *Eptr = Res;
+    if (CurrentPL && static_cast<SExpr*>(Res) == CurrentPL->LoadInstr) {
+      // NOTE: this could cause a type error if a Load does not rewrite to
+      // an instruction.  We check in reduceSCFG.
+      CurrentPL->DPos = Eptr;
+      CurrentPL = nullptr;
+    }
+    return Res;
   }
 
-protected:
-  SCFG*        CurrentCFG;
-  BasicBlock*  CurrentBB;
-  unsigned     CurrentBlockID;
-  MemRegionRef Arena;
-};
-
-
-
-class SSAPass : public SSAPassBase {
-public:
-  SSAPass() : CurrentVarMap(nullptr) { }
+  // There's no need to rewrite update anything that's not an SExpr**.
+  template <class T, class U>
+  T* handleResult(U** Eptr, T* Res) {
+    return Res;
+  }
 
   SCFG* reduceSCFGBegin(SCFG &Orig) {
     assert(CurrentCFG == nullptr && "Already in a CFG.");
@@ -84,13 +83,28 @@ public:
 
   SCFG* reduceSCFG(SCFG* Scfg) {
     assert(Scfg == CurrentCFG && "Internal traversal error.");
+
+    // Second pass:  Go back and replace all loads with phi nodes or values.
+    for (PendingLoad &PL : Pending) {
+      SExpr *E = lookupInPredecessors(PL.BB, PL.AllocID);
+      assert(PL.DPos && "Unhandled Load");
+      assert(isa<Instruction>(E) && "Loads must rewrite to instructions.");
+      *PL.DPos = E;
+    }
+
+    Pending.clear();
     CurrentCFG = nullptr;
     BInfoMap.clear();
+
+    // Assign numbers to phi nodes.
+    Scfg->renumber();
     return Scfg;
   }
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    SSAPassBase::reduceBasicBlockBegin(Orig);
+    assert(CurrentBB == nullptr && "Already in a basic block.");
+    CurrentBB = &Orig;
+    CurrentBlockID = CurrentBB->blockID();
 
     // warning -- make sure you don't add blocks to BlockInfo.
     CurrentVarMap = &BInfoMap[CurrentBlockID].AllocVarMap;
@@ -103,6 +117,12 @@ public:
     CurrentVarMap->resize(PSize, nullptr);
 
     return &Orig;
+  }
+
+  BasicBlock* reduceBasicBlock(BasicBlock *BB) {
+    assert(CurrentBB == BB && "Internal traversal error.");
+    CurrentBB = nullptr;
+    return BB;
   }
 
 
@@ -131,47 +151,63 @@ public:
       if (auto* A = dyn_cast<Alloc>(E0)) {
         if (auto *Av = CurrentVarMap->at(A->allocID()))
           return Av;
+        else {
+          assert(CurrentPL == nullptr && "Unhandled load.");
+          Pending.push_back(PendingLoad(&Orig, CurrentBB, A->allocID()));
+          // handleResult will pull this info out of CurrentPL when we return.
+          CurrentPL = &Pending.back();
+        }
       }
     }
     return &Orig;
   }
 
-private:
-  LocalVarMap* CurrentVarMap;
-  std::vector<BlockInfo> BInfoMap;
-};
+protected:
+  struct PendingLoad {
+    PendingLoad(Load *Ld, BasicBlock *B, unsigned ID)
+      : LoadInstr(Ld), BB(B), AllocID(ID), DPos(nullptr)
+    { }
 
-
-
-class SSALookupPass : public SSAPassBase {
-public:
-  SSALookupPass(std::vector<BlockInfo>& BMap) : BInfoMap(BMap) { }
+    Load       *LoadInstr;
+    BasicBlock *BB;
+    unsigned   AllocID;
+    SExpr      **DPos;
+  };
 
   // Lookup value of local variable at the beginning of basic block B
   SExpr* lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
+    auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
     SExpr* E = nullptr;
     Phi* Ph = nullptr;
     unsigned i = 0;
+
     for (auto* P : B->predecessors()) {
-      SExpr* E2 = lookup(B, LvarID);
+      SExpr* E2 = lookup(P, LvarID);
       if (Ph) {
-        // We know we need a phi node, so just copy E2 into it.
+        // We already have a phi node, so just copy E2 into it.
         Ph->values().push_back(E2);
       }
-      else if (E && E2 != E) {
+      else if ((E && E2 != E) || (P->blockID() >= B->blockID())) {
         // Values don't match, so make a new phi node.
         Ph = new (Arena) Phi(Arena, B->numPredecessors());
         // Fill it with the original value E
-        for (unsigned j = 0; j < i; ++j) {
+        for (unsigned j = 0; j < i; ++j)
           Ph->values().push_back(E);
-        }
-        // And add new value.
+        // Add the new value.
         Ph->values().push_back(E2);
+
+        if (!LvarMap->at(LvarID))
+          LvarMap->at(LvarID) = Ph;
       }
       E = E2;
+      ++i;
     }
-    if (Ph) E = Ph;
-    // auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
+    if (Ph) {
+      E = Ph;
+      B->addArgument(Ph);
+    }
+    // FIXME -- cache value at beginning of block.
+
     return E;
   }
 
@@ -189,8 +225,19 @@ public:
   }
 
 private:
-  std::vector<BlockInfo>& BInfoMap;
+  SSAPass() = delete;
+
+  MemRegionRef Arena;
+  SCFG*        CurrentCFG;
+  BasicBlock*  CurrentBB;
+  unsigned     CurrentBlockID;
+  LocalVarMap* CurrentVarMap;
+  PendingLoad* CurrentPL;
+
+  std::vector<BlockInfo> BInfoMap;
+  std::vector<PendingLoad> Pending;
 };
+
 
 
 }  // end namespace ohmu

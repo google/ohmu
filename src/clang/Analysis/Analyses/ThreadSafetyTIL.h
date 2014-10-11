@@ -1009,8 +1009,7 @@ public:
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
 
-  Phi()
-      : Instruction(COP_Phi), LocalVar(nullptr) { }
+  Phi() : Instruction(COP_Phi), LocalVar(nullptr) { }
   Phi(MemRegionRef A, unsigned Nvals, Alloc* Lv = nullptr)
       : Instruction(COP_Phi), Values(A, Nvals), LocalVar(Lv)  { }
   Phi(const Phi &Ph, MemRegionRef A, Alloc* Lv = nullptr)
