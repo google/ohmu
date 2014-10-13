@@ -212,6 +212,11 @@ int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (Visited) return ID;
   Visited = true;
 
+  // First sort the dominator, if it exists.
+  // This gives us a topological order where post-dominators always come last.
+  if (DominatorNode.Parent)
+    ID = DominatorNode.Parent->postTopologicalSort(Blocks, ID);
+
   for (auto *Block : predecessors())
     ID = Block->postTopologicalSort(Blocks, ID);
 

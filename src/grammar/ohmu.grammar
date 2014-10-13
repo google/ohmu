@@ -106,6 +106,7 @@ expr10 ::=
   unary
   |*[a] ( "*" b=unary       { (binary "*" a b) }
         | "/" b=unary       { (binary "/" a b) }
+        | "%" b=unary       { (binary "%" a b) }
         )
   ;
 
