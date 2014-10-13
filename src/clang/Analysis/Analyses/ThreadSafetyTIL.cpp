@@ -61,14 +61,6 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
-SExpr* Future::force() {
-  Status = FS_evaluating;
-  Result = compute();
-  Status = FS_done;
-  return Result;
-}
-
-
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
@@ -169,12 +161,31 @@ void simplifyIncompleteArg(til::Phi *Ph) {
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
 unsigned BasicBlock::renumber(unsigned ID) {
-  for (auto *Arg : Args)
-    Arg->setID(this, ID++);
-  for (auto *Instr : Instrs)
-    Instr->setID(this, ID++);
-  TermInstr->setID(this, ID++);
+  for (auto *Arg : Args) {
+    if (!Arg)
+      continue;
+    Arg->setBlock(this);
+    Arg->setInstrID(ID++);
+  }
+  for (auto *Instr : Instrs) {
+    if (!Instr)
+      continue;
+    Instr->setBlock(this);
+    Instr->setInstrID(ID++);
+  }
+  TermInstr->setInstrID(ID++);
   return ID;
+}
+
+// Renumber instructions in all blocks
+void SCFG::renumber() {
+  unsigned InstrID = 1;
+  unsigned BlockID = 0;
+  for (auto *Block : Blocks) {
+    InstrID = Block->renumber(InstrID);
+    Block->setBlockID(BlockID++);
+  }
+  NumInstructions = InstrID;
 }
 
 
@@ -282,18 +293,6 @@ void BasicBlock::computePostDominator() {
   }
   PostDominatorNode.Parent = Candidate;
   PostDominatorNode.SizeOfSubTree = 1;
-}
-
-
-// Renumber instructions in all blocks
-void SCFG::renumber() {
-  unsigned InstrID = 0;
-  unsigned BlockID = 0;
-  for (auto *Block : Blocks) {
-    InstrID = Block->renumber(InstrID);
-    Block->setBlockID(BlockID++);
-  }
-  NumInstructions = InstrID;
 }
 
 

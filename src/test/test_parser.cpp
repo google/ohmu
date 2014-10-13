@@ -85,13 +85,13 @@ int main(int argc, const char** argv) {
   }
 
   for (SExpr* e : *v) {
-    std::cout << "\nDefinition:\n";
+    std::cout << "\n====== Definition: ======\n";
     printSExpr(e);
-    std::cout << "\nCFG:\n";
+    std::cout << "\n====== CFG: ======\n";
     SCFG* cfg = CFGReducer::convertSExprToCFG(e, tilParser.arena());
     printSExpr(cfg);
     //encode(cfg, nullptr);
-    std::cout << "Doing SSA Pass:\n";
+    std::cout << "\n====== Doing SSA Pass: ======\n";
     SSAPass::ssaTransform(cfg, tilParser.arena());
     printSExpr(cfg);
   }

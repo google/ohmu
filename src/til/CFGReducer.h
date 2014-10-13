@@ -36,13 +36,6 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
-public:
-  TILDebugPrinter() : PrettyPrinter(true, false, false) { }
-};
-
-
-
 class VarContext {
 public:
   VarContext() { }

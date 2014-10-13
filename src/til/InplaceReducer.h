@@ -68,9 +68,16 @@ public:
   VarDecl*     reduceWeak(VarDecl *E)      { return E; }
   BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
 
-  // Destructively update SExprs by writing results.
-  template <class T, class U>
-  T* handleResult(U** Eptr, T* Res) {
+  // Destructively update SExprs by writing back results.
+  template <class T>
+  T* handleResult(SExpr** Eptr, T* Res) {
+    *Eptr = Res;
+    return Res;
+  }
+
+  // Destructively update SExprs by writing back results.
+  template <class T>
+  T* handleResult(T** Eptr, T* Res) {
     *Eptr = Res;
     return Res;
   }
@@ -93,54 +100,54 @@ public:
     return &Orig;
   }
 
-  Instruction* reduceLiteral(Literal &Orig) {
+  SExpr* reduceLiteral(Literal &Orig) {
     return &Orig;
   }
   template<class T>
-  Instruction* reduceLiteralT(LiteralT<T> &Orig) {
+  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
     return &Orig;
   }
-  Instruction* reduceLiteralPtr(LiteralPtr &Orig) {
+  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
     return &Orig;
   }
-  Instruction* reduceVariable(Variable &Orig, VarDecl* VD) {
+  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
     return &Orig;
   }
 
-  Instruction* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceProject(Project &Orig, SExpr* E0) {
+  SExpr* reduceProject(Project &Orig, SExpr* E0) {
     return &Orig;
   }
-  Instruction* reduceCall(Call &Orig, SExpr* E0) {
+  SExpr* reduceCall(Call &Orig, SExpr* E0) {
     return &Orig;
   }
-  Instruction* reduceAlloc(Alloc &Orig, SExpr* E0) {
+  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
     return &Orig;
   }
-  Instruction* reduceLoad(Load &Orig, SExpr* E0) {
+  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
     return &Orig;
   }
-  Instruction* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
+  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
     return &Orig;
   }
-  Instruction* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
+  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
-  Instruction* reduceCast(Cast &Orig, SExpr* E0) {
+  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
     return &Orig;
   }
 
@@ -150,13 +157,13 @@ public:
   void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) { }
   Phi* reducePhi(Phi* Ph) { return Ph; }
 
-  Terminator* reduceGoto(Goto &Orig, BasicBlock *B) {
+  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
     return &Orig;
   }
-  Terminator* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
+  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return &O;
   }
-  Terminator* reduceReturn(Return &Orig, SExpr* E) {
+  SExpr* reduceReturn(Return &Orig, SExpr* E) {
     return &Orig;
   }
 
@@ -164,9 +171,15 @@ public:
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
     return &Orig;
   }
-  void reduceBasicBlockArg  (BasicBlock *BB, unsigned i, SExpr* E) { }
-  void reduceBasicBlockInstr(BasicBlock *BB, unsigned i, SExpr* E) { }
-  void reduceBasicBlockTerm (BasicBlock *BB, SExpr* E) { }
+  void reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
+    BB->arguments()[i] = cast<Phi>(E);
+  }
+  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
+    BB->instructions()[i] = cast<Instruction>(E);
+  }
+  void reduceBBTerminator(BasicBlock *BB, SExpr* E) {
+    BB->setTerminator(cast<Terminator>(E));
+  }
   BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
 
 

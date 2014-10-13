@@ -522,7 +522,7 @@ private:
 class Instruction : public SExpr {
 public:
   static bool classof(const SExpr *E) {
-    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Phi;
+    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Future;
   }
 
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
@@ -553,7 +553,7 @@ public:
   StringRef name() const { return Name; }
 
   /// Set the basic block and instruction ID for this instruction.
-  void setID(BasicBlock *B, unsigned id) { Block = B; InstrID = id; }
+  void setInstrID(unsigned id) { InstrID = id; }
 
   /// Set the basic block for this instruction.
   void setBlock(BasicBlock *B) { Block = B; }
@@ -575,7 +575,7 @@ protected:
 
 inline Instruction* SExpr::asCFGInstruction() {
   Instruction* I = dyn_cast<Instruction>(this);
-  if (I && I->block())
+  if (I && I->block() && I->instrID() > 0)
     return I;
   return nullptr;
 }
@@ -1237,8 +1237,6 @@ public:
   const Terminator *terminator() const { return TermInstr; }
   Terminator *terminator() { return TermInstr; }
 
-  void setTerminator(Terminator *E) { TermInstr = E; }
-
   unsigned depth() const { return Depth; }
   void setDepth(unsigned D) { Depth = D; }
 
@@ -1254,17 +1252,22 @@ public:
   }
 
   /// Add a new argument.
-  void addArgument(Phi *V) {
+  void addArgument(Phi *E) {
     Args.reserveCheck(1, Arena);
-    Args.push_back(V);
-    V->setBlock(this);
+    Args.push_back(E);
+    E->setBlock(this);
   }
   /// Add a new instruction.
-  void addInstruction(Instruction *V) {
+  void addInstruction(Instruction *E) {
     Instrs.reserveCheck(1, Arena);
-    Instrs.push_back(V);
-    V->setBlock(this);
+    Instrs.push_back(E);
+    E->setBlock(this);
   }
+  void setTerminator(Terminator *E) {
+    TermInstr = E;
+    E->setBlock(this);
+  }
+
   // Add a new predecessor, and return the phi-node index for it.
   // Will add an argument to all phi-nodes, initialized to nullptr.
   unsigned addPredecessor(BasicBlock *Pred);
@@ -1411,7 +1414,7 @@ private:
 
 /// Placeholder for an expression that has not yet been created.
 /// Used to implement lazy copy and rewriting strategies.
-class Future : public SExpr {
+class Future : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
 
@@ -1421,37 +1424,23 @@ public:
     FS_done
   };
 
-  Future() : SExpr(COP_Future), Status(FS_pending), Result(nullptr) {}
-
-private:
-  virtual ~Future() LLVM_DELETED_FUNCTION;
+  Future() : Instruction(COP_Future), Status(FS_pending), Result(nullptr) { }
 
 public:
-  // A lazy rewriting strategy should subclass Future and override this method.
-  virtual SExpr *compute() { return nullptr; }
-
   // Return the result of this future if it exists, otherwise return null.
-  SExpr *maybeGetResult() const {
-    return Result;
-  }
+  SExpr *maybeGetResult() const { return Result; }
+  FutureStatus status() const { return Status; }
 
-  // Return the result of this future; forcing it if necessary.
-  SExpr *result() {
-    switch (Status) {
-    case FS_pending:
-      return force();
-    case FS_evaluating:
-      return nullptr; // infinite loop; illegal recursion.
-    case FS_done:
-      return Result;
-    }
+  void setStatus(FutureStatus FS) { Status = FS; }
+
+  void setResult(SExpr *Res) {
+    Result = Res;
+    Status = FS_done;
   }
 
   DECLARE_TRAVERSE_AND_COMPARE(Future)
 
 private:
-  SExpr* force();
-
   FutureStatus Status;
   SExpr *Result;
 };

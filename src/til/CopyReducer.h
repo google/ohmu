@@ -146,15 +146,15 @@ public:
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
     return new (Arena) BasicBlock(Orig, Arena);
   }
-  void reduceBasicBlockArg(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Phi* Ph = dyn_cast<Phi>(E))
+  void reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
+    if (Phi* Ph = dyn_cast_or_null<Phi>(E))
       BB->addArgument(Ph);
   }
-  void reduceBasicBlockInstr(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Instruction* I = dyn_cast<Instruction>(E))
+  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
+    if (Instruction* I = dyn_cast_or_null<Instruction>(E))
       BB->addInstruction(I);
   }
-  void reduceBasicBlockTerm (BasicBlock *BB, SExpr* E) {
+  void reduceBBTerminator(BasicBlock *BB, SExpr* E) {
     BB->setTerminator(dyn_cast<Terminator>(E));
   }
   BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }

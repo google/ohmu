@@ -38,7 +38,7 @@ void CFGReducer::enterScope(VarDecl *orig, VarDecl *nv) {
   if (orig->name().length() > 0) {
     varCtx_->push(nv);
     if (currentBB_ && nv->definition())
-      if (Instruction *I = nv->definition()->asCFGInstruction())
+      if (Instruction *I = dyn_cast<Instruction>(nv->definition()))
         if (I->name().length() == 0)
           I->setName(nv->name());
   }
@@ -346,7 +346,7 @@ void CFGReducer::initCFG() {
 SCFG* CFGReducer::finishCFG() {
   currentCFG_->renumber();
   TILDebugPrinter::print(currentCFG_, std::cout);
-  std::cout << "\n\n";
+  std::cout << "\n====== Converting to Normal Form ======\n";
   setContinuation(nullptr);
   currentCFG_->computeNormalForm();
   return currentCFG_;

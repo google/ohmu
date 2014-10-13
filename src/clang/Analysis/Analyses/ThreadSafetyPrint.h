@@ -30,17 +30,16 @@ template <typename Self, typename StreamType>
 class PrettyPrinter {
 private:
   bool Verbose;  // Print out additional information
-  bool Cleanup;  // Omit redundant decls.
   bool CStyle;   // Print exprs in C-like syntax.
 
 public:
-  PrettyPrinter(bool V = false, bool C = true, bool CS = true)
-     : Verbose(V), Cleanup(C), CStyle(CS)
+  PrettyPrinter(bool V = false, bool CS = true)
+     : Verbose(V), CStyle(CS)
   {}
 
-  static void print(const SExpr *E, StreamType &SS) {
+  static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
     Self printer;
-    printer.printSExpr(E, SS, Prec_MAX);
+    printer.printSExpr(E, SS, Prec_MAX, Sub);
   }
 
 protected:
@@ -443,6 +442,11 @@ protected:
 
 
   void printBBInstr(const Instruction *E, StreamType &SS) {
+    if (!E) {
+      if (Verbose)
+        SS << "null;\n";
+      return;
+    }
     if (E->opcode() != COP_Store) {
       SS << "let " << printableName(E->name()) << E->instrID() << " = ";
     }
@@ -553,7 +557,9 @@ protected:
   }
 
   void printFuture(const Future *E, StreamType &SS) {
+    SS << "#future(";
     self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
+    SS << ")";
   }
 
   void printUndefined(const Undefined *E, StreamType &SS) {
@@ -567,6 +573,11 @@ protected:
 
 
 class StdPrinter : public PrettyPrinter<StdPrinter, std::ostream> { };
+
+class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
+public:
+  TILDebugPrinter() : PrettyPrinter(false, false) { }
+};
 
 
 }  // end namespace til

@@ -165,21 +165,40 @@
 };
 
 
-// SSA pass for loops.
+// Initial SSA Handling for loops.
 {
   let n = 100+0;
+  var i = 0;
+  var total = 0;
+  letrec loop(): Int -> {
+    if (i^ < n) then total^ else {
+      total := total^ + i^;
+      i := i^ + 1;
+      loop();
+    };
+  };
+  loop();
+};
+
+
+// Test redundant Phi code elimination
+{
+  let n = 100+0;
+  var i = 0;
   var total = 0;
   var unchanged = 0;
-  letrec loop(i: Int): Int -> {
-    if (i < n) then {
-      total := total + 1;
-      loop(i+1);
-    }
-    else 0;
+  letrec loop(): Int -> {
+    if (i^ < n) then total^ else {
+      total := total^ + i^;
+      i := i^ + 1;
+      loop();
+    };
   };
-  loop(0);
-  unchanged^;
+  let ans = loop();
+  ans + unchanged^;
 };
+
+
 
 
 

@@ -98,7 +98,6 @@ public:
   /// Invoked by SExpr class to traverse owned data members.
   /// K should not be TRV_Weak; use traverseWeakDM instead.
   /// Possibly weak instructions should use traversDM(SExpr*, R).
-  /// Do not override.
   template <class T>
   MAPTYPE(RMap, T) traverseDM(T** Eptr, TraversalKind K) {
     return self()->handleResult(Eptr, self()->traverse(*Eptr, K));
@@ -289,9 +288,9 @@ public:
   R_BasicBlock reduceBasicBlockBegin(BasicBlock &Orig) {
     return self()->reduceSExpr(Orig);
   }
-  void reduceBasicBlockArg  (R_BasicBlock, unsigned i, R_SExpr E) { }
-  void reduceBasicBlockInstr(R_BasicBlock, unsigned i, R_SExpr E) { }
-  void reduceBasicBlockTerm (R_BasicBlock, R_SExpr E) { }
+  void reduceBBArgument   (R_BasicBlock, unsigned i, R_SExpr E) { }
+  void reduceBBInstruction(R_BasicBlock, unsigned i, R_SExpr E) { }
+  void reduceBBTerminator (R_BasicBlock, R_SExpr E) { }
   R_BasicBlock reduceBasicBlock(R_BasicBlock BB) { return BB; }
 
 
@@ -606,7 +605,7 @@ template <class V>
 MAPTYPE(V::RMap, Phi) Phi::traverse(V &Vs) {
   auto Np = Vs.reducePhiBegin(*this);
   unsigned i = 0;
-  for (auto *Va : Values) {
+  for (auto *&Va : Values) {
     Vs.reducePhiArg(*this, Np, i, Vs.traverseDM(&Va));
     ++i;
   }
@@ -637,18 +636,20 @@ template <class V>
 MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
   auto Nb = Vs.reduceBasicBlockBegin(*this);
   unsigned i = 0;
+  // Note -- we do not use traverseDM here, because reduceBBArg/Instr/Term
+  // is used as an alternative to handleResult.  (See Traversal class.)
   for (Phi* &A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
-    Vs.reduceBasicBlockArg(Nb, i, Vs.traverseDM(&A, TRV_SubExpr));
+    Vs.reduceBBArgument(Nb, i, Vs.traverse(A, TRV_SubExpr));
     ++i;
   }
   i = 0;
   for (Instruction* &I : Instrs) {
     // Use TRV_SubExpr to force traversal of instructions
-    Vs.reduceBasicBlockInstr(Nb, i, Vs.traverseDM(&I, TRV_SubExpr));
+    Vs.reduceBBInstruction(Nb, i, Vs.traverse(I, TRV_SubExpr));
     ++i;
   }
-  Vs.reduceBasicBlockTerm(Nb, Vs.traverseDM(&TermInstr, TRV_SubExpr));
+  Vs.reduceBBTerminator(Nb, Vs.traverse(TermInstr, TRV_SubExpr));
   return Vs.reduceBasicBlock(Nb);
 }
 
