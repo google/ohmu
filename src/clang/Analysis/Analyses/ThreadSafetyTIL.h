@@ -1009,18 +1009,15 @@ public:
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_Phi; }
 
-  Phi() : Instruction(COP_Phi), LocalVar(nullptr) { }
+  Phi() : Instruction(COP_Phi) { }
   Phi(MemRegionRef A, unsigned Nvals, Alloc* Lv = nullptr)
-      : Instruction(COP_Phi), Values(A, Nvals), LocalVar(Lv)  { }
+      : Instruction(COP_Phi), Values(A, Nvals) { }
   Phi(const Phi &Ph, MemRegionRef A, Alloc* Lv = nullptr)
-      : Instruction(Ph), Values(A, Ph.values().size()), LocalVar(Lv) { }
+      : Instruction(Ph), Values(A, Ph.values().size()) { }
 
   /// Return the array of Phi arguments
   const ValArray &values() const { return Values; }
   ValArray &values() { return Values; }
-
-  const Alloc* localVar() const { return LocalVar; }
-  Alloc* localVar() { return LocalVar; }
 
   Status status() const { return static_cast<Status>(Flags); }
   void setStatus(Status s) { Flags = s; }
@@ -1029,7 +1026,6 @@ public:
 
 private:
   ValArray Values;
-  Alloc* LocalVar;   // The alloc of the associates local variable, if any.
 };
 
 

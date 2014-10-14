@@ -147,6 +147,7 @@ private:
   std::vector<BlockInfo>     BInfoMap;
   std::vector<Instruction*>  InstructionMap;
   std::vector<PendingFuture> Pending;
+  LocalVarMap CachedVarMap;
 };
 
 

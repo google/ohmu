@@ -41,12 +41,21 @@ SCFG* SSAPass::reduceSCFG(SCFG* Scfg) {
   assert(Scfg == CurrentCFG && "Internal traversal error.");
 
   // Second pass:  Go back and replace all loads with phi nodes or values.
+  CurrentBB = Scfg->entry();
   for (PendingFuture &PF : Pending) {
     auto *F = PF.Fut;
     SExpr *E = F->maybeGetResult();
     if (!E) {
       Load  *L = F->LoadInstr;
       Alloc *A = F->AllocInstr;
+      BasicBlock *B = L->block();
+      if (B != CurrentBB) {
+        // We've switched to a new block.  Clear the cache.
+        CachedVarMap.clear();
+        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+        CachedVarMap.resize(MSize, nullptr);
+        CurrentBB = B;
+      }
       E = lookupInPredecessors(L->block(), A->allocID());
       F->setResult(E);
     }
@@ -65,6 +74,7 @@ SCFG* SSAPass::reduceSCFG(SCFG* Scfg) {
       *PF.IPos = I2;
     }
   }
+  CachedVarMap.clear();
 
   // TODO: clear future arena.
   Pending.clear();
@@ -110,6 +120,14 @@ void SSAPass::reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
   CurrentInstrID = ID;
 
   if (Phi* Ph = dyn_cast_or_null<Phi>(E)) {
+    // Delete invalid Phi nodes.
+    for (auto *A : Ph->values()) {
+      if (!A) {
+        Ph = nullptr;
+        break;
+      }
+    }
+
     // Store E in instruction map and rewrite.
     InstructionMap[ID] = Ph;
     BB->arguments()[i] = Ph;
@@ -164,7 +182,7 @@ SExpr* SSAPass::reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
     // Update current var map.
     if (auto* A = dyn_cast<Alloc>(E0)) {
       CurrentVarMap->at(A->allocID()) = E1;
-      return nullptr;
+      return E1;
     }
   }
   return &Orig;
@@ -174,7 +192,7 @@ SExpr* SSAPass::reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
 SExpr* SSAPass::reduceLoad(Load &Orig, SExpr* E0) {
   if (CurrentBB) {
     // Replace load with value from current var map.
-    if (auto* A = dyn_cast<Alloc>(E0)) {
+    if (auto* A = dyn_cast_or_null<Alloc>(E0)) {
       if (auto *Av = CurrentVarMap->at(A->allocID()))
         return Av;
       else
@@ -197,10 +215,44 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 
 // Lookup value of local variable at the beginning of basic block B
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
+  // See if we have a cached value.
+  SExpr* E = CachedVarMap[LvarID];
+  if (E)
+    return E;
+
+  // E is the first value we find, and E2 is the second.
+  SExpr* E2 = nullptr;
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
-  SExpr* E = nullptr;
   Phi* Ph = nullptr;
-  unsigned i = 0;  for (auto* P : B->predecessors()) {    SExpr* E2;    if (Ph) {      // We already have a phi node, so just copy E2 into it.      E2 = lookup(P, LvarID);      Ph->values().push_back(E2);    }    else if (P->blockID() >= B->blockID() && !LvarMap->at(LvarID)) {      // This is a back-edge, and we don't set the variable in this block.      // Create a dummy Phi node to avoid infinite recursion before lookup.      Ph = makeNewPhiNode(i, E, B->numPredecessors());      LvarMap->at(LvarID) = Ph;      E2 = lookup(P, LvarID);      Ph->values().push_back(E2);    }    else {      // Ordinary edge, so we do the lookup first, and create a Phi only      // if necessary.      E2 = lookup(P, LvarID);      if (E && E2 != E) {        // Values don't match, so we need a phi node.        Ph = makeNewPhiNode(i, E, B->numPredecessors());        Ph->values().push_back(E2);      }    }    E = E2;    ++i;  }  if (Ph) {    E = Ph;    B->addArgument(Ph);  }  // FIXME -- cache value at beginning of block.  return E;}
+  bool Incomplete = false;
+  unsigned i = 0;
+  for (BasicBlock* P : B->predecessors()) {
+    if (!Ph && P->blockID() >= B->blockID() && !LvarMap->at(LvarID)) {
+      // This is a back-edge, and we don't set the variable in this block.
+      // Create a dummy Phi node to avoid infinite recursion before lookup.
+      Ph = makeNewPhiNode(i, E, B->numPredecessors());
+      Incomplete = true;
+      LvarMap->at(LvarID) = Ph;
+    }
+
+    E2 = lookup(P, LvarID);
+    if (!E)
+      E = E2;
+    if (Ph) {      // We already have a phi node, so just copy E2 into it.      Ph->values().push_back(E2);
+      // If E2 is different, then mark the Phi node as complete.
+      if (E2 != Ph && E2 != E)
+        Incomplete = false;    }
+    else if (E2 != E) {      // Values don't match, so we need a phi node.      Ph = makeNewPhiNode(i, E, B->numPredecessors());      Ph->values().push_back(E2);
+      Incomplete = false;    }    ++i;  }
+  if (Ph) {
+    if (Incomplete) {
+      // Remove Ph from the LvarMap
+      LvarMap->at(LvarID) = nullptr;
+    }
+    else {      E = Ph;      B->addArgument(Ph);
+    }  }
+  // Cache result to avoid creating duplicate phi nodes.
+  CachedVarMap[LvarID] = E;  return E;}
 // Lookup value of local variable at the end of basic block BSExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {  auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;  assert(LvarID < LvarMap->size());  // Check to see if the variable was set in this block.  if (auto* E = LvarMap->at(LvarID))    return E;  // Lookup variable in predecessor blocks, and store in the end map.  auto* E = lookupInPredecessors(B, LvarID);  LvarMap->at(LvarID) = E;  return E;}
 
 

@@ -171,7 +171,7 @@
   var i = 0;
   var total = 0;
   letrec loop(): Int -> {
-    if (i^ < n) then total^ else {
+    if (i^ == n) then total^ else {
       total := total^ + i^;
       i := i^ + 1;
       loop();
@@ -181,26 +181,73 @@
 };
 
 
-// Test redundant Phi code elimination
+// Test caching of variable lookups.
+{
+  let a = 1+0;
+  var i = 0;
+  if (a < 10) then { i := 1; a; } else { i := 2; a; };
+  i^ + i^ * i^ + i^;
+};
+
+
+// don't insert Phi nodes for dead variables.
+{
+  let a = 1+0;
+  var i = 0;
+  if (a < 10) then { i := 1; a; } else { i := 2; a; };
+  let z = i^ * i^;
+  let w = if (a < 20) then a else a*z;
+  w;
+};
+
+
+// Test redundant Phi code elimination in loops.
 {
   let n = 100+0;
   var i = 0;
   var total = 0;
-  var unchanged = 0;
+  var unchanged = n+1;
   letrec loop(): Int -> {
-    if (i^ < n) then total^ else {
+    if (i^ < n) then {
       total := total^ + i^;
       i := i^ + 1;
       loop();
-    };
+    }
+    else total^;
   };
   let ans = loop();
   ans + unchanged^;
 };
 
 
-
-
-
-
+// Test redundant Phi code elimination in nested loops.
+{
+  let n = 100 + 0;
+  let m = 100 + 0;
+  let ii = 0+0;
+  let jj = 0+0;
+  let tt = 0+0;
+  var i = ii;
+  var j = jj;
+  var total = tt;
+  letrec loop_m(): Int -> {
+    letrec loop_n(): Int -> {
+      if (i^ < n) then {
+        total := total^ + i^ + j^;
+        i := i^ + 1;
+        loop_n();
+      }
+      else 0;
+    };
+    if (j < m) then {
+      i := ii;
+      loop_n();
+      j := j^ + 1;
+      loop_m();
+    }
+    else 0;
+  };
+  loop_m();
+  total^;
+};
 
