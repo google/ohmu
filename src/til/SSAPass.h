@@ -49,17 +49,20 @@ public:
     Pass.traverse(Scfg, TRV_Tail);
   }
 
-
   SCFG* reduceSCFGBegin(SCFG &Orig);
   SCFG* reduceSCFG(SCFG* Scfg);
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
-  BasicBlock* reduceBasicBlock(BasicBlock *BB);
 
-  void reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E);
-  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E);
+  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
+    if (!InplaceReducer::reduceBBInstruction(BB, i, E))
+      return;
+    // Warning: adding new instructions will invalidate Pending.
+    if (Future *F = dyn_cast_or_null<Future>(E))
+      Pending.push_back(PendingFuture(F, &BB->instructions()[i],
+                                      CurrentInstrID));
+  }
 
-  // Destructively update SExprs by writing results.
   template <class T>
   T* handleResult(SExpr** Eptr, T* Res) {
     if (Future *F = dyn_cast_or_null<Future>(Res))
@@ -67,28 +70,12 @@ public:
     *Eptr = Res;
     return Res;
   }
-
   BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
   VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
-
-
-  Instruction* reduceWeak(Instruction* I) {
-    // In most cases, we can return the rewritten version of I.
-    // However, phi node arguments on back-edges have not been rewritten yet;
-    // we'll rewrite those when we do the jump.
-    if (I->instrID() <= CurrentInstrID)
-      return InstructionMap[I->instrID()];
-    else
-      return I;
-  }
-
-  BasicBlock* reduceWeak(BasicBlock* B) { return B; }
-  VarDecl*    reduceWeak(VarDecl* VD)   { return VD; }
 
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0);
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1);
   SExpr* reduceLoad(Load &Orig, SExpr* E0);
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B);
 
 protected:
   // A load instruction that needs to be rewritten.
@@ -117,6 +104,9 @@ protected:
     unsigned INum;
   };
 
+  // Look up variable in the cache.
+  SExpr* lookupInCache(LocalVarMap *LvarMap, unsigned LvarID);
+
   // Make a new phi node, with the first i values set to E
   Phi* makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds);
 
@@ -126,10 +116,12 @@ protected:
   // Lookup value of local variable at the end of basic block B
   SExpr* lookup(BasicBlock *B, unsigned LvarID);
 
+  // Second pass of SSA -- lookup variables and replace all loads.
+  void replacePendingLoads();
+
 public:
   SSAPass(MemRegionRef A)
-    : Arena(A), CurrentCFG(nullptr), CurrentBB(nullptr), CurrentInstrID(0),
-      CurrentVarMap(nullptr)
+    : Arena(A), CurrentVarMap(nullptr)
   { FutArena.setRegion(&FutRegion); }
 
 private:
@@ -139,13 +131,9 @@ private:
   MemRegion    FutRegion; //< Allocate futures in region for immediate delete.
   MemRegionRef FutArena;
 
-  SCFG*        CurrentCFG;
-  BasicBlock*  CurrentBB;
-  unsigned     CurrentInstrID;
   LocalVarMap* CurrentVarMap;
 
   std::vector<SSABlockInfo>  BInfoMap;
-  std::vector<Instruction*>  InstructionMap;
   std::vector<PendingFuture> Pending;
   LocalVarMap CachedVarMap;
 };

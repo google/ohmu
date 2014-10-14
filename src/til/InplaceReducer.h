@@ -64,23 +64,28 @@ public:
 /// transformations.
 class InplaceReducer  {
 public:
-  Instruction* reduceWeak(Instruction* E)  { return E; }
-  VarDecl*     reduceWeak(VarDecl *E)      { return E; }
-  BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
-
   // Destructively update SExprs by writing back results.
   template <class T>
   T* handleResult(SExpr** Eptr, T* Res) {
     *Eptr = Res;
     return Res;
   }
+  BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
+  VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
 
-  // Destructively update SExprs by writing back results.
-  template <class T>
-  T* handleResult(T** Eptr, T* Res) {
-    *Eptr = Res;
-    return Res;
+
+  SExpr* reduceWeak(Instruction* I) {
+    // In most cases, we can return the rewritten version of I.
+    // However, phi node arguments on back-edges have not been rewritten yet;
+    // we'll rewrite those when we do the jump.
+    if (I->instrID() <= CurrentInstrID)
+      return InstructionMap[I->instrID()];
+    else
+      return I;
   }
+  VarDecl*     reduceWeak(VarDecl *E)      { return E; }
+  BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
+
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return &Orig;
@@ -168,26 +173,18 @@ public:
   }
 
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    return &Orig;
-  }
-  void reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
-    BB->arguments()[i] = cast<Phi>(E);
-  }
-  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
-    BB->instructions()[i] = cast<Instruction>(E);
-  }
+  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
+  bool reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E);
+  bool reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E);
   void reduceBBTerminator(BasicBlock *BB, SExpr* E) {
     BB->setTerminator(cast<Terminator>(E));
   }
-  BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
+  BasicBlock* reduceBasicBlock(BasicBlock *BB);
 
 
-  SCFG* reduceSCFGBegin(SCFG &Orig) {
-    return &Orig;
-  }
+  SCFG* reduceSCFGBegin(SCFG &Orig);
   void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) { }
-  SCFG* reduceSCFG(SCFG* Scfg) { return Scfg; }
+  SCFG* reduceSCFG(SCFG* Scfg);
 
 
   SExpr* reduceUndefined(Undefined &Orig) {
@@ -209,6 +206,16 @@ public:
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
     return &Orig;
   }
+
+
+  InplaceReducer()
+    : CurrentCFG(nullptr), CurrentBB(nullptr), CurrentInstrID(0) { }
+
+protected:
+  SCFG*        CurrentCFG;
+  BasicBlock*  CurrentBB;
+  unsigned     CurrentInstrID;
+  std::vector<SExpr*>  InstructionMap;
 };
 
 

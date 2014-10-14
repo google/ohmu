@@ -28,69 +28,28 @@ using namespace clang::threadSafety::til;
 
 
 SCFG* SSAPass::reduceSCFGBegin(SCFG &Orig) {
-  assert(CurrentCFG == nullptr && "Already in a CFG.");
-  CurrentCFG = &Orig;
+  InplaceReducer::reduceSCFGBegin(Orig);
   BInfoMap.resize(CurrentCFG->numBlocks());
-  InstructionMap.resize(CurrentCFG->numInstructions(), nullptr);
-  CurrentInstrID = 0;
   return &Orig;
 }
 
 
 SCFG* SSAPass::reduceSCFG(SCFG* Scfg) {
-  assert(Scfg == CurrentCFG && "Internal traversal error.");
+  replacePendingLoads();
 
-  // Second pass:  Go back and replace all loads with phi nodes or values.
-  CurrentBB = Scfg->entry();
-  for (PendingFuture &PF : Pending) {
-    auto *F = PF.Fut;
-    SExpr *E = F->maybeGetResult();
-    if (!E) {
-      Load  *L = F->LoadInstr;
-      Alloc *A = F->AllocInstr;
-      BasicBlock *B = L->block();
-      if (B != CurrentBB) {
-        // We've switched to a new block.  Clear the cache.
-        CachedVarMap.clear();
-        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
-        CachedVarMap.resize(MSize, nullptr);
-        CurrentBB = B;
-      }
-      E = lookupInPredecessors(L->block(), A->allocID());
-      F->setResult(E);
-    }
-    assert(PF.IPos && "Unhandled Future.");
-
-    Instruction* I2 = cast<Instruction>(E);
-    if (PF.INum > 0) {
-      // If I2 is a new, non-trivial instruction, then replace the old one.
-      // Otherwise eliminate the old instruction.
-      if (I2->instrID() == 0 && !I2->isTrivial() && !isa<Phi>(I2))
-        *PF.IPos = I2;
-      else
-        *PF.IPos = nullptr;
-    }
-    else {
-      *PF.IPos = I2;
-    }
-  }
-  CachedVarMap.clear();
-
-  // TODO: clear future arena.
+  // TODO: clear the Future arena.
   Pending.clear();
   BInfoMap.clear();
-  InstructionMap.clear();
-  CurrentCFG = nullptr;
 
   // Assign numbers to phi nodes.
   Scfg->renumber();
-  return Scfg;
+
+  return InplaceReducer::reduceSCFG(Scfg);
 }
 
 
 BasicBlock* SSAPass::reduceBasicBlockBegin(BasicBlock &Orig) {
-  assert(CurrentBB == nullptr && "Already in a basic block.");
-  CurrentBB = &Orig;
+  InplaceReducer::reduceBasicBlockBegin(Orig);
 
   // Warning -- adding blocks to BlockInfo will invalidate CurrentVarMap.
   CurrentVarMap = &BInfoMap[CurrentBB->blockID()].AllocVarMap;
@@ -105,66 +64,6 @@ BasicBlock* SSAPass::reduceBasicBlockBegin(BasicBlock &Orig) {
   return &Orig;
 }
 
-BasicBlock* SSAPass::reduceBasicBlock(BasicBlock *BB) {
-  assert(CurrentBB == BB && "Internal traversal error.");
-  CurrentBB = nullptr;
-  return BB;
-}
-
-
-void SSAPass::reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
-  // Get ID of the original argument.
-  unsigned ID = BB->arguments()[i]->instrID();
-  assert(CurrentInstrID == 0 || ID > CurrentInstrID &&
-         "Instructions not numbered properly.");
-  CurrentInstrID = ID;
-
-  if (Phi* Ph = dyn_cast_or_null<Phi>(E)) {
-    // Delete invalid Phi nodes.
-    for (auto *A : Ph->values()) {
-      if (!A) {
-        Ph = nullptr;
-        break;
-      }
-    }
-
-    // Store E in instruction map and rewrite.
-    InstructionMap[ID] = Ph;
-    BB->arguments()[i] = Ph;
-    return;
-  }
-  BB->arguments()[i] = nullptr;
-}
-
-// This is called instead of handleResult for basic block instructions.
-void SSAPass::reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
-  // Get the ID of the original instruction.
-  unsigned ID = BB->instructions()[i]->instrID();
-  assert(CurrentInstrID == 0 || ID > CurrentInstrID &&
-         "Instructions not numbered properly.");
-  CurrentInstrID = ID;
-
-  // Warning: adding new instructions will invalidate Pending.
-  if (Future *F = dyn_cast_or_null<Future>(E))
-    Pending.push_back(PendingFuture(F, &BB->instructions()[i], ID));
-
-  if (Instruction *I = dyn_cast_or_null<Instruction>(E)) {
-    // Store E in instruction map and rewrite.
-    InstructionMap[ID] = I;
-
-    if (I == BB->instructions()[i])
-      return;  // No change.
-
-    // If this is a new, non-trivial instruction, replace the old one.
-    // Otherwise eliminate the old instruction
-    if (I->instrID() == 0 && !I->isTrivial() && !isa<Phi>(I))
-      BB->instructions()[i] = I;        // rewrite
-    else
-      BB->instructions()[i] = nullptr;  // eliminate
-    return;
-  }
-  BB->instructions()[i] = nullptr;
-}
 
 
 SExpr* SSAPass::reduceAlloc(Alloc &Orig, SExpr* E0) {
@@ -203,13 +102,22 @@ SExpr* SSAPass::reduceLoad(Load &Orig, SExpr* E0) {
 }
 
 
-SExpr* SSAPass::reduceGoto(Goto &Orig, BasicBlock *B) {
-  if (B->blockID() < Orig.block()->blockID()) {
-    // FIXME!
-    // This is a back-edge, so we need to reduce the Phi arguments that we
-    // skipped earlier.
+
+SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
+  SExpr *E = LvarMap->at(LvarID);
+  if (!E)
+    return nullptr;
+
+  // The cached value may be an incomplete and temporary Phi node,
+  // that was later eliminated.
+  // If so, grab the real value and update the cache.
+  if (auto *Ph = dyn_cast<Phi>(E)) {
+    if (Ph->status() == Phi::PH_SingleVal) {
+      E = Ph->values()[0];
+      LvarMap->at(LvarID) = E;
+    }
   }
-  return &Orig;
+  return E;
 }
 
 
@@ -225,18 +133,16 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 
 // Lookup value of local variable at the beginning of basic block B
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
-  SExpr* E = nullptr;
   if (B == CurrentBB) {
-    // See if we have a cached value in the current block.
-    E = CachedVarMap[LvarID];
-    if (E)
+    // See if we have a cached value at the start of the current block.
+    if (SExpr* E = CachedVarMap[LvarID])
       return E;
   }
 
-  // E is the first value we find, and E2 is the second.
-  SExpr* E2 = nullptr;
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
-  Phi* Ph = nullptr;
+  SExpr* E  = nullptr;   //< The first value we find.
+  SExpr* E2 = nullptr;   //< The second distinct value we find.
+  Phi*   Ph = nullptr;   //< The Phi node we created (if any)
   bool Incomplete = false;                //< Is Ph incomplete?
   bool SetInBlock = LvarMap->at(LvarID);  //< Is var set within this block?
   unsigned i = 0;
@@ -255,16 +161,8 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
     if (!SetInBlock) {
       // Lookup in P may force a lookup in the current block due to cycles.
       // If that happened, just return the previous answer.
-      if (auto* E3 = LvarMap->at(LvarID)) {
-        // Cached value may be a temporary Phi node.
-        if (auto *Ph = dyn_cast<Phi>(E3)) {
-          if (Ph->status() == Phi::PH_SingleVal) {
-            E3 = Ph->values()[0];
-            LvarMap->at(LvarID) = E3;
-          }
-        }
-        return E3;
-      }
+      if (auto* CE = lookupInCache(LvarMap, LvarID))
+        return CE;
     }
     if (!E)
       E = E2;
@@ -290,10 +188,12 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
       // Remove Ph from the LvarMap; LvarMap will be set to E in lookup()
       LvarMap->at(LvarID) = nullptr;
       // Ph may have been cached elsewhere, so mark it as single val.
+      // It will be eliminated by lookupInCache/
       Ph->values()[0] = E;
       Ph->setStatus(Phi::PH_SingleVal);
     }
     else {
+      // Valid Phi node; add it to the block and return it.
       E = Ph;
       B->addArgument(Ph);
     }
@@ -305,27 +205,61 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
   return E;
 }
 
+
 // Lookup value of local variable at the end of basic block B
 SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
   assert(LvarID < LvarMap->size());
   // Check to see if the variable was set in this block.
-  if (auto* E = LvarMap->at(LvarID)) {
-    // Cached value may be a temporary Phi node.
-    if (auto *Ph = dyn_cast<Phi>(E)) {
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        LvarMap->at(LvarID) = E;
-      }
-    }
+  if (auto* E = lookupInCache(LvarMap, LvarID))
     return E;
-  }
   // Lookup variable in predecessor blocks.
   auto* E = lookupInPredecessors(B, LvarID);
   // Cache the result.
   LvarMap->at(LvarID) = E;
   return E;
 }
+
+
+// This is the second pass of the SSA conversion, which replaces looks up
+// values for all loads.
+void SSAPass::replacePendingLoads() {
+  // Second pass:  Go back and replace all loads with phi nodes or values.
+  CurrentBB = CurrentCFG->entry();
+  for (PendingFuture &PF : Pending) {
+    auto *F = PF.Fut;
+    SExpr *E = F->maybeGetResult();
+    if (!E) {
+      Load  *L = F->LoadInstr;
+      Alloc *A = F->AllocInstr;
+      BasicBlock *B = L->block();
+      if (B != CurrentBB) {
+        // We've switched to a new block.  Clear the cache.
+        CachedVarMap.clear();
+        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+        CachedVarMap.resize(MSize, nullptr);
+        CurrentBB = B;
+      }
+      E = lookupInPredecessors(L->block(), A->allocID());
+      F->setResult(E);
+    }
+    assert(PF.IPos && "Unhandled Future.");
+
+    Instruction* I2 = cast<Instruction>(E);
+    if (PF.INum > 0) {
+      // If I2 is a new, non-trivial instruction, then replace the old one.
+      // Otherwise eliminate the old instruction.
+      if (I2->instrID() == 0 && !I2->isTrivial() && !isa<Phi>(I2))
+        *PF.IPos = I2;
+      else
+        *PF.IPos = nullptr;
+    }
+    else {
+      *PF.IPos = I2;
+    }
+  }
+  CachedVarMap.clear();
+};
 
 
 }  // end namespace ohmu
