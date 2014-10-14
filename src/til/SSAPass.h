@@ -88,7 +88,7 @@ public:
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0);
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1);
   SExpr* reduceLoad(Load &Orig, SExpr* E0);
-
+  SExpr* reduceGoto(Goto &Orig, BasicBlock *B);
 
 protected:
   // A load instruction that needs to be rewritten.

@@ -203,6 +203,16 @@ SExpr* SSAPass::reduceLoad(Load &Orig, SExpr* E0) {
 }
 
 
+SExpr* SSAPass::reduceGoto(Goto &Orig, BasicBlock *B) {
+  if (B->blockID() < Orig.block()->blockID()) {
+    // FIXME!
+    // This is a back-edge, so we need to reduce the Phi arguments that we
+    // skipped earlier.
+  }
+  return &Orig;
+}
+
+
 Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
   // Values don't match, so make a new phi node.
   auto *Ph = new (Arena) Phi(Arena, numPreds);

@@ -130,11 +130,9 @@ protected:
       return;
     }
     if (Sub) {
-      if (const auto *I = dyn_cast<Instruction>(E)) {
-        if (I->block()) {
-          SS << printableName(I->name()) << I->instrID();
-          return;
-        }
+      if (const auto *I = E->asCFGInstruction()) {
+        SS << printableName(I->name()) << I->instrID();
+        return;
       }
     }
     if (self()->precedence(E) > P) {
