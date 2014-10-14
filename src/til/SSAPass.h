@@ -35,7 +35,7 @@ using namespace clang::threadSafety::til;
 // Map from local variables (allocID) to their definitions (SExpr*).
 typedef std::vector<SExpr*> LocalVarMap;
 
-struct BlockInfo {
+struct SSABlockInfo {
   LocalVarMap AllocVarMap;
 };
 
@@ -144,7 +144,7 @@ private:
   unsigned     CurrentInstrID;
   LocalVarMap* CurrentVarMap;
 
-  std::vector<BlockInfo>     BInfoMap;
+  std::vector<SSABlockInfo>  BInfoMap;
   std::vector<Instruction*>  InstructionMap;
   std::vector<PendingFuture> Pending;
   LocalVarMap CachedVarMap;
