@@ -225,45 +225,107 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 
 // Lookup value of local variable at the beginning of basic block B
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
-  // See if we have a cached value.
-  SExpr* E = CachedVarMap[LvarID];
-  if (E)
-    return E;
+  SExpr* E = nullptr;
+  if (B == CurrentBB) {
+    // See if we have a cached value in the current block.
+    E = CachedVarMap[LvarID];
+    if (E)
+      return E;
+  }
 
   // E is the first value we find, and E2 is the second.
   SExpr* E2 = nullptr;
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
   Phi* Ph = nullptr;
-  bool Incomplete = false;
+  bool Incomplete = false;                //< Is Ph incomplete?
+  bool SetInBlock = LvarMap->at(LvarID);  //< Is var set within this block?
   unsigned i = 0;
-  for (BasicBlock* P : B->predecessors()) {
-    if (!Ph && P->blockID() >= B->blockID() && !LvarMap->at(LvarID)) {
+
+  for (BasicBlock* P : B->predecessors()) {
+    if (!Ph && !SetInBlock && P->blockID() >= B->blockID()) {
       // This is a back-edge, and we don't set the variable in this block.
       // Create a dummy Phi node to avoid infinite recursion before lookup.
       Ph = makeNewPhiNode(i, E, B->numPredecessors());
       Incomplete = true;
       LvarMap->at(LvarID) = Ph;
+      SetInBlock = true;
     }
 
     E2 = lookup(P, LvarID);
+    if (!SetInBlock) {
+      // Lookup in P may force a lookup in the current block due to cycles.
+      // If that happened, just return the previous answer.
+      if (auto* E3 = LvarMap->at(LvarID)) {
+        // Cached value may be a temporary Phi node.
+        if (auto *Ph = dyn_cast<Phi>(E3)) {
+          if (Ph->status() == Phi::PH_SingleVal) {
+            E3 = Ph->values()[0];
+            LvarMap->at(LvarID) = E3;
+          }
+        }
+        return E3;
+      }
+    }
     if (!E)
       E = E2;
-    if (Ph) {      // We already have a phi node, so just copy E2 into it.      Ph->values().push_back(E2);
+
+    if (Ph) {
+      // We already have a phi node, so just copy E2 into it.
+      Ph->values().push_back(E2);
       // If E2 is different, then mark the Phi node as complete.
       if (E2 != Ph && E2 != E)
-        Incomplete = false;    }
-    else if (E2 != E) {      // Values don't match, so we need a phi node.      Ph = makeNewPhiNode(i, E, B->numPredecessors());      Ph->values().push_back(E2);
-      Incomplete = false;    }    ++i;  }
-  if (Ph) {
-    if (Incomplete) {
-      // Remove Ph from the LvarMap
-      LvarMap->at(LvarID) = nullptr;
+        Incomplete = false;
     }
-    else {      E = Ph;      B->addArgument(Ph);
-    }  }
-  // Cache result to avoid creating duplicate phi nodes.
-  CachedVarMap[LvarID] = E;  return E;}
-// Lookup value of local variable at the end of basic block BSExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {  auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;  assert(LvarID < LvarMap->size());  // Check to see if the variable was set in this block.  if (auto* E = LvarMap->at(LvarID))    return E;  // Lookup variable in predecessor blocks, and store in the end map.  auto* E = lookupInPredecessors(B, LvarID);  LvarMap->at(LvarID) = E;  return E;}
+    else if (E2 != E) {
+      // Values don't match, so we need a phi node.
+      Ph = makeNewPhiNode(i, E, B->numPredecessors());
+      Ph->values().push_back(E2);
+      Incomplete = false;
+    }
+    ++i;
+  }
+
+  if (Ph) {
+    if (Incomplete) {
+      // Remove Ph from the LvarMap; LvarMap will be set to E in lookup()
+      LvarMap->at(LvarID) = nullptr;
+      // Ph may have been cached elsewhere, so mark it as single val.
+      Ph->values()[0] = E;
+      Ph->setStatus(Phi::PH_SingleVal);
+    }
+    else {
+      E = Ph;
+      B->addArgument(Ph);
+    }
+  }
+
+  // Cache the result to avoid creating duplicate phi nodes.
+  if (B == CurrentBB)
+    CachedVarMap[LvarID] = E;
+  return E;
+}
+
+// Lookup value of local variable at the end of basic block B
+SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {
+  auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
+  assert(LvarID < LvarMap->size());
+  // Check to see if the variable was set in this block.
+  if (auto* E = LvarMap->at(LvarID)) {
+    // Cached value may be a temporary Phi node.
+    if (auto *Ph = dyn_cast<Phi>(E)) {
+      if (Ph->status() == Phi::PH_SingleVal) {
+        E = Ph->values()[0];
+        LvarMap->at(LvarID) = E;
+      }
+    }
+    return E;
+  }
+  // Lookup variable in predecessor blocks.
+  auto* E = lookupInPredecessors(B, LvarID);
+  // Cache the result.
+  LvarMap->at(LvarID) = E;
+  return E;
+}
 
 
 }  // end namespace ohmu
