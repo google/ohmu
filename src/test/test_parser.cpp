@@ -22,6 +22,7 @@
 #include "parser/TILParser.h"
 #include "til/CFGReducer.h"
 #include "til/SSAPass.h"
+#include "til/VisitCFG.h"
 
 #include <iostream>
 
@@ -84,19 +85,22 @@ int main(int argc, const char** argv) {
     return 0;
   }
 
+  VisitCFG visitCFG;
+
   for (SExpr* e : *v) {
     std::cout << "\n====== Initial AST: ======\n";
     printSExpr(e);
     SExpr* e2 = CFGReducer::lower(e, tilParser.arena());
     std::cout << "\n====== Lowered AST: ======\n";
     printSExpr(e2);
+    visitCFG.traverse(e2, TRV_Tail);
     //std::cout << "\n====== Doing SSA Pass: ======\n";
     //SSAPass::ssaTransform(cfg, tilParser.arena());
     //printSExpr(cfg);
   }
   delete v;
 
-  std::cout << "\n";
+  std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
   return 0;
 }
 

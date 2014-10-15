@@ -570,6 +570,7 @@ protected:
   }
 
   void printIdentifier(const Identifier *E, StreamType &SS) {
+    SS << "$";
     SS << E->name();
   }
 
