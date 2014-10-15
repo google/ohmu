@@ -72,6 +72,17 @@ public:
   Field* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Field(Orig, E0, E1);
   }
+  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
+    return new (Arena) Slot(Orig, E0);
+  }
+  Record* reduceRecordBegin(Record &Orig) {
+    return new (Arena) Record(Orig, Arena);
+  }
+  void reduceRecordSlot(Record &Orig, Record *R, unsigned i, Slot *S) {
+    R->slots().push_back(S);
+  }
+  Record* reduceRecord(Record *R) { return R; }
+
 
   Literal* reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);

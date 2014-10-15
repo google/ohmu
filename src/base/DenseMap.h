@@ -23,7 +23,6 @@
 #ifndef OHMU_DENSEMAP_H
 #define OHMU_DENSEMAP_H
 
-
 #include <unordered_map>
 
 

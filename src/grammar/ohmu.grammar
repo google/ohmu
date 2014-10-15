@@ -1,8 +1,8 @@
 
 // First rule for files
 definitions ::=
-  e=expr ";"           { (append [] e) }
-  |*[es] e=expr ";"    { (append es e) }
+  e=slot          { (append [] e) }
+  |*[es] e=slot   { (append es e) }
   ;
 
 // First rule for read-eval-print loop

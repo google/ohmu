@@ -41,8 +41,8 @@ struct SSABlockInfo {
 
 
 class SSAPass : public InplaceReducer,
-                public Traversal<SSAPass, InplaceReducerMap>,
-                public DefaultScopeHandler<InplaceReducerMap> {
+                public Traversal<SSAPass, SExprReducerMap>,
+                public DefaultScopeHandler<SExprReducerMap> {
 public:
   static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
     SSAPass Pass(A);
@@ -72,6 +72,7 @@ public:
   }
   BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
   VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
+  Slot*       handleResult(Slot** S,       Slot *Res)       { return Res; }
 
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0);
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1);

@@ -93,11 +93,15 @@ public:
   template <class T>
   MAPTYPE(SExprReducerMap, T) traverse(T* e, TraversalKind k);
 
+  // Code traversals will rewrite the code blocks to SCFGs.
+  SExpr* traverseCode(Code* e, TraversalKind k);
+
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *e, TraversalKind k);
 
-  static SCFG* convertSExprToCFG(SExpr *e, MemRegionRef a);
+  static SExpr* lower(SExpr *e, MemRegionRef a);
+
 
 protected:
   unsigned numPendingArgs() {
@@ -135,12 +139,11 @@ protected:
   /// Takes the top len arguments from args.
   Goto* createGoto(BasicBlock *target, std::vector<SExpr*>& args, unsigned len);
 
-  /// Creates a new CFG.
-  /// Returns the exit block, for use as a continuation.
-  void initCFG();
+  /// Creates a new CFG, and sets everything up to process it.
+  void startCFG();
 
-  /// Completes the CFG and returns it.
-  SCFG* finishCFG();
+  /// Completes the current CFG.
+  void finishCFG();
 
   // Implement lazy block traversal.
   void traversePendingBlocks();
@@ -174,9 +177,6 @@ private:
 
 template <class T>
 MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
-  if (k == TRV_Lazy)  // Skip lazy terms -- we'll handle them specially.
-    return nullptr;
-
   unsigned plen = savePendingArgs();
   // This is a CPS transform, so we track the current continuation.
   BasicBlock* cont = currentContinuation();

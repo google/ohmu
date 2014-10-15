@@ -16,7 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "til/CFGReducer.h"
-#include "til/InplaceReducer.h"
+#include "til/SSAPass.h"
 
 namespace ohmu {
 
@@ -126,6 +126,11 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
 
 SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
+  if (!currentCFG_)
+    return CopyReducer::reduceCode(orig, e0, e1);
+
+  // Code blocks inside a CFG will be lowered to basic blocks.
+
   // Function arguments in the context will become phi nodes in the block.
   unsigned nargs = 0;
   unsigned sz = varCtx_->size();
@@ -179,6 +184,18 @@ SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
 }
 
 
+SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
+  auto Nt = self()->traverse(e->returnType(), TRV_Type);
+  SExpr *Nb = nullptr;
+  if (!currentCFG_) {
+    startCFG();
+    self()->traverse(e->body(), TRV_Tail);
+    Nb = currentCFG_;
+    finishCFG();
+  }
+  return self()->reduceCode(*e, Nt, Nb);
+}
+
 
 SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
   if (!currentBB_) {
@@ -198,15 +215,13 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
     cont = addBlock(1);
 
   // Process the then and else blocks
-  SExpr* thenE = e->thenExpr();
   startBlock(br->thenBlock());
   setContinuation(cont);
-  this->self()->traverseDM(&thenE, TRV_Tail);
+  this->self()->traverse(e->thenExpr(), TRV_Tail);
 
-  SExpr* elseE = e->elseExpr();
   startBlock(br->elseBlock());
   setContinuation(cont);
-  this->self()->traverseDM(&elseE, TRV_Tail);
+  this->self()->traverse(e->elseExpr(), TRV_Tail);
   setContinuation(currCont);    // restore original continuation
 
   // If we had an existing continuation, then we're done.
@@ -334,8 +349,9 @@ Goto* CFGReducer::createGoto(BasicBlock *target, std::vector<SExpr*>& args,
 }
 
 
-void CFGReducer::initCFG() {
-  assert(currentCFG_ == nullptr && currentBB_ == nullptr);
+void CFGReducer::startCFG() {
+  assert(!currentCFG_ && !currentBB_ && "Already inside a CFG");
+
   currentCFG_ = new (Arena) SCFG(Arena, 0);
   currentBB_ = currentCFG_->entry();
   setContinuation(currentCFG_->exit());
@@ -343,13 +359,24 @@ void CFGReducer::initCFG() {
 }
 
 
-SCFG* CFGReducer::finishCFG() {
-  currentCFG_->renumber();
-  TILDebugPrinter::print(currentCFG_, std::cout);
-  std::cout << "\n====== Converting to Normal Form ======\n";
+void CFGReducer::finishCFG() {
+  assert(currentCFG_ && "Not inside a CFG.");
+  assert(!currentBB_ && "Never finished the last block.");
+
   setContinuation(nullptr);
+  traversePendingBlocks();
+
+  //std::cout << "\n====== Initial CFG ======\n";
+  //currentCFG_->renumber();
+  //TILDebugPrinter::print(currentCFG_, std::cout);
+  //std::cout << "\n====== Converting to Normal Form ======\n";
   currentCFG_->computeNormalForm();
-  return currentCFG_;
+  //TILDebugPrinter::print(currentCFG_, std::cout);
+
+  SSAPass::ssaTransform(currentCFG_, Arena);
+
+  currentCFG_ = nullptr;
+  currentBB_ = nullptr;
 }
 
 
@@ -384,12 +411,9 @@ void CFGReducer::traversePendingBlocks() {
 
 
 
-SCFG* CFGReducer::convertSExprToCFG(SExpr *e, MemRegionRef a) {
+SExpr* CFGReducer::lower(SExpr *e, MemRegionRef a) {
   CFGReducer traverser(a);
-  traverser.initCFG();
-  traverser.traverse(e, TRV_Tail);
-  traverser.traversePendingBlocks();
-  return traverser.finishCFG();
+  return traverser.traverse(e, TRV_Tail);
 }
 
 

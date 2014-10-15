@@ -35,14 +35,6 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-// Used by SExprReducerMap.  Most terms map to SExpr*.
-template <class T> struct InplaceTypeMap { typedef SExpr* Ty; };
-
-// These kinds of SExpr must map to the same kind.
-// We define these here b/c template specializations cannot be class members.
-template<> struct InplaceTypeMap<VarDecl>     { typedef VarDecl* Ty; };
-template<> struct InplaceTypeMap<BasicBlock>  { typedef BasicBlock* Ty; };
-
 
 /// Defines the TypeMap for traversals that return SExprs.
 /// See CopyReducer and InplaceReducer for details.
@@ -72,6 +64,7 @@ public:
   }
   BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
   VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
+  Slot*       handleResult(Slot** VD,      Slot *Res)       { return Res; }
 
 
   SExpr* reduceWeak(Instruction* I) {
@@ -83,8 +76,9 @@ public:
     else
       return I;
   }
-  VarDecl*     reduceWeak(VarDecl *E)      { return E; }
-  BasicBlock*  reduceWeak(BasicBlock *E)   { return E; }
+  VarDecl*     reduceWeak(VarDecl *E)     { return E; }
+  BasicBlock*  reduceWeak(BasicBlock *E)  { return E; }
+  Slot*        reduceWeak(Slot *S)        { return S; }
 
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
@@ -104,6 +98,17 @@ public:
   SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
     return &Orig;
   }
+  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
+    return &Orig;
+  }
+  Record* reduceRecordBegin(Record &Orig) {
+    return &Orig;
+  }
+  void reduceRecordSlot(Record &Orig, Record *R, unsigned i, Slot *S) {
+    R->slots()[i] = S;
+  }
+  Record* reduceRecord(Record *R) { return R; }
+
 
   SExpr* reduceLiteral(Literal &Orig) {
     return &Orig;

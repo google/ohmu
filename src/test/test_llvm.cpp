@@ -93,11 +93,10 @@ int main(int argc, const char** argv) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
     std::cout << "\nCFG:\n";
-    SCFG* cfg = CFGReducer::convertSExprToCFG(e, tilParser.arena());
-    printSExpr(cfg);
+    SExpr* e2 = CFGReducer::lower(e, tilParser.arena());
+    printSExpr(e2);
 
-    backend_llvm::generate_LLVM_IR(cfg);
-    //encode(cfg, nullptr);
+    //backend_llvm::generate_LLVM_IR(cfg);
   }
 
   delete v;

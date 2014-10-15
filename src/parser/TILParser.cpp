@@ -166,13 +166,11 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return nullptr;
     return prs[i].getNode<SExpr>(TILP_SExpr);
   };
-  /*
-  auto sexprList = [=](unsigned i) -> std::vector< SExpr* >* {
+  auto sexprList = [=](unsigned i) -> std::vector<SExpr*>* {
     if (!prs[i].isList(TILP_SExpr) || i >= arity)
       return nullptr;
     return prs[i].getList<SExpr>(TILP_SExpr);
   };
-  */
 
   switch (op) {
     case TCOP_LitNull: {
@@ -249,12 +247,22 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Record: {
-      assert(arity == 2);
-      return ParseResult();
+      assert(arity == 1);
+      auto* es = sexprList(0);
+      auto* r  = new (arena_) Record(arena_, es->size());
+      for (SExpr* e : *es) {
+        Slot* s = dyn_cast<Slot>(e);
+        if (s)
+          r->slots().push_back(s);
+      }
+      return ParseResult(TILP_SExpr, r);
     }
     case TCOP_Slot: {
       assert(arity == 2);
-      return ParseResult();
+      Token* t = tok(0);
+      SExpr* d = sexpr(1);
+      auto* s = new (arena_) Slot(copyStr(t->string()), d);
+      return ParseResult(TILP_SExpr, s);
     }
     case TCOP_Array: {
       assert(arity == 2);

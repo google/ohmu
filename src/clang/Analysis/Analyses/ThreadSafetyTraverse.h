@@ -85,7 +85,7 @@ public:
   /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
-  /// Invoked by SExpr classes to traverse data members.
+  /// Invoked by SExpr classes to traverse writable data members.
   /// Do not override.
   MAPTYPE(RMap, SExpr) traverseDM(SExpr** Eptr) {
     SExpr *E = *Eptr;
@@ -93,6 +93,15 @@ public:
     if (Instruction *I = E->asCFGInstruction())
       return self()->handleResult(Eptr, self()->reduceWeak(I));
     return self()->handleResult(Eptr, self()->traverse(E, TRV_SubExpr));
+  }
+
+  /// Invoked by SExpr classes to traverse non-writable data members.
+  /// Do not override.
+  MAPTYPE(RMap, SExpr) traverseDE(SExpr* E) {
+    // Detect weak references to other instructions in the CFG.
+    if (Instruction *I = E->asCFGInstruction())
+      return self()->reduceWeak(I);
+    return self()->traverse(E, TRV_SubExpr);
   }
 
   /// Invoked by SExpr class to traverse owned data members.
@@ -170,10 +179,10 @@ template <class Self, class RMap>
 class DefaultReducer {
 public:
   typedef MAPTYPE(RMap, SExpr)       R_SExpr;
-  typedef MAPTYPE(RMap, Instruction) R_Instruction;
-  typedef MAPTYPE(RMap, Terminator)  R_Terminator;
-  typedef MAPTYPE(RMap, Phi)         R_Phi;
   typedef MAPTYPE(RMap, VarDecl)     R_VarDecl;
+  typedef MAPTYPE(RMap, Slot)        R_Slot;
+  typedef MAPTYPE(RMap, Record)      R_Record;
+  typedef MAPTYPE(RMap, Phi)         R_Phi;
   typedef MAPTYPE(RMap, BasicBlock)  R_BasicBlock;
   typedef MAPTYPE(RMap, SCFG)        R_SCFG;
 
@@ -186,19 +195,19 @@ public:
   R_SExpr reduceSExpr(SExpr& Orig) {
     return RMap::reduceNull();
   }
-  R_Instruction reduceInstruction(SExpr& Orig) {
+  R_SExpr reduceInstruction(SExpr& Orig) {
     return self()->reduceSExpr(Orig);
   }
-  R_Terminator reduceTerminator(Terminator& Orig) {
+  R_SExpr reduceTerminator(Terminator& Orig) {
     return self()->reduceInstruction(Orig);
   }
   R_SExpr reducePseudoTerm(SExpr& Orig) {
     return self()->reduceSExpr(Orig);
   }
 
-  R_Instruction reduceWeak(Instruction* E) { return RMap::reduceNull(); }
-  R_VarDecl     reduceWeak(VarDecl *E)     { return RMap::reduceNull(); }
-  R_BasicBlock  reduceWeak(BasicBlock *E)  { return RMap::reduceNull(); }
+  R_SExpr      reduceWeak(Instruction* E) { return RMap::reduceNull(); }
+  R_VarDecl    reduceWeak(VarDecl *E)     { return RMap::reduceNull(); }
+  R_BasicBlock reduceWeak(BasicBlock *E)  { return RMap::reduceNull(); }
 
 
   R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
@@ -218,58 +227,75 @@ public:
   R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
   }
+  R_Slot reduceSlot(Slot &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_Record reduceRecordBegin(Record &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  void reduceRecordSlot(Record &Orig, R_Record R, unsigned i, R_Slot S) { }
+  R_Record reduceRecord(R_Record R) { return R; }
 
-  R_Instruction reduceLiteral(Literal &Orig) {
+
+  R_SExpr reduceLiteral(Literal &Orig) {
     return self()->reduceInstruction(Orig);
   }
   template<class T>
-  R_Instruction reduceLiteralT(LiteralT<T> &Orig) {
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
     return self()->reduceInstruction(Orig);
   }
-  R_Instruction reduceLiteralPtr(LiteralPtr &Orig) {
+  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
     return self()->reduceInstruction(Orig);
   }
-  R_Instruction reduceVariable(Variable &Orig, R_VarDecl VD) {
-    return self()->reduceInstruction(Orig);
-  }
-
-  R_Instruction reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceProject(Project &Orig, R_SExpr E0) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceCall(Call &Orig, R_SExpr E0) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceAlloc(Alloc &Orig, R_SExpr E0) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceLoad(Load &Orig, R_SExpr E0) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceInstruction(Orig);
-  }
-  R_Instruction reduceCast(Cast &Orig, R_SExpr E0) {
+  R_SExpr reduceVariable(Variable &Orig, R_VarDecl VD) {
     return self()->reduceInstruction(Orig);
   }
 
+  R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
+    return self()->reduceInstruction(Orig);
+  }
+  R_SExpr reduceGoto(Goto &Orig, R_BasicBlock B) {
+    return self()->reduceTerminator(Orig);
+  }
+  R_SExpr reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
+    return self()->reduceTerminator(O);
+  }
+  R_SExpr reduceReturn(Return &O, R_SExpr E) {
+    return self()->reduceTerminator(O);
+  }
 
   R_Phi reducePhiBegin(Phi &Orig) {
     return self()->reduceInstruction(Orig);
@@ -293,16 +319,6 @@ public:
   void reduceBBTerminator (R_BasicBlock, R_SExpr E) { }
   R_BasicBlock reduceBasicBlock(R_BasicBlock BB) { return BB; }
 
-
-  R_Terminator reduceGoto(Goto &Orig, R_BasicBlock B) {
-    return self()->reduceTerminator(Orig);
-  }
-  R_Terminator reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
-    return self()->reduceTerminator(O);
-  }
-  R_Terminator reduceReturn(Return &O, R_SExpr E) {
-    return self()->reduceTerminator(O);
-  }
 
   R_SExpr reduceUndefined(Undefined &Orig) {
     return self()->reducePseudoTerm(Orig);
@@ -373,6 +389,7 @@ template <class T> struct SExprTypeMap { typedef SExpr* Ty; };
 // We define these here b/c template specializations cannot be class members.
 template<> struct SExprTypeMap<VarDecl>    { typedef VarDecl* Ty; };
 template<> struct SExprTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
+template<> struct SExprTypeMap<Slot>       { typedef Slot* Ty; };
 
 /// Defines the TypeMap for traversals that return SExprs.
 /// See CopyReducer and InplaceReducer for details.
@@ -455,6 +472,23 @@ MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
   auto Nr = Vs.traverseDM(&Range, TRV_Type);
   auto Nb = Vs.traverseDM(&Body, TRV_Lazy);
   return Vs.reduceField(*this, Nr, Nb);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Slot) Slot::traverse(V &Vs) {
+  auto Nd = Vs.traverseDM(&Definition, TRV_SubExpr);
+  return Vs.reduceSlot(*this, Nd);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
+  auto Nr = Vs.reduceRecordBegin(*this);
+  unsigned i = 0;
+  for (auto *&Slt : Slots) {
+    Vs.reduceRecordSlot(*this, Nr, i, Vs.traverseDM(&Slt, TRV_SubExpr));
+    ++i;
+  }
+  return Vs.reduceRecord(Nr);
 }
 
 
@@ -786,6 +820,31 @@ typename C::CType Field::compare(const Field* E, C& Cmp) const {
     return Ct;
   return Cmp.compare(body(), E->body());
 }
+
+template <class C>
+typename C::CType Slot::compare(const Slot* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compareStrings(name(), E->name());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(definition(), E->definition());
+}
+
+template <class C>
+typename C::CType Record::compare(const Record* E, C& Cmp) const {
+  unsigned N = slots().size();
+  unsigned M = E->slots().size();
+  typename C::CType Ct = Cmp.compareIntegers(N, M);
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  unsigned Sz = (N < M) ? N : M;
+  for (unsigned i = 0; i < Sz; ++i) {
+    Ct = Cmp.compare(slots()[i], E->slots()[i]);
+    if (Cmp.notTrue(Ct))
+      return Ct;
+  }
+  return Ct;
+}
+
 
 template <class C>
 typename C::CType Literal::compare(const Literal* E, C& Cmp) const {

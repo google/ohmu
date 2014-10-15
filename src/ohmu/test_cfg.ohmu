@@ -1,34 +1,33 @@
-
 // Very simple test case.
-(1 + 2 + 3);
+testSimple(): Int -> (1 + 2 + 3);
 
-// Let-expressions:
-{ 
+// Let expressions:
+testLet(): Int -> {
   let x = 1+0;
   let y = 2+0;
   x*y;
 };
 
-// If-expressions:
-{ 
+// If expressions:
+testIf(): Int -> {
   let x = 1+0;
   let y = 2+0;
   if (1 == 2) then x*x else y*y;
 };
 
 // Check for correct continuation of nested if.
-{ 
+testNestedIf(): Int -> {
   let a = 1+0;
   let b = a + (1 + (if (a==2) then 3 else 4));
   if (b == a) then a+5 else b+5;
 };
 
 // Ensure that the Lets don't introduce empty blocks.
-{ 
+testNestedLet(): Int -> {
   let x = 1+0;
   let y = {
     let z = {
-      let a = x; 
+      let a = x;
       a+a;
     };
     z*z;
@@ -38,11 +37,11 @@
 
 // Continuation passing between if and let
 // Make the z branches continue directly to x/x, without empty blocks.
-{ 
+testNestedLetIf(): Int -> {
   let a = 1+0;
   let b = 2+0;
   if (a == b) then {
-    let y = a+3; 
+    let y = a+3;
     y*y;
   }
   else {
@@ -52,7 +51,7 @@
 };
 
 // First version of locally defined functions.
-{ 
+testLocalFun(): Int -> {
   let a = 1+0;
   let b = 2+0;
   let f(y: Int): Int -> y+1;
@@ -61,7 +60,7 @@
 };
 
 // Locally defined functions with multiple arguments.
-{
+testLocalFunMultiArg(): Int -> {
   let a = 1+0;
   let b = 2+0;
   let f(y: Int, z: Int): Int -> y*z+1;
@@ -70,7 +69,7 @@
 };
 
 // The first real code, with a loop!.
-{
+testLoop(): Int -> {
   let n = 100 + 0;
   letrec loop(i: Int, total: Int): Int -> {
     if (i < n) then loop(i+1, total+i) else total;
@@ -79,7 +78,7 @@
 };
 
 // Handling of nested function calls.
-{
+testNestedFunCall(): Int -> {
   let n = 100 + 0;
   let foo(z: Int): Int -> z*z;
   let bar(w: Int): Int -> w+0;
@@ -90,7 +89,7 @@
 };
 
 // More handling of nested functions.
-{ 
+testNestedFunCall2(): Int -> {
   let n = 100 + 0;
   let foo(z: Int): Int -> z*z;
   letrec loop(i: Int, total: Int): Int -> {
@@ -104,9 +103,9 @@
 // Handle multiple function calls
 // Notice that the function calls don't have to be in tail positions,
 // so long as the CPS transform can convert them to tail calls.
-// It can convert them so long as all calls to the function return to the 
+// It can convert them so long as all calls to the function return to the
 // same point in the code.
-{ 
+testMultiFunCall(): Int -> {
   let n = 100 + 0;
   letrec loop(i: Int, total: Int): Int -> {
     if (i < n) then loop(i+1, total+i) else total;
@@ -117,7 +116,7 @@
 
 
 // Nested loops.
-{
+testNestedLoop(): Int -> {
   let n = 100 + 0;
   let m = 100 + 0;
   letrec loop_m(j: Int, total_m: Int): Int -> {
@@ -139,7 +138,7 @@
 
 
 // Test handling of SSA in a DAG.
-{
+testSSA_DAG(): Int -> {
   let a = 1+0;
   let b = 2+0;
   var c = 0;
@@ -166,7 +165,7 @@
 
 
 // Initial SSA Handling for loops.
-{
+testSSA_Loop(): Int -> {
   let n = 100+0;
   var i = 0;
   var total = 0;
@@ -182,7 +181,7 @@
 
 
 // Test caching of variable lookups.
-{
+testSSA_VarCache(): Int -> {
   let a = 1+0;
   var i = 0;
   if (a < 10) then { i := 1; a; } else { i := 2; a; };
@@ -191,7 +190,7 @@
 
 
 // don't insert Phi nodes for dead variables.
-{
+testSSA_DeadVar(): Int -> {
   let a = 1+0;
   var i = 0;
   if (a < 10) then { i := 1; a; } else { i := 2; a; };
@@ -202,7 +201,7 @@
 
 
 // Test redundant Phi code elimination in loops.
-{
+testSSA_LoopUnchanged(): Int -> {
   let n = 100+0;
   var i = 0;
   var total = 0;
@@ -221,7 +220,7 @@
 
 
 // Test redundant Phi code elimination in nested loops.
-{
+testSSA_NestedLoopUnchanged(): Int -> {
   let n = 100 + 0;
   let m = 100 + 0;
   let ii = 0+0;

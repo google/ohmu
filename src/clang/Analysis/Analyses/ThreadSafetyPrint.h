@@ -31,10 +31,11 @@ class PrettyPrinter {
 private:
   bool Verbose;  // Print out additional information
   bool CStyle;   // Print exprs in C-like syntax.
+  unsigned Indent;
 
 public:
   PrettyPrinter(bool V = false, bool CS = true)
-     : Verbose(V), CStyle(CS)
+     : Verbose(V), CStyle(CS), Indent(0)
   {}
 
   static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
@@ -45,8 +46,13 @@ public:
 protected:
   Self *self() { return reinterpret_cast<Self *>(this); }
 
+  void indent()   { Indent += 2; }
+  void unindent() { Indent -= 2; }
+
   void newline(StreamType &SS) {
     SS << "\n";
+    for (unsigned i = 0; i < Indent; ++i)
+      SS << " ";
   }
 
   // TODO: further distinguish between binary operations.
@@ -66,6 +72,8 @@ protected:
       case COP_SFunction:  return Prec_Decl;
       case COP_Code:       return Prec_Decl;
       case COP_Field:      return Prec_Decl;
+      case COP_Slot:       return Prec_Decl;
+      case COP_Record:     return Prec_Atom;
 
       case COP_Literal:    return Prec_Atom;
       case COP_LiteralPtr: return Prec_Atom;
@@ -97,8 +105,8 @@ protected:
       case COP_Wildcard:   return Prec_Atom;
 
       case COP_Identifier: return Prec_Atom;
-      case COP_Let:        return Prec_Decl;
-      case COP_Letrec:     return Prec_Decl;
+      case COP_Let:        return Prec_Atom;
+      case COP_Letrec:     return Prec_Atom;
       case COP_IfThenElse: return Prec_Decl;
     }
     return Prec_MAX;
@@ -313,6 +321,37 @@ protected:
     self()->printSExpr(E->body(), SS, Prec_Decl);
   }
 
+  void printSlot(const Slot *E, StreamType &SS) {
+    SS << E->name();
+    if (auto *F = dyn_cast<Function>(E->definition())) {
+      printFunction(F, SS, 1);
+    }
+    else if (auto *C = dyn_cast<Code>(E->definition())) {
+      SS << "()";
+      printCode(C, SS);
+    }
+    else if (auto *F = dyn_cast<Field>(E->definition())) {
+      printField(F, SS);
+    }
+    else {
+      SS << " = ";
+      self()->printSExpr(E->definition(), SS, Prec_Decl);
+    }
+    SS << ";";
+  }
+
+  void printRecord(const Record *E, StreamType &SS) {
+    SS << "struct {";
+    self()->indent();
+    for (Slot* S : E->slots()) {
+      self()->newline(SS);
+      self()->printSlot(S, SS);
+    }
+    self()->unindent();
+    self()->newline(SS);
+    SS << "}";
+  }
+
   void printApply(const Apply *E, StreamType &SS, bool sugared = false) {
     const SExpr *F = E->fun();
     if (F->opcode() == COP_Apply) {
@@ -432,27 +471,36 @@ protected:
   }
 
   void printSCFG(const SCFG *E, StreamType &SS) {
-    SS << "CFG {\n";
+    SS << "CFG {";
+    self()->indent();
+    bool First = true;
     for (auto BBI : *E) {
+      self()->newline(SS);
+      if (!First)
+        self()->newline(SS);
+      First = false;
       printBasicBlock(BBI, SS);
     }
+    self()->unindent();
+    self()->newline(SS);
     SS << "}";
-    newline(SS);
   }
 
 
   void printBBInstr(const Instruction *E, StreamType &SS) {
     if (!E) {
-      if (Verbose)
+      if (Verbose) {
+        self()->newline(SS);
         SS << "null;\n";
+      }
       return;
     }
+    self()->newline(SS);
     if (E->opcode() != COP_Store) {
       SS << "let " << printableName(E->name()) << E->instrID() << " = ";
     }
     self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";
-    newline(SS);
   }
 
   void printBasicBlock(const BasicBlock *E, StreamType &SS) {
@@ -470,21 +518,21 @@ protected:
       First = false;
     }
     SS << "}";
-    newline(SS);
+    self()->indent();
 
-    for (auto *A : E->arguments())
+    for (auto *A : E->arguments()) {
       printBBInstr(A, SS);
-
-    for (auto *I : E->instructions())
+    }
+    for (auto *I : E->instructions()) {
       printBBInstr(I, SS);
-
+    }
     auto *T = E->terminator();
     if (T) {
+      self()->newline(SS);
       self()->printSExpr(T, SS, Prec_MAX, false);
       SS << ";";
-      newline(SS);
     }
-    newline(SS);
+    self()->unindent();
   }
 
   void printPhi(const Phi *E, StreamType &SS) {
@@ -525,18 +573,64 @@ protected:
     SS << E->name();
   }
 
-  void printLet(const Let *E, StreamType &SS) {
+  void printLet(const Let *E, StreamType &SS, bool Nested=false) {
+    if (!Nested) {
+      SS << "{";
+      self()->indent();
+    }
+
+    self()->newline(SS);
     SS << "let ";
     printVarDecl(E->variableDecl(), SS);
-    SS << "; ";
-    printSExpr(E->body(), SS, Prec_Decl-1);
+    SS << ";";
+
+    if (auto *L = dyn_cast<Let>(E->body())) {
+      printLet(L, SS, true);
+    }
+    else if (auto *Lr = dyn_cast<Letrec>(E->body())) {
+      printLetrec(Lr, SS, true);
+    }
+    else {
+      self()->newline(SS);
+      printSExpr(E->body(), SS, Prec_Decl);
+      SS << ";";
+    }
+
+    if (!Nested) {
+      self()->unindent();
+      self()->newline(SS);
+      SS << "}";
+    }
   }
 
-  void printLetrec(const Letrec *E, StreamType &SS) {
+  void printLetrec(const Letrec *E, StreamType &SS, bool Nested=false) {
+    if (!Nested) {
+      SS << "{";
+      self()->indent();
+    }
+
+    self()->newline(SS);
     SS << "letrec ";
     printVarDecl(E->variableDecl(), SS);
-    SS << "; ";
-    printSExpr(E->body(), SS, Prec_Decl-1);
+    SS << ";";
+
+    if (auto *L = dyn_cast<Let>(E->body())) {
+      printLet(L, SS, true);
+    }
+    else if (auto *Lr = dyn_cast<Letrec>(E->body())) {
+      printLetrec(Lr, SS, true);
+    }
+    else {
+      self()->newline(SS);
+      printSExpr(E->body(), SS, Prec_Decl);
+      SS << ";";
+    }
+
+    if (!Nested) {
+      self()->unindent();
+      self()->newline(SS);
+      SS << "}";
+    }
   }
 
   void printIfThenElse(const IfThenElse *E, StreamType &SS) {

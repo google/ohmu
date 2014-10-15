@@ -283,21 +283,6 @@ class Instruction;
 /// Base class for AST nodes in the typed intermediate language.
 class SExpr {
 public:
-  // Subclasses of SExpr must define the following:
-  //
-  // This(const This& E, ...) {
-  //   copy constructor: construct copy of E, with some additional arguments.
-  // }
-  //
-  // template <class V>
-  // typename V::R_SExpr traverse(V &Vs, typename V::R_Ctx Ctx) {
-  //   traverse all subexpressions, following the traversal/rewriter interface.
-  // }
-  //
-  // template <class C> typename C::CType compare(CType* E, C& Cmp) {
-  //   compare all subexpressions, following the comparator interface
-  // }
-
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
   /// Return true if this is a trivial SExpr (constant or variable name).
@@ -342,7 +327,6 @@ private:
   /// SExpr objects must be created in an arena.
   void *operator new(size_t) LLVM_DELETED_FUNCTION;
 };
-
 
 
 // Nodes which declare variables
@@ -513,6 +497,52 @@ public:
 private:
   SExpr* Range;
   SExpr* Body;
+};
+
+
+/// A Slot (i.e. a named definition) in a Record.
+class Slot : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
+
+  Slot(StringRef N, SExpr *D) : SExpr(COP_Slot), Name(N), Definition(D) { }
+  Slot(const Slot &S, SExpr *D) : SExpr(S), Name(S.Name), Definition(D) { }
+
+  StringRef name() const { return Name; }
+
+  SExpr *definition() { return Definition; }
+  const SExpr *definition() const { return Definition; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Slot)
+
+private:
+  StringRef Name;
+  SExpr*    Definition;
+};
+
+
+/// A record, which is similar to a C struct.
+/// A record is essentially a function from slot names to definitions.
+class Record : public SExpr {
+public:
+  typedef SimpleArray<Slot*> SlotArray;
+  typedef DenseMap<std::string, unsigned> SlotMap;
+
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
+
+  Record(MemRegionRef A, unsigned NSlots)
+    : SExpr(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
+  Record(const Record &R, MemRegionRef A)
+    : SExpr(R), Slots(A, R.Slots.size()), SMap(R.SMap) {}
+
+  SlotArray& slots() { return Slots; }
+  const SlotArray& slots() const { return Slots; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Record)
+
+private:
+  SlotArray Slots;    //< The slots in the record.
+  SlotMap*  SMap;     //< A map from slot names to indices.
 };
 
 
