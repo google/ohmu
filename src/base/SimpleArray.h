@@ -50,7 +50,7 @@ public:
     return *this;
   }
 
-  // Reserve space for at least Ncp items, reallocating if necessary.
+  /// Reserve space for at least Ncp items, reallocating if necessary.
   void reserve(size_t Ncp, MemRegionRef A) {
     if (Ncp <= Capacity)
       return;
@@ -61,11 +61,18 @@ public:
     return;
   }
 
-  // Reserve space for at least N more items.
+  /// Resize to Nsz, initializing newly-added elements to V
+  void resize(size_t Nsz, MemRegionRef A, const T& V) {
+    reserve(Nsz, A);
+    for (size_t i = Size; i < Nsz; ++i)
+      Data[i] = V;
+  }
+
+  /// Reserve space for at least N more items.
   void reserveCheck(size_t N, MemRegionRef A) {
     if (Capacity == 0)
       reserve(u_max(InitialCapacity, N), A);
-    else if (Size + N < Capacity)
+    else if (Size + N > Capacity)
       reserve(u_max(Size + N, Capacity * 2), A);
   }
 
@@ -106,10 +113,15 @@ public:
     Data[Size++] = Elem;
   }
 
-  // drop last n elements from array
+  /// drop last n elements from array
   void drop(unsigned n = 0) {
     assert(Size > n);
     Size -= n;
+  }
+
+  /// drop all elements from array.
+  void clear() {
+    Size = 0;
   }
 
   void setValues(unsigned Sz, const T& C) {

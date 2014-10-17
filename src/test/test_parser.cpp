@@ -21,7 +21,6 @@
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
 #include "til/CFGReducer.h"
-#include "til/SSAPass.h"
 #include "til/VisitCFG.h"
 
 #include <iostream>

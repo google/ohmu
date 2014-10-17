@@ -100,6 +100,9 @@ public:
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *e, TraversalKind k);
 
+  SCFG* beginSCFG(SCFG *Cfg, unsigned NBlocks=0, unsigned NInstrs=0) override;
+  void  endSCFG() override;
+
   static SExpr* lower(SExpr *e, MemRegionRef a);
 
 
@@ -116,57 +119,21 @@ protected:
     pendingPathArgLen_ = plen;
   }
 
-  // Add a new instruction to the current basic block.
-  void addInstruction(SExpr* e);
-
-  // Create a new basic block.
-  BasicBlock* addBlock(unsigned nargs = 0);
-
-  /// Add BB to the current CFG, and start working on it.
-  void startBlock(BasicBlock *bb);
-
-  // Finish the current basic block, terminating it with Term.
-  void finishBlock(Terminator* term);
-
-  /// Terminate the current block with a branch instruction.
-  /// This will create new blocks for the branches.
-  Branch* createBranch(SExpr *cond);
-
-  /// Terminate the current block with a Goto instruction.
-  Goto* createGoto(BasicBlock *target, SExpr* result);
-
-  /// Terminate the current block with a Goto instruction.
-  /// Takes the top len arguments from args.
-  Goto* createGoto(BasicBlock *target, std::vector<SExpr*>& args, unsigned len);
-
-  /// Creates a new CFG, and sets everything up to process it.
-  void startCFG();
-
-  /// Completes the current CFG.
-  void finishCFG();
-
   // Implement lazy block traversal.
   void traversePendingBlocks();
 
 public:
   CFGReducer(MemRegionRef a)
       : CopyReducer(a), varCtx_(new VarContext()),
-        currentCFG_(nullptr), currentBB_(nullptr),
         currentContinuation_(nullptr), pendingPathArgLen_(0)
   { }
 
 private:
   std::unique_ptr<VarContext> varCtx_;
-  std::vector<SExpr*> instructionMap_;
-  std::vector<SExpr*> blockMap_;
 
-  SCFG*       currentCFG_;                      //< the current SCFG
-  BasicBlock* currentBB_;                       //< the current basic block
   BasicBlock* currentContinuation_;      //< continuation for current block.
   unsigned    pendingPathArgLen_;
 
-  std::vector<Phi*>          currentArgs_;      //< arguments in currentBB.
-  std::vector<Instruction*>  currentInstrs_;    //< instructions in currentBB.
   std::vector<SExpr*>        pendingPathArgs_;
   DenseMap<Code*, unsigned>  codeMap_;
   std::vector<PendingBlock>  pendingBlocks_;
@@ -194,15 +161,12 @@ MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
     restorePendingArgs(plen);
   }
 
-  if (!currentBB_)
+  if (!currentBB())
     return result;
-
-  // Add instructions to the current basic block
-  addInstruction(result);
 
   // If we have a continuation, then jump to it.
   if (cont && k == TRV_Tail) {
-    createGoto(cont, result);
+    newGoto(cont, result);
     return nullptr;
   }
   return result;

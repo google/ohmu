@@ -49,27 +49,23 @@ public:
     Pass.traverse(Scfg, TRV_Tail);
   }
 
-  SCFG* reduceSCFGBegin(SCFG &Orig);
-  SCFG* reduceSCFG(SCFG* Scfg);
+  SCFG* reduceSCFG_Begin(SCFG &Orig);
+  SCFG* reduceSCFG_End(SCFG* Scfg);
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
-
-  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (!InplaceReducer::reduceBBInstruction(BB, i, E))
-      return;
-    // Warning: adding new instructions will invalidate Pending.
-    if (Future *F = dyn_cast_or_null<Future>(E))
-      Pending.push_back(PendingFuture(F, &BB->instructions()[i],
-                                      CurrentInstrID));
-  }
 
   template <class T>
   T* handleResult(SExpr** Eptr, T* Res) {
     if (Future *F = dyn_cast_or_null<Future>(Res))
-      Pending.push_back(PendingFuture(F, Eptr));
+      Pending.push_back(PendingFuture(Eptr, F));
     *Eptr = Res;
     return Res;
   }
+
+  void handleFutureInstr(Instruction **Iptr, Future *F) override {
+    Pending.push_back(PendingFuture(Iptr, F));
+  }
+
   BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
   VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
   Slot*       handleResult(Slot** S,       Slot *Res)       { return Res; }
@@ -92,17 +88,19 @@ protected:
   // Pointer to a Future object, along with the position where it occurs.
   // Forcing the future will write the result to the position.
   struct PendingFuture {
-    PendingFuture(Future *F, Instruction **Pos, unsigned N)
-      : Fut(reinterpret_cast<FutureLoad*>(F)), IPos(Pos), INum(N) { }
+    PendingFuture(Instruction **Pos, Future *F)
+      : IPos(Pos), Fut(reinterpret_cast<FutureLoad*>(F)), BBInstr(true)
+    { }
 
-    // The cast is safe here because IPos is write-only.
-    PendingFuture(Future *F, SExpr **Pos)
-      : Fut(reinterpret_cast<FutureLoad*>(F)),
-        IPos(reinterpret_cast<Instruction**>(Pos)), INum(0) { }
+    PendingFuture(SExpr **Pos, Future *F)
+      // The cast is safe here because IPos is write-only.
+      : IPos(reinterpret_cast<Instruction**>(Pos)),
+        Fut(reinterpret_cast<FutureLoad*>(F)), BBInstr(false)
+    { }
 
-    FutureLoad  *Fut;
-    Instruction **IPos;
-    unsigned INum;
+    Instruction **IPos;   // The location where the future occurs.
+    FutureLoad  *Fut;     // The future.
+    bool        BBInstr;  // True if IPos is a basic block instruction.
   };
 
   // Look up variable in the cache.
@@ -121,22 +119,21 @@ protected:
   void replacePendingLoads();
 
 public:
-  SSAPass(MemRegionRef A)
-    : Arena(A), CurrentVarMap(nullptr)
-  { FutArena.setRegion(&FutRegion); }
+  SSAPass(MemRegionRef A) : InplaceReducer(A), CurrentVarMap(nullptr) {
+    FutArena.setRegion(&FutRegion);
+  }
 
 private:
   SSAPass() = delete;
 
-  MemRegionRef Arena;
   MemRegion    FutRegion; //< Allocate futures in region for immediate delete.
   MemRegionRef FutArena;
 
   LocalVarMap* CurrentVarMap;
 
-  std::vector<SSABlockInfo>  BInfoMap;
-  std::vector<PendingFuture> Pending;
-  LocalVarMap CachedVarMap;
+  std::vector<SSABlockInfo>  BInfoMap;  //< Side table for basic blocks.
+  std::vector<PendingFuture> Pending;   //< Loads that need to be rewritten.
+  LocalVarMap VarMapCache;
 };
 
 

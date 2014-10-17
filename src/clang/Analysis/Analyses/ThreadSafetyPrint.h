@@ -552,7 +552,7 @@ protected:
 
   void printGoto(const Goto *E, StreamType &SS) {
     SS << "goto ";
-    printBlockLabel(SS, E->targetBlock(), E->index());
+    printBlockLabel(SS, E->targetBlock(), E->phiIndex());
   }
 
   void printBranch(const Branch *E, StreamType &SS) {

@@ -27,14 +27,14 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-SCFG* SSAPass::reduceSCFGBegin(SCFG &Orig) {
-  InplaceReducer::reduceSCFGBegin(Orig);
+SCFG* SSAPass::reduceSCFG_Begin(SCFG &Orig) {
+  InplaceReducer::reduceSCFG_Begin(Orig);
   BInfoMap.resize(CurrentCFG->numBlocks());
   return &Orig;
 }
 
 
-SCFG* SSAPass::reduceSCFG(SCFG* Scfg) {
+SCFG* SSAPass::reduceSCFG_End(SCFG* Scfg) {
   replacePendingLoads();
 
   // TODO: clear the Future arena.
@@ -44,7 +44,7 @@ SCFG* SSAPass::reduceSCFG(SCFG* Scfg) {
   // Assign numbers to phi nodes.
   Scfg->renumber();
 
-  return InplaceReducer::reduceSCFG(Scfg);
+  return InplaceReducer::reduceSCFG_End(Scfg);
 }
 
 
@@ -63,6 +63,53 @@ BasicBlock* SSAPass::reduceBasicBlockBegin(BasicBlock &Orig) {
 
   return &Orig;
 }
+
+
+// This is the second pass of the SSA conversion, which looks up values for
+// all loads, and replaces the loads.
+void SSAPass::replacePendingLoads() {
+  // Second pass:  Go back and replace all loads with phi nodes or values.
+  CurrentBB = CurrentCFG->entry();
+  unsigned CurrentInstrID = CurrentCFG->numInstructions();
+
+  for (PendingFuture &PF : Pending) {
+    auto *F = PF.Fut;
+    SExpr *E = F->maybeGetResult();
+    if (!E) {
+      Load  *L = F->LoadInstr;
+      Alloc *A = F->AllocInstr;
+      BasicBlock *B = L->block();
+      if (B != CurrentBB) {
+        // We've switched to a new block.  Clear the cache.
+        VarMapCache.clear();
+        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+        VarMapCache.resize(MSize, nullptr);
+        CurrentBB = B;
+      }
+      E = lookupInPredecessors(L->block(), A->allocID());
+      F->setResult(E);
+    }
+    assert(PF.IPos && "Unhandled Future.");
+
+    Instruction* I2 = cast<Instruction>(E);
+    if (PF.BBInstr) {
+      // If I2 is a new, non-trivial instruction, then add it to the
+      // current block.  Otherwise, eliminate it, because it's a reference
+      // to a previously added instruction.
+      if (I2->instrID() == 0 && !I2->isTrivial()) {
+        *PF.IPos = I2;
+        I2->setInstrID(CurrentInstrID++);
+      }
+      else {
+        *PF.IPos = nullptr;
+      }
+    }
+    else {
+      *PF.IPos = I2;
+    }
+  }
+  VarMapCache.clear();
+};
 
 
 
@@ -135,7 +182,7 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
   if (B == CurrentBB) {
     // See if we have a cached value at the start of the current block.
-    if (SExpr* E = CachedVarMap[LvarID])
+    if (SExpr* E = VarMapCache[LvarID])
       return E;
   }
 
@@ -201,7 +248,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
 
   // Cache the result to avoid creating duplicate phi nodes.
   if (B == CurrentBB)
-    CachedVarMap[LvarID] = E;
+    VarMapCache[LvarID] = E;
   return E;
 }
 
@@ -219,47 +266,6 @@ SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {
   LvarMap->at(LvarID) = E;
   return E;
 }
-
-
-// This is the second pass of the SSA conversion, which replaces looks up
-// values for all loads.
-void SSAPass::replacePendingLoads() {
-  // Second pass:  Go back and replace all loads with phi nodes or values.
-  CurrentBB = CurrentCFG->entry();
-  for (PendingFuture &PF : Pending) {
-    auto *F = PF.Fut;
-    SExpr *E = F->maybeGetResult();
-    if (!E) {
-      Load  *L = F->LoadInstr;
-      Alloc *A = F->AllocInstr;
-      BasicBlock *B = L->block();
-      if (B != CurrentBB) {
-        // We've switched to a new block.  Clear the cache.
-        CachedVarMap.clear();
-        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
-        CachedVarMap.resize(MSize, nullptr);
-        CurrentBB = B;
-      }
-      E = lookupInPredecessors(L->block(), A->allocID());
-      F->setResult(E);
-    }
-    assert(PF.IPos && "Unhandled Future.");
-
-    Instruction* I2 = cast<Instruction>(E);
-    if (PF.INum > 0) {
-      // If I2 is a new, non-trivial instruction, then replace the old one.
-      // Otherwise eliminate the old instruction.
-      if (I2->instrID() == 0 && !I2->isTrivial() && !isa<Phi>(I2))
-        *PF.IPos = I2;
-      else
-        *PF.IPos = nullptr;
-    }
-    else {
-      *PF.IPos = I2;
-    }
-  }
-  CachedVarMap.clear();
-};
 
 
 }  // end namespace ohmu

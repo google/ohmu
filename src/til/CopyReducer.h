@@ -30,6 +30,9 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
+#include "til/CFGBuilder.h"
+
+
 namespace ohmu {
 
 using namespace clang::threadSafety::til;
@@ -38,20 +41,37 @@ using namespace clang::threadSafety::til;
 /// CopyReducer implements the reducer interface to build a new SExpr.
 /// In other words, it makes a deep copy of a term.
 /// It is also useful as a base class for non-destructive rewrites.
-class CopyReducer {
+class CopyReducer : public CFGBuilder {
 public:
-  CopyReducer() {}
-  CopyReducer(MemRegionRef A) : Arena(A) { }
+  SExpr* reduceWeak(Instruction* E) {
+    return InstructionMap[E->instrID()];
+  }
+  VarDecl* reduceWeak(VarDecl *E) {
+    return E; /* FIXME! */
+  }
+  BasicBlock* reduceWeak(BasicBlock *E);
 
-  void setArena(MemRegionRef A) { Arena = A; }
-
-public:
-  Instruction* reduceWeak(Instruction* E)  { return nullptr; }
-  VarDecl*     reduceWeak(VarDecl *E)      { return nullptr; }
-  BasicBlock*  reduceWeak(BasicBlock *E)   { return nullptr; }
-
+  // This is a non-destructive rewrite; just return the result.
   template <class T, class U>
-  T* handleResult(U** Eptr, T* Res) { return Res; }
+  T* handleResult(T** Eptr, U* Res) { return Res; }
+
+  void handleRecordSlot(Record *E, Slot *Res) {
+    E->slots().push_back(Res);
+  }
+  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
+    rewritePhiArg(Orig, NG, Res);
+  }
+  void handleBBArg(Phi &Orig, SExpr* Res) {
+    if (OverwriteArguments && Orig.instrID() > 0)
+      InstructionMap[Orig.instrID()] = Res;
+  }
+  void handleBBInstr(Instruction &Orig, SExpr* Res) {
+    if (Orig.instrID() > 0)
+      InstructionMap[Orig.instrID()] = Res;
+  }
+  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
+    /* BlockMap updated by reduceWeak(BasicBlock). */
+  }
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return new (Arena) VarDecl(Orig, E);
@@ -78,10 +98,7 @@ public:
   Record* reduceRecordBegin(Record &Orig) {
     return new (Arena) Record(Orig, Arena);
   }
-  void reduceRecordSlot(Record &Orig, Record *R, unsigned i, Slot *S) {
-    R->slots().push_back(S);
-  }
-  Record* reduceRecord(Record *R) { return R; }
+  Record* reduceRecordEnd(Record *R) { return R; }
 
 
   Literal* reduceLiteral(Literal &Orig) {
@@ -107,77 +124,78 @@ public:
   Project* reduceProject(Project &Orig, SExpr* E0) {
     return new (Arena) Project(Orig, E0);
   }
+
   Call* reduceCall(Call &Orig, SExpr* E0) {
-    return new (Arena) Call(Orig, E0);
+    return addInstr(new (Arena) Call(Orig, E0));
   }
   Alloc* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return new (Arena) Alloc(Orig, E0);
+    return addInstr(new (Arena) Alloc(Orig, E0));
   }
   Load* reduceLoad(Load &Orig, SExpr* E0) {
-    return new (Arena) Load(Orig, E0);
+    return addInstr(new (Arena) Load(Orig, E0));
   }
   Store* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Store(Orig, E0, E1);
+    return addInstr(new (Arena) Store(Orig, E0, E1));
   }
   ArrayIndex* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) ArrayIndex(Orig, E0, E1);
+    return addInstr(new (Arena) ArrayIndex(Orig, E0, E1));
   }
   ArrayAdd* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) ArrayAdd(Orig, E0, E1);
+    return addInstr(new (Arena) ArrayAdd(Orig, E0, E1));
   }
   UnaryOp* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return new (Arena) UnaryOp(Orig, E0);
+    return addInstr(new (Arena) UnaryOp(Orig, E0));
   }
   BinaryOp* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) BinaryOp(Orig, E0, E1);
+    return addInstr(new (Arena) BinaryOp(Orig, E0, E1));
   }
   Cast* reduceCast(Cast &Orig, SExpr* E0) {
-    return new (Arena) Cast(Orig, E0);
+    return addInstr(new (Arena) Cast(Orig, E0));
   }
 
-  Phi* reducePhiBegin(Phi &Orig) {
-    return new (Arena) Phi(Orig, Arena);
-  }
-  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) {
-    Ph->values().push_back(E);
-  }
-  Phi* reducePhi(Phi* Ph) { return Ph; }
+  /// Phi nodes are created and added to InstructionMap by reduceWeak(BB).
+  /// Passes which reduce Phi nodes must also set OverwriteArguments to true.
+  SExpr* reducePhi(Phi& Orig) { return nullptr; }
 
-  Goto* reduceGoto(Goto &Orig, BasicBlock *B) {
-    return new (Arena) Goto(Orig, B, 0);
+  Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) {
+    unsigned Idx = B->addPredecessor(CurrentBB);
+    return new (Arena) Goto(Orig, B, Idx);
   }
+  Goto* reduceGotoEnd(Goto* G) {
+    // Phi nodes are set by handlePhiNodeArg.
+    endBlock(G);
+    return G;
+  }
+
   Branch* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    return new (Arena) Branch(O, C, B0, B1);
+    return newBranch(C, B0, B1);
   }
   Return* reduceReturn(Return &O, SExpr* E) {
-    return new (Arena) Return(O, E);
+    auto *Rt = new (Arena) Return(O, E);
+    endBlock(Rt);
+    return Rt;
   }
-
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    return new (Arena) BasicBlock(Orig, Arena);
+    BasicBlock *B = reduceWeak(&Orig);
+    beginBlock(B);
+    return B;
   }
-  void reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Phi* Ph = dyn_cast_or_null<Phi>(E))
-      BB->addArgument(Ph);
+  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
+    // Sanity check.
+    // If Term isn't null, then writing the terminator should end the block.
+    if (currentBB())
+      endBlock(nullptr);
+    return B;
   }
-  void reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
-    if (Instruction* I = dyn_cast_or_null<Instruction>(E))
-      BB->addInstruction(I);
-  }
-  void reduceBBTerminator(BasicBlock *BB, SExpr* E) {
-    BB->setTerminator(dyn_cast<Terminator>(E));
-  }
-  BasicBlock* reduceBasicBlock(BasicBlock *BB) { return BB; }
 
-
-  SCFG* reduceSCFGBegin(SCFG &Orig) {
-    return new (Arena) SCFG(Orig, Arena);
+  SCFG* reduceSCFG_Begin(SCFG &Orig) {
+    return beginSCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
   }
-  void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) {
-    Scfg->add(B);
+  SCFG* reduceSCFG_End(SCFG* Scfg) {
+    endSCFG();
+    return Scfg;
   }
-  SCFG* reduceSCFG(SCFG* Scfg) { return Scfg; }
 
 
   SExpr* reduceUndefined(Undefined &Orig) {
@@ -200,21 +218,11 @@ public:
     return new (Arena) IfThenElse(Orig, C, T, E);
   }
 
-protected:
-  MemRegionRef Arena;
-};
-
-
-template<class Self, class ReducerT>
-class CopyTraversal : public Traversal<Self, ReducerT> {
 public:
-  static SExpr* rewrite(SExpr *E, MemRegionRef A) {
-    Self Traverser;
-    ReducerT Reducer;
-    Reducer.setArena(A);
-    return Traverser.traverse(E, &Reducer, TRV_Tail);
-  }
+  CopyReducer() { }
+  CopyReducer(MemRegionRef A) : CFGBuilder(A) { }
 };
+
 
 }  // end namespace ohmu
 

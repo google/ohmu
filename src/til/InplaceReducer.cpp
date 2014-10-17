@@ -21,37 +21,9 @@ namespace ohmu {
 
 using namespace clang::threadSafety::til;
 
-SCFG* InplaceReducer::reduceSCFGBegin(SCFG &Orig) {
-  assert(CurrentCFG == nullptr && "Already in a CFG.");
-  CurrentCFG = &Orig;
-  InstructionMap.resize(CurrentCFG->numInstructions(), nullptr);
-  CurrentInstrID = 0;
-  return &Orig;
-}
-
-SCFG* InplaceReducer::reduceSCFG(SCFG* Scfg) {
-  assert(Scfg == CurrentCFG && "Internal traversal error.");
-  InstructionMap.clear();
-  CurrentInstrID = 0;
-  CurrentCFG = nullptr;
-  return Scfg;
-}
-
-
-BasicBlock* InplaceReducer::reduceBasicBlockBegin(BasicBlock &Orig) {
-  assert(CurrentBB == nullptr && "Already in a basic block.");
-  CurrentBB = &Orig;
-  return &Orig;
-}
-
-BasicBlock* InplaceReducer::reduceBasicBlock(BasicBlock *BB) {
-  assert(CurrentBB == BB && "Internal traversal error.");
-  CurrentBB = nullptr;
-  return BB;
-}
-
-
-bool InplaceReducer::reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
+/*
+bool InplaceReducer::handleBBArg(BasicBlock &Orig, unsigned i, BasicBlock *BB,
+                                 SExpr* E) {
   // Get the ID of the original argument.
   unsigned ID = BB->arguments()[i]->instrID();
   assert(CurrentInstrID == 0 || ID > CurrentInstrID &&
@@ -80,7 +52,8 @@ bool InplaceReducer::reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E) {
 
 
 // This is called instead of handleResult for basic block instructions.
-bool InplaceReducer::reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
+bool InplaceReducer::handleBBInstr(BasicBlock &Orig, unsigned i,
+                                   BasicBlock *BB, SExpr* E) {
   // Get the ID of the original instruction.
   unsigned ID = BB->instructions()[i]->instrID();
   assert(CurrentInstrID == 0 || ID > CurrentInstrID &&
@@ -107,6 +80,7 @@ bool InplaceReducer::reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E) {
   BB->instructions()[i] = nullptr;
   return false;
 }
+*/
 
 
 }  // end namespace ohmu

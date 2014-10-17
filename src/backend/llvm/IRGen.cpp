@@ -206,7 +206,7 @@ public:
     return lbb;
   }
 
-  llvm::Function* reduceSCFGBegin(SCFG& orig) {
+  llvm::Function* reduceSCFG_Begin(SCFG& orig) {
     currentBlocks_.clear();
     currentBlocks_.resize(orig.numBlocks(), nullptr);
     currentValues_.clear();
@@ -224,7 +224,7 @@ public:
     return currentFunction_;
   }
 
-  llvm::Function* reduceSCFG(llvm::Function* cfg) {
+  llvm::Function* reduceSCFG_End(llvm::Function* cfg) {
     llvm::verifyFunction(*currentFunction_);
     currentFunction_->dump();
     return cfg;

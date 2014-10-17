@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 2.8)
 
 add_library(tilpasslib STATIC
+  CFGBuilder.cpp
+  CopyReducer.cpp
+  CFGReducer.cpp  
   InplaceReducer.cpp
-  CFGReducer.cpp
   SSAPass.cpp
 )
 

@@ -1097,8 +1097,10 @@ public:
   const BasicBlock *targetBlock() const { return TargetBlock; }
   BasicBlock *targetBlock() { return TargetBlock; }
 
-  /// Returns the index into the
-  unsigned index() const { return Index; }
+  /// Returns the argument index into the Phi nodes for this branch.
+  unsigned phiIndex() const { return Index; }
+
+  bool isBackEdge() const;
 
   /// Return the list of basic blocks that this terminator can branch to.
   ArrayRef<BasicBlock*> successors() {
@@ -1291,7 +1293,8 @@ public:
   }
   void setTerminator(Terminator *E) {
     TermInstr = E;
-    E->setBlock(this);
+    if (E)
+      E->setBlock(this);
   }
 
   // Add a new predecessor, and return the phi-node index for it.
@@ -1599,6 +1602,12 @@ private:
   SExpr* ThenExpr;
   SExpr* ElseExpr;
 };
+
+
+inline bool Goto::isBackEdge() const {
+  return TargetBlock->blockID() <= block()->blockID();
+}
+
 
 
 const SExpr *getCanonicalVal(const SExpr *E);

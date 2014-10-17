@@ -30,23 +30,12 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
+#include "til/CFGBuilder.h"
+
+
 namespace ohmu {
 
 using namespace clang::threadSafety::til;
-
-
-
-/// Defines the TypeMap for traversals that return SExprs.
-/// See CopyReducer and InplaceReducer for details.
-class InplaceReducerMap {
-public:
-  // An SExpr reducer rewrites one SExpr to another.
-  template <class T> struct TypeMap : public SExprTypeMap<T> { };
-
-  typedef std::nullptr_t NullType;
-
-  static NullType reduceNull() { return nullptr; }
-};
 
 
 /// InplaceReducer implements the reducer interface so that each reduce simply
@@ -54,7 +43,7 @@ public:
 ///
 /// It is intended to be used as a basic class for destructive in-place
 /// transformations.
-class InplaceReducer  {
+class InplaceReducer : public CFGBuilder {
 public:
   // Destructively update SExprs by writing back results.
   template <class T>
@@ -67,23 +56,34 @@ public:
   Slot*       handleResult(Slot** VD,      Slot *Res)       { return Res; }
 
 
+  void handleRecordSlot(Record *E, Slot *Res) {
+    /* Slots can only be replaced with themselves. */
+  }
+  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
+    rewritePhiArg(Orig, NG, Res);
+  }
+  void handleBBArg(Phi &Orig, SExpr* Res) {
+    if (Orig.instrID() > 0)
+      InstructionMap[Orig.instrID()] = Res;
+  }
+  void handleBBInstr(Instruction &Orig, SExpr* Res) {
+    if (Orig.instrID() > 0)
+      InstructionMap[Orig.instrID()] = Res;
+  }
+  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
+    /* Blocks can only be replaced with themselves. */
+  }
+
+
   SExpr* reduceWeak(Instruction* I) {
-    // In most cases, we can return the rewritten version of I.
-    // However, phi node arguments on back-edges have not been rewritten yet;
-    // we'll rewrite those when we do the jump.
-    if (I->instrID() <= CurrentInstrID)
-      return InstructionMap[I->instrID()];
-    else
-      return I;
+    return InstructionMap[I->instrID()];
   }
   VarDecl*     reduceWeak(VarDecl *E)     { return E; }
   BasicBlock*  reduceWeak(BasicBlock *E)  { return E; }
   Slot*        reduceWeak(Slot *S)        { return S; }
 
 
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    return &Orig;
-  }
+  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E)      { return &Orig; }
   VarDecl* reduceVarDeclLetrec(VarDecl* Nvd, SExpr* D) { return Nvd; }
 
   SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
@@ -92,84 +92,57 @@ public:
   SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
     return &Orig;
   }
-  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
-  }
-  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
-  }
-  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
-    return &Orig;
-  }
-  Record* reduceRecordBegin(Record &Orig) {
-    return &Orig;
-  }
-  void reduceRecordSlot(Record &Orig, Record *R, unsigned i, Slot *S) {
-    R->slots()[i] = S;
-  }
-  Record* reduceRecord(Record *R) { return R; }
+  SExpr*  reduceCode(Code &Orig, SExpr* E0, SExpr* E1)    { return &Orig; }
+  SExpr*  reduceField(Field &Orig, SExpr* E0, SExpr* E1)  { return &Orig; }
+  Slot*   reduceSlot(Slot &Orig, SExpr *E0)               { return &Orig; }
+  Record* reduceRecordBegin(Record &Orig)                 { return &Orig; }
+  Record* reduceRecordEnd(Record *R)                      { return R; }
 
-
-  SExpr* reduceLiteral(Literal &Orig) {
-    return &Orig;
-  }
+  SExpr* reduceLiteral(Literal &Orig)                     { return &Orig; }
   template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig) {
-    return &Orig;
-  }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return &Orig;
-  }
-  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
-    return &Orig;
-  }
+  SExpr* reduceLiteralT(LiteralT<T> &Orig)                { return &Orig; }
+  SExpr* reduceLiteralPtr(LiteralPtr &Orig)               { return &Orig; }
+  SExpr* reduceVariable(Variable &Orig, VarDecl* VD)      { return &Orig; }
 
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
-  }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
-  }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
-    return &Orig;
-  }
+  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1)   { return &Orig; }
+  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) { return &Orig; }
+  SExpr* reduceProject(Project &Orig, SExpr* E0)          { return &Orig; }
+
   SExpr* reduceCall(Call &Orig, SExpr* E0) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceLoad(Load &Orig, SExpr* E0) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return &Orig;
+    return addInstr(&Orig);
   }
   SExpr* reduceCast(Cast &Orig, SExpr* E0) {
-    return &Orig;
+    return addInstr(&Orig);
   }
 
-  Phi* reducePhiBegin(Phi &Orig) {
-    return &Orig;
-  }
-  void reducePhiArg(Phi &Orig, Phi* Ph, unsigned i, SExpr* E) { }
-  Phi* reducePhi(Phi* Ph) { return Ph; }
+  /// Phi nodes require special handling, and cannot be
+  /// Passes which reduce Phi nodes must also set OverwriteArguments to true.
+  SExpr* reducePhi(Phi& Orig) { return &Orig; }
 
-  SExpr* reduceGoto(Goto &Orig, BasicBlock *B) {
-    return &Orig;
-  }
+  Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) { return &Orig; }
+  Goto* reduceGotoEnd(Goto* G) { return G; }
+
   SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return &O;
   }
@@ -177,50 +150,39 @@ public:
     return &Orig;
   }
 
-
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
-  bool reduceBBArgument(BasicBlock *BB, unsigned i, SExpr* E);
-  bool reduceBBInstruction(BasicBlock *BB, unsigned i, SExpr* E);
-  void reduceBBTerminator(BasicBlock *BB, SExpr* E) {
-    BB->setTerminator(cast<Terminator>(E));
-  }
-  BasicBlock* reduceBasicBlock(BasicBlock *BB);
-
-
-  SCFG* reduceSCFGBegin(SCFG &Orig);
-  void reduceSCFGBlock(SCFG* Scfg, unsigned i, BasicBlock* B) { }
-  SCFG* reduceSCFG(SCFG* Scfg);
-
-
-  SExpr* reduceUndefined(Undefined &Orig) {
+  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
+    beginBlock(&Orig);
     return &Orig;
   }
-  SExpr* reduceWildcard(Wildcard &Orig) {
-    return &Orig;
+  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
+    endBlock(cast<Terminator>(Term));
+    return B;
   }
 
-  SExpr* reduceIdentifier(Identifier &Orig) {
-    return &Orig;
+  SCFG* reduceSCFG_Begin(SCFG &Orig) {
+    return beginSCFG(&Orig);
   }
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    return &Orig;
+  SCFG* reduceSCFG_End(SCFG* Scfg) {
+    endSCFG();
+    return Scfg;
   }
-  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
-    return &Orig;
-  }
+
+  SExpr* reduceUndefined(Undefined &Orig) { return &Orig; }
+  SExpr* reduceWildcard(Wildcard &Orig)   { return &Orig; }
+
+  SExpr* reduceIdentifier(Identifier &Orig) { return &Orig; }
+  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) { return &Orig; }
+  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) { return &Orig; }
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
     return &Orig;
   }
 
-
-  InplaceReducer()
-    : CurrentCFG(nullptr), CurrentBB(nullptr), CurrentInstrID(0) { }
-
-protected:
-  SCFG*        CurrentCFG;
-  BasicBlock*  CurrentBB;
-  unsigned     CurrentInstrID;
-  std::vector<SExpr*>  InstructionMap;
+  InplaceReducer() {
+    OverwriteInstructions = true;
+  }
+  InplaceReducer(MemRegionRef A) : CFGBuilder(A) {
+    OverwriteInstructions = true;
+  }
 };
 
 

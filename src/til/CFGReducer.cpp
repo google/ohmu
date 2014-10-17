@@ -37,7 +37,7 @@ VarDecl* VarContext::lookup(StringRef s) {
 void CFGReducer::enterScope(VarDecl *orig, VarDecl *nv) {
   if (orig->name().length() > 0) {
     varCtx_->push(nv);
-    if (currentBB_ && nv->definition())
+    if (currentBB() && nv->definition())
       if (Instruction *I = dyn_cast<Instruction>(nv->definition()))
         if (I->name().length() == 0)
           I->setName(nv->name());
@@ -53,27 +53,16 @@ void CFGReducer::exitScope(const VarDecl *orig) {
 }
 
 
-
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
-  // std::cerr << "Apply: ";
-  // TILDebugPrinter::print(e, std::cerr);
-  // std::cerr << "\n";
-
   if (auto* F = dyn_cast<Function>(e)) {
     pendingPathArgs_.push_back(a);
     return F->body();
   }
-
-  // std::cerr << "Unhandled.\n";
   return CopyReducer::reduceApply(orig, e, a);
 }
 
 
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // std::cerr << "Call: ";
-  // TILDebugPrinter::print(e, std::cerr);
-  // std::cerr << "\n";
-
   // Traversing Apply and SApply will push arguments onto pendingPathArgs_.
   // A call expression will consume the args.
   if (auto* c = dyn_cast<Code>(e)) {
@@ -87,7 +76,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
       // All calls are tail calls.  Make a continuation if we don't have one.
       BasicBlock* cont = currentContinuation();
       if (!cont)
-        cont = addBlock(1);
+        cont = newBlock(1);
 
       // Set the continuation of the pending block to the current continuation.
       // If there are multiple calls, the continuations must match.
@@ -98,7 +87,8 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
       // End current block with a jump to the new one.
       unsigned nargs = numPendingArgs();
-      createGoto(pb.block, pendingPathArgs_, nargs);
+      SExpr** pbegin = &pendingPathArgs_[pendingPathArgs_.size()-nargs];
+      newGoto(pb.block, ArrayRef<SExpr*>(pbegin, nargs));
 
       // Add the pending block to the queue of reachable blocks, which will
       // be rewritten later.
@@ -109,14 +99,12 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
       // If this was a newly-created continuation, then continue where we
       // left off.
       if (!currentContinuation()) {
-        startBlock(cont);
+        beginBlock(cont);
         return cont->arguments()[0];
       }
       return nullptr;
     }
   }
-
-  // std::cerr << "Unhandled.\n";
 
   SExpr *f = e;
   for (auto *a : pendingPathArgs_)
@@ -126,7 +114,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
 
 SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
-  if (!currentCFG_)
+  if (!currentCFG())
     return CopyReducer::reduceCode(orig, e0, e1);
 
   // Code blocks inside a CFG will be lowered to basic blocks.
@@ -141,9 +129,9 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   // Eventually, we'll need to handle proper nested lambdas.
 
   // Create a new block.
+  BasicBlock *b = newBlock(nargs);
   // Clone the current context, but replace function parameters with phi nodes
   // in the new block.
-  BasicBlock *b = addBlock(nargs);
   VarContext* nvc = varCtx_->clone();
   for (unsigned i = 0; i < nargs; ++i) {
     unsigned j   = nargs-1-i;
@@ -177,7 +165,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
 
 
 SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
-  if (currentCFG_)
+  if (currentCFG())
     return b;   // eliminate the let
   else
     return CopyReducer::reduceLet(orig, nvd, b);
@@ -187,39 +175,38 @@ SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
 SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
   auto Nt = self()->traverse(e->returnType(), TRV_Type);
   SExpr *Nb = nullptr;
-  if (!currentCFG_) {
-    startCFG();
+  if (!currentCFG()) {
+    beginSCFG(nullptr);
     self()->traverse(e->body(), TRV_Tail);
-    Nb = currentCFG_;
-    finishCFG();
+    Nb = currentCFG();
+    endSCFG();
   }
   return self()->reduceCode(*e, Nt, Nb);
 }
 
 
 SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
-  if (!currentBB_) {
+  if (!currentBB()) {
     // Just do a normal traversal if we're not currently rewriting in a CFG.
     return e->traverse(*this->self());
   }
 
   // End current block with a branch
-  SExpr* cond = e->condition();
-  SExpr* nc = this->self()->traverseDM(&cond);
-  Branch* br = createBranch(nc);
+  SExpr* nc = this->self()->traverseArg(e->condition());
+  Branch* br = newBranch(nc);
 
   // If the current continuation is null, then make a new one.
   BasicBlock* currCont = currentContinuation();
   BasicBlock* cont = currCont;
   if (!cont)
-    cont = addBlock(1);
+    cont = newBlock(1);
 
   // Process the then and else blocks
-  startBlock(br->thenBlock());
+  beginBlock(br->thenBlock());
   setContinuation(cont);
   this->self()->traverse(e->thenExpr(), TRV_Tail);
 
-  startBlock(br->elseBlock());
+  beginBlock(br->elseBlock());
   setContinuation(cont);
   this->self()->traverse(e->elseExpr(), TRV_Tail);
   setContinuation(currCont);    // restore original continuation
@@ -230,158 +217,17 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
     return nullptr;
 
   // Otherwise, if we created a new continuation, then start processing it.
-  startBlock(cont);
+  beginBlock(cont);
   assert(cont->arguments().size() > 0);
   return cont->arguments()[0];
 }
 
 
-
-void CFGReducer::addInstruction(SExpr* e) {
-  if (!e)
-    return;
-
-  switch (e->opcode()) {
-    case COP_Literal:  return;
-    case COP_Variable: return;
-    case COP_Apply:    return;
-    case COP_SApply:   return;
-    case COP_Project:  return;
-    default: break;
-  }
-
-  if (Instruction* i = dyn_cast<Instruction>(e)) {
-    if (!i->block()) {
-      i->setBlock(currentBB_);      // mark i as being in the current block
-      currentInstrs_.push_back(i);
-    }
-  }
-}
-
-
-BasicBlock* CFGReducer::addBlock(unsigned nargs) {
-  BasicBlock *b = new (Arena) BasicBlock(Arena);
-  for (unsigned i = 0; i < nargs; ++i) {
-    auto *ph = new (Arena) Phi();
-    b->addArgument(ph);
-  }
-  return b;
-}
-
-
-void CFGReducer::startBlock(BasicBlock *bb) {
-  assert(currentBB_ == nullptr && "Haven't finished current block.");
-  assert(currentArgs_.empty());
-  assert(currentInstrs_.empty());
-  assert(bb->instructions().size() == 0 && "Already processed block.");
-
-  currentBB_ = bb;
-  if (!bb->cfg())
-    currentCFG_->add(bb);
-}
-
-
-void CFGReducer::finishBlock(Terminator* term) {
-  assert(currentBB_);
-  assert(currentBB_->instructions().size() == 0);
-
-  currentBB_->instructions().reserve(currentInstrs_.size(), Arena);
-  for (auto *E : currentInstrs_) {
-    currentBB_->addInstruction(E);
-  }
-  currentBB_->setTerminator(term);
-  currentArgs_.clear();
-  currentInstrs_.clear();
-  currentBB_ = nullptr;
-}
-
-
-Branch* CFGReducer::createBranch(SExpr *cond) {
-  assert(currentBB_);
-
-  // Create new basic blocks for then and else.
-  BasicBlock *ntb = addBlock();
-  ntb->addPredecessor(currentBB_);
-
-  BasicBlock *neb = addBlock();
-  neb->addPredecessor(currentBB_);
-
-  // Terminate current basic block with a branch
-  auto *nt = new (Arena) Branch(cond, ntb, neb);
-  finishBlock(nt);
-  return nt;
-}
-
-
-Goto* CFGReducer::createGoto(BasicBlock *target, SExpr* result) {
-  assert(currentBB_);
-  assert(target->arguments().size() == 1);
-
-  unsigned idx = target->addPredecessor(currentBB_);
-  Phi *ph = target->arguments()[0];
-  ph->values()[idx] = result;
-
-  auto *nt = new (Arena) Goto(target, idx);
-  finishBlock(nt);
-  return nt;
-}
-
-
-Goto* CFGReducer::createGoto(BasicBlock *target, std::vector<SExpr*>& args,
-                             unsigned nargs) {
-  assert(currentBB_);
-  if (target->arguments().size() != nargs) {
-    std::cerr << "target: " << target->arguments().size()
-              << " goto: "   << nargs << "\n";
-    assert(false);
-  }
-
-  unsigned idx = target->addPredecessor(currentBB_);
-  unsigned first = args.size() - nargs;
-  for (unsigned i = 0; i < nargs; ++i) {
-    Phi *ph = target->arguments()[i];
-    ph->values()[idx] = args[first + i];
-  }
-
-  auto *nt = new (Arena) Goto(target, idx);
-  finishBlock(nt);
-  return nt;
-}
-
-
-void CFGReducer::startCFG() {
-  assert(!currentCFG_ && !currentBB_ && "Already inside a CFG");
-
-  currentCFG_ = new (Arena) SCFG(Arena, 0);
-  currentBB_ = currentCFG_->entry();
-  setContinuation(currentCFG_->exit());
-  assert(currentBB_->instructions().size() == 0);
-}
-
-
-void CFGReducer::finishCFG() {
-  assert(currentCFG_ && "Not inside a CFG.");
-  assert(!currentBB_ && "Never finished the last block.");
-
-  setContinuation(nullptr);
-  traversePendingBlocks();
-
-  //std::cout << "\n====== Initial CFG ======\n";
-  //currentCFG_->renumber();
-  //TILDebugPrinter::print(currentCFG_, std::cout);
-  //std::cout << "\n====== Converting to Normal Form ======\n";
-  currentCFG_->computeNormalForm();
-  //TILDebugPrinter::print(currentCFG_, std::cout);
-
-  SSAPass::ssaTransform(currentCFG_, Arena);
-
-  currentCFG_ = nullptr;
-  currentBB_ = nullptr;
-}
-
-
-
 void CFGReducer::traversePendingBlocks() {
+  // Save the current context.
+  std::unique_ptr<VarContext> oldVarCtx = std::move(varCtx_);
+
+  // Process pending blocks.
   while (!pendingBlockQueue_.empty()) {
     unsigned pi = pendingBlockQueue_.front();
     pendingBlockQueue_.pop();
@@ -396,7 +242,7 @@ void CFGReducer::traversePendingBlocks() {
 
     varCtx_ = std::move(pb->ctx);
     setContinuation(pb->continuation);
-    startBlock(pb->block);
+    beginBlock(pb->block);
     SExpr *e = pb->expr;
 
     traverse(e, TRV_Tail);  // may invalidate pb
@@ -407,8 +253,30 @@ void CFGReducer::traversePendingBlocks() {
     // traversal may have invalidated pb
     pendingBlocks_[pi].processed = true;  // mark block as processed.
   }
+
+  // Restore the current context.
+  varCtx_ = std::move(oldVarCtx);
 }
 
+
+
+SCFG* CFGReducer::beginSCFG(SCFG *Cfg, unsigned NBlocks, unsigned NInstrs) {
+  CopyReducer::beginSCFG(Cfg, NBlocks, NInstrs);
+  beginBlock(currentCFG()->entry());
+  setContinuation(currentCFG()->exit());
+  return currentCFG();
+}
+
+
+void CFGReducer::endSCFG() {
+  setContinuation(nullptr);
+  traversePendingBlocks();
+  currentCFG()->computeNormalForm();
+  SCFG* Scfg = currentCFG();
+  CopyReducer::endSCFG();
+
+  SSAPass::ssaTransform(Scfg, Arena);
+}
 
 
 SExpr* CFGReducer::lower(SExpr *e, MemRegionRef a) {
