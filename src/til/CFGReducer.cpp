@@ -290,16 +290,17 @@ void CFGReducer::endSCFG() {
   SCFG* Scfg = currentCFG();
   CopyReducer::endSCFG();
 
-  std::cerr << "\n===== Lowered ======\n";
-  TILDebugPrinter::print(Scfg, std::cerr);
+  //std::cerr << "\n===== Lowered ======\n";
+  //TILDebugPrinter::print(Scfg, std::cerr);
 
   SSAPass::ssaTransform(Scfg, Arena);
-  std::cerr << "\n===== SSA ======\n";
-  TILDebugPrinter::print(Scfg, std::cerr);
+  //std::cerr << "\n===== SSA ======\n";
+  //TILDebugPrinter::print(Scfg, std::cerr);
 
-  SExpr *ncfg = CFGCopier::copy(Scfg, Arena);
-  std::cerr << "\n===== Copy ======\n";
-  TILDebugPrinter::print(ncfg, std::cerr);
+  //SExpr *ncfg = CFGCopier::copy(Scfg, Arena);
+  //cast<SCFG>(ncfg)->computeNormalForm();
+  //std::cerr << "\n===== Copy ======\n";
+  //TILDebugPrinter::print(ncfg, std::cerr);
 }
 
 

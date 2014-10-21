@@ -250,3 +250,12 @@ testSSA_NestedLoopUnchanged(): Int -> {
   total^;
 };
 
+
+// Test rewriting of Phi nodes. 
+testPhiNodeRewriting(i: Int, j: Int): Int -> {
+  var total_i = i;
+  var total_j = j;
+  let a = if (i < j) then total_i^ else total_j^;
+  a*2;
+};
+

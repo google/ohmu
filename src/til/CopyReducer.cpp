@@ -47,14 +47,14 @@ SCFG* CopyReducer::reduceSCFG_End(SCFG* Scfg) {
 }
 
 
-BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
+BasicBlock* CopyReducer::reduceBasicBlockBegin(BasicBlock &Orig) {
   BasicBlock *B = reduceWeak(&Orig);
   beginBlock(B);
   return B;
 }
 
 
-BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
+BasicBlock* CopyReducer::reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
   // Sanity check.
   // If Term isn't null, then writing the terminator should end the block.
   if (currentBB())
