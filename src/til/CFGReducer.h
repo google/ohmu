@@ -36,29 +36,6 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-class VarContext {
-public:
-  VarContext() { }
-
-  VarDecl*&   operator[](unsigned i) {
-    assert(i < size() && "Array out of bounds.");
-    return vars_[size()-1-i];
-  }
-
-  VarDecl*    lookup(StringRef s);
-  size_t      size() const      { return vars_.size(); }
-  void        push(VarDecl *vd) { vars_.push_back(vd); }
-  void        pop()             { vars_.pop_back(); }
-  VarDecl*    back()            { return vars_.back(); }
-  VarContext* clone()           { return new VarContext(*this); }
-
-private:
-  VarContext(const VarContext& ctx) : vars_(ctx.vars_) { }
-
-  std::vector<VarDecl*> vars_;
-};
-
-
 struct PendingBlock {
   SExpr*      expr;
   BasicBlock* block;
@@ -72,7 +49,6 @@ struct PendingBlock {
 };
 
 
-
 class CFGReducer : public CopyReducer,
                    public Traversal<CFGReducer, SExprReducerMap> {
 public:
@@ -80,9 +56,6 @@ public:
 
   BasicBlock* currentContinuation()   { return currentContinuation_; }
   void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }
-
-  void enterScope(VarDecl *orig, VarDecl *Nv);
-  void exitScope(const VarDecl *orig);
 
   SExpr* reduceApply(Apply &orig, SExpr* e, SExpr *a);
   SExpr* reduceCall(Call &orig, SExpr *e);
@@ -124,13 +97,11 @@ protected:
 
 public:
   CFGReducer(MemRegionRef a)
-      : CopyReducer(a), varCtx_(new VarContext()),
-        currentContinuation_(nullptr), pendingPathArgLen_(0)
+      : CopyReducer(a), currentContinuation_(nullptr), pendingPathArgLen_(0)
   { }
+  ~CFGReducer() { }
 
 private:
-  std::unique_ptr<VarContext> varCtx_;
-
   BasicBlock* currentContinuation_;      //< continuation for current block.
   unsigned    pendingPathArgLen_;
 

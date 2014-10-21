@@ -94,12 +94,13 @@ void SSAPass::replacePendingLoads() {
     Instruction* I2 = cast<Instruction>(E);
     if (PF.BBInstr) {
       // If I2 is a new, non-trivial instruction, then add it to the
-      // current block.  Otherwise, eliminate it, because it's a reference
-      // to a previously added instruction.
+      // current block.
       if (I2->instrID() == 0 && !I2->isTrivial() && !isa<Phi>(I2)) {
         *PF.IPos = I2;
         I2->setInstrID(CurrentInstrID++);
       }
+      // Otherwise, eliminate it, because it's a reference to a previously
+      // added instruction.
       else {
         *PF.IPos = nullptr;
       }

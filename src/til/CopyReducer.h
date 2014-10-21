@@ -31,6 +31,7 @@
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 #include "til/CFGBuilder.h"
+#include "til/VarContext.h"
 
 
 namespace ohmu {
@@ -41,14 +42,16 @@ using namespace clang::threadSafety::til;
 /// CopyReducer implements the reducer interface to build a new SExpr.
 /// In other words, it makes a deep copy of a term.
 /// It is also useful as a base class for non-destructive rewrites.
-class CopyReducer : public CFGBuilder {
+class CopyReducer : public CFGBuilder, public ScopeHandler {
 public:
   SExpr* reduceWeak(Instruction* E) {
     return InstructionMap[E->instrID()];
   }
+
   VarDecl* reduceWeak(VarDecl *E) {
-    return E; /* FIXME! */
+    return VarCtx->map(E->varIndex());
   }
+
   BasicBlock* reduceWeak(BasicBlock *E);
 
   // This is a non-destructive rewrite; just return the result.
@@ -202,13 +205,36 @@ public:
     return new (Arena) IfThenElse(Orig, C, T, E);
   }
 
-
 public:
   CopyReducer() { }
   CopyReducer(MemRegionRef A) : CFGBuilder(A) { }
 };
 
 
+/*
+template<class Self>
+class CopyTraversal : public Traversal<Self, SExprReducerMap> {
+
+public:
+
+};
+*/
+
+
+/// This class will make a deep copy of a term.
+class SExprCopier : public CopyReducer,
+                    public Traversal<SExprCopier, SExprReducerMap> {
+public:
+  SExprCopier(MemRegionRef a) : CopyReducer(a) { }
+
+  static SExpr* copy(SExpr* e, MemRegionRef a) {
+    SExprCopier copier(a);
+    return copier.traverse(e, TRV_Tail);
+  }
+};
+
+
 }  // end namespace ohmu
+
 
 #endif  // OHMU_TIL_COPYREDUCER_H

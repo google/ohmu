@@ -23,51 +23,6 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-class CFGCopier : public CopyReducer,
-                  public DefaultScopeHandler<SExprReducerMap>,
-                  public Traversal<CFGCopier, SExprReducerMap> {
-public:
-  CFGCopier(MemRegionRef a) : CopyReducer(a) { }
-
-  static SExpr* copy(SExpr* e, MemRegionRef a) {
-    CFGCopier copier(a);
-    return copier.traverse(e, TRV_Tail);
-  }
-};
-
-
-
-
-VarDecl* VarContext::lookup(StringRef s) {
-  for (unsigned i=0,n=vars_.size(); i < n; ++i) {
-    VarDecl* vd = vars_[n-i-1];
-    if (vd->name() == s) {
-      return vd;
-    }
-  }
-  return nullptr;
-}
-
-
-void CFGReducer::enterScope(VarDecl *orig, VarDecl *nv) {
-  if (orig->name().length() > 0) {
-    varCtx_->push(nv);
-    if (currentBB() && nv->definition())
-      if (Instruction *I = dyn_cast<Instruction>(nv->definition()))
-        if (I->name().length() == 0)
-          I->setName(nv->name());
-  }
-}
-
-
-void CFGReducer::exitScope(const VarDecl *orig) {
-  if (orig->name().length() > 0) {
-    assert(orig->name() == varCtx_->back()->name() && "Variable mismatch");
-    varCtx_->pop();
-  }
-}
-
-
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
   if (auto* F = dyn_cast<Function>(e)) {
     pendingPathArgs_.push_back(a);
@@ -136,8 +91,8 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
   // Function arguments in the context will become phi nodes in the block.
   unsigned nargs = 0;
-  unsigned sz = varCtx_->size();
-  while (nargs < sz && (*varCtx_)[nargs]->kind() == VarDecl::VK_Fun)
+  unsigned sz = varCtx().size();
+  while (nargs < sz && varCtx()[nargs]->kind() == VarDecl::VK_Fun)
     ++nargs;
 
   // TODO: right now, we assume that all local functions will become blocks.
@@ -147,10 +102,10 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   BasicBlock *b = newBlock(nargs);
   // Clone the current context, but replace function parameters with phi nodes
   // in the new block.
-  VarContext* nvc = varCtx_->clone();
+  VarContext* nvc = varCtx().clone();
   for (unsigned i = 0; i < nargs; ++i) {
     unsigned j   = nargs-1-i;
-    StringRef nm = (*varCtx_)[j]->name();
+    StringRef nm = varCtx()[j]->name();
     b->arguments()[i]->setName(nm);
     (*nvc)[j] = new (Arena) VarDecl(nm, b->arguments()[i]);
   }
@@ -167,7 +122,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
 
 SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
-  VarDecl* vd = varCtx_->lookup(orig.name());
+  VarDecl* vd = varCtx().lookup(orig.name());
   // TODO: emit warning on name-not-found.
   if (vd) {
     if (vd->kind() == VarDecl::VK_Let ||
@@ -240,7 +195,7 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
 
 void CFGReducer::traversePendingBlocks() {
   // Save the current context.
-  std::unique_ptr<VarContext> oldVarCtx = std::move(varCtx_);
+  std::unique_ptr<VarContext> oldVarCtx = std::move(VarCtx);
 
   // Process pending blocks.
   while (!pendingBlockQueue_.empty()) {
@@ -255,7 +210,7 @@ void CFGReducer::traversePendingBlocks() {
     // TILDebugPrinter::print(pb->expr, std::cerr);
     // std::cerr << "\n";
 
-    varCtx_ = std::move(pb->ctx);
+    VarCtx = std::move(pb->ctx);
     setContinuation(pb->continuation);
     beginBlock(pb->block);
     SExpr *e = pb->expr;
@@ -263,14 +218,14 @@ void CFGReducer::traversePendingBlocks() {
     traverse(e, TRV_Tail);  // may invalidate pb
 
     setContinuation(nullptr);
-    varCtx_ = nullptr;
+    VarCtx = nullptr;
 
     // traversal may have invalidated pb
     pendingBlocks_[pi].processed = true;  // mark block as processed.
   }
 
   // Restore the current context.
-  varCtx_ = std::move(oldVarCtx);
+  VarCtx = std::move(oldVarCtx);
 }
 
 

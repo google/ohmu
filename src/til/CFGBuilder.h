@@ -92,27 +92,27 @@ public:
   void rewritePhiArg(Phi &Orig, Goto *NG, SExpr *Res);
 
   CFGBuilder()
-    : CurrentCFG(nullptr), CurrentBB(nullptr),
-      OverwriteArguments(false), OverwriteInstructions(false)
+    : OverwriteArguments(false), OverwriteInstructions(false),
+      CurrentCFG(nullptr), CurrentBB(nullptr)
   { }
   CFGBuilder(MemRegionRef A)
-    : Arena(A), CurrentCFG(nullptr), CurrentBB(nullptr),
-      OverwriteArguments(false), OverwriteInstructions(false)
+    : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
+      CurrentCFG(nullptr), CurrentBB(nullptr)
   { }
   virtual ~CFGBuilder() { }
 
 protected:
   MemRegionRef               Arena;
-
-  SCFG*                      CurrentCFG;
-  BasicBlock*                CurrentBB;
-  std::vector<Phi*>          CurrentArgs;
-  std::vector<Instruction*>  CurrentInstrs;    //< instructions in currentBB.
   bool OverwriteArguments;     //< Set to true for passes which rewrite Phi.
   bool OverwriteInstructions;  //< Set to true for in-place rewriting passes.
 
-  std::vector<SExpr*>        InstructionMap;
-  std::vector<BasicBlock*>   BlockMap;
+  SCFG*                      CurrentCFG;
+  BasicBlock*                CurrentBB;
+  std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
+  std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
+
+  std::vector<SExpr*>        InstructionMap;  //< map old to new instrs
+  std::vector<BasicBlock*>   BlockMap;        //< map old to new blocks
 };
 
 

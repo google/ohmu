@@ -353,16 +353,19 @@ public:
   };
 
   VarDecl(StringRef s, SExpr *D)
-      : SExpr(COP_VarDecl), Name(s), Definition(D) {
+      : SExpr(COP_VarDecl), VarIndex(0), Name(s), Definition(D) {
     Flags = VK_Let;
   }
   VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
-      : SExpr(Vd), Name(Vd.Name), Definition(D) {
+      : SExpr(Vd), VarIndex(0), Name(Vd.Name), Definition(D) {
     Flags = Vd.kind();
   }
 
   /// Return the kind of variable (let, function param, or self)
   VariableKind kind() const { return static_cast<VariableKind>(Flags); }
+
+  /// Return the de-bruin index of the variable.
+  unsigned varIndex() const { return VarIndex; }
 
   /// Return the name of the variable, if any.
   StringRef name() const { return Name; }
@@ -373,6 +376,7 @@ public:
   SExpr *definition() { return Definition; }
   const SExpr *definition() const { return Definition; }
 
+  void setVarIndex(unsigned i) { VarIndex = i; }
   void setName(StringRef S)    { Name = S;  }
   void setKind(VariableKind K) { Flags = K; }
   void setDefinition(SExpr *E) { Definition = E; }
@@ -385,8 +389,9 @@ private:
   friend class Let;
   friend class Letrec;
 
+  unsigned  VarIndex;      // The de-bruin index of the variable.
   StringRef Name;          // The name of the variable.
-  SExpr*    Definition;    // The TIL type or definition
+  SExpr*    Definition;    // The TIL type or definition.
 };
 
 

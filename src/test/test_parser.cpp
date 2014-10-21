@@ -46,7 +46,7 @@ int main(int argc, const char** argv) {
     return -1;
   }
 
-  bool success = BNFParser::initParserFromFile(tilParser, file, false);
+  BNFParser::initParserFromFile(tilParser, file, false);
   std::cout << "\n";
   // if (success)
   //   tilParser.printSyntax(std::cout);
