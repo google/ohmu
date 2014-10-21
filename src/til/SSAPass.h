@@ -65,6 +65,9 @@ public:
   void handleFutureInstr(Instruction **Iptr, Future *F) override {
     Pending.push_back(PendingFuture(Iptr, F));
   }
+  void handleFuturePhiArg(SExpr **Eptr, Future *F) override {
+    Pending.push_back(PendingFuture(Eptr, F));
+  }
 
   BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
   VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }

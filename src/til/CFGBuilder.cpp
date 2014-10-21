@@ -105,6 +105,24 @@ void CFGBuilder::endBlock(Terminator *Term) {
 }
 
 
+/// Add block to blockmap, and add its arguments to InstructionMap.
+void CFGBuilder::mapBlock(BasicBlock *B, BasicBlock *B2) {
+  // Create a map from B1 to B2
+  BlockMap[B->blockID()] = B2;
+
+  // Create a map from the arguments of B1 to the arguments of B2
+  unsigned Nargs = B->arguments().size();
+  assert(Nargs == B2->arguments().size() && "Block arguments don't match.");
+
+  for (unsigned i = 0; i < Nargs; ++i) {
+    Phi *Ph = B->arguments()[i];
+    if (Ph && Ph->instrID() > 0)
+      InstructionMap[Ph->instrID()] = B2->arguments()[i];
+  }
+}
+
+
+
 BasicBlock* CFGBuilder::newBlock(unsigned Nargs, unsigned Npreds) {
   BasicBlock *B = new (Arena) BasicBlock(Arena);
   if (Nargs > 0) {
@@ -182,13 +200,14 @@ void CFGBuilder::rewritePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
     // The blocks match, so we know that Orig was rewritten to Ph.
     // (It might have been eliminated by rewriting to something else.)
     unsigned j = NG->phiIndex();
+    Ph->values().resize(j+1, Arena, nullptr);  // Make room if we need to.
     if (!OverwriteInstructions)
       assert(!Ph->values()[j] && "We already handled this node.");
-    Ph->values().resize(j, Arena, nullptr);    // Make room if we need to.
     Ph->values()[j] = Res;                     // Write the argument into Ph
+    if (Future *F = dyn_cast<Future>(Res))
+      handleFuturePhiArg(&Ph->values()[j], F);
   }
 }
 
 
 }  // end namespace ohmu
-

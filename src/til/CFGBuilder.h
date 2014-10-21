@@ -52,9 +52,14 @@ public:
   /// Finish working on the current basic block.
   virtual void endBlock(Terminator *Term);
 
-  /// Handle futures that are inserted into the instruction stream.
-  virtual void handleFutureInstr(Instruction** I, Future* F) { }
+  /// Map B->B2 in BlockMap, and map their arguments in InstructionMap.
+  virtual void mapBlock(BasicBlock *B, BasicBlock *B2);
 
+  /// Handle futures that are inserted into the instruction stream.
+  virtual void handleFutureInstr(Instruction** Iptr, Future* F) { }
+
+  /// Handle futures that are inserted into Phi arguments.
+  virtual void handleFuturePhiArg(SExpr** Eptr, Future *F) { }
 
   /// Add I to the current basic basic block.
   template<class T> inline T* addInstr(T* I);

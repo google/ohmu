@@ -63,9 +63,12 @@ public:
 
   /// Resize to Nsz, initializing newly-added elements to V
   void resize(size_t Nsz, MemRegionRef A, const T& V) {
+    if (Nsz <= Size)
+      return;
     reserve(Nsz, A);
     for (size_t i = Size; i < Nsz; ++i)
       Data[i] = V;
+    Size = Nsz;
   }
 
   /// Reserve space for at least N more items.

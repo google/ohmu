@@ -23,6 +23,21 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
+class CFGCopier : public CopyReducer,
+                  public DefaultScopeHandler<SExprReducerMap>,
+                  public Traversal<CFGCopier, SExprReducerMap> {
+public:
+  CFGCopier(MemRegionRef a) : CopyReducer(a) { }
+
+  static SExpr* copy(SExpr* e, MemRegionRef a) {
+    CFGCopier copier(a);
+    return copier.traverse(e, TRV_Tail);
+  }
+};
+
+
+
+
 VarDecl* VarContext::lookup(StringRef s) {
   for (unsigned i=0,n=vars_.size(); i < n; ++i) {
     VarDecl* vd = vars_[n-i-1];
@@ -275,7 +290,16 @@ void CFGReducer::endSCFG() {
   SCFG* Scfg = currentCFG();
   CopyReducer::endSCFG();
 
+  std::cerr << "\n===== Lowered ======\n";
+  TILDebugPrinter::print(Scfg, std::cerr);
+
   SSAPass::ssaTransform(Scfg, Arena);
+  std::cerr << "\n===== SSA ======\n";
+  TILDebugPrinter::print(Scfg, std::cerr);
+
+  SExpr *ncfg = CFGCopier::copy(Scfg, Arena);
+  std::cerr << "\n===== Copy ======\n";
+  TILDebugPrinter::print(ncfg, std::cerr);
 }
 
 

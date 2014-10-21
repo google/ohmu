@@ -173,7 +173,8 @@ unsigned BasicBlock::renumber(unsigned ID) {
     Instr->setBlock(this);
     Instr->setInstrID(ID++);
   }
-  TermInstr->setInstrID(ID++);
+  if (TermInstr)
+    TermInstr->setInstrID(ID++);
   return ID;
 }
 

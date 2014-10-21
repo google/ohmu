@@ -176,27 +176,11 @@ public:
     return Rt;
   }
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    BasicBlock *B = reduceWeak(&Orig);
-    beginBlock(B);
-    return B;
-  }
-  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
-    // Sanity check.
-    // If Term isn't null, then writing the terminator should end the block.
-    if (currentBB())
-      endBlock(nullptr);
-    return B;
-  }
+  SCFG* reduceSCFG_Begin(SCFG &Orig);
+  SCFG* reduceSCFG_End(SCFG* Scfg);
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig) {
-    return beginSCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
-  }
-  SCFG* reduceSCFG_End(SCFG* Scfg) {
-    endSCFG();
-    return Scfg;
-  }
-
+  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
+  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
 
   SExpr* reduceUndefined(Undefined &Orig) {
     return new (Arena) Undefined(Orig);
@@ -217,6 +201,7 @@ public:
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
     return new (Arena) IfThenElse(Orig, C, T, E);
   }
+
 
 public:
   CopyReducer() { }

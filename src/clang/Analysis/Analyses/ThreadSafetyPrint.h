@@ -541,7 +541,7 @@ protected:
       self()->printSExpr(E->values()[0], SS, Prec_MAX);
     else {
       unsigned i = 0;
-      for (auto V : E->values()) {
+      for (auto *V : E->values()) {
         if (i++ > 0)
           SS << ", ";
         self()->printSExpr(V, SS, Prec_MAX);

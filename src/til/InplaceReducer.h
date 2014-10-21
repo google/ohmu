@@ -74,14 +74,17 @@ public:
     /* Blocks can only be replaced with themselves. */
   }
 
-
   SExpr* reduceWeak(Instruction* I) {
     return InstructionMap[I->instrID()];
   }
-  VarDecl*     reduceWeak(VarDecl *E)     { return E; }
-  BasicBlock*  reduceWeak(BasicBlock *E)  { return E; }
-  Slot*        reduceWeak(Slot *S)        { return S; }
+  VarDecl* reduceWeak(VarDecl *E) { return E; }
+  Slot*    reduceWeak(Slot *S)    { return S; }
 
+  BasicBlock* reduceWeak(BasicBlock *B) {
+    if (!BlockMap[B->blockID()])
+      mapBlock(B, B);   // Update InstructionMap for B
+    return B;
+  }
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E)      { return &Orig; }
   VarDecl* reduceVarDeclLetrec(VarDecl* Nvd, SExpr* D) { return Nvd; }

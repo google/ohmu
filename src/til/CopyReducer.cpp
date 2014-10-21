@@ -29,23 +29,52 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-// Create new blocks on demand, as we encounter jumps to them.
-BasicBlock* CopyReducer::reduceWeak(BasicBlock *E) {
-  auto *B = BlockMap[E->blockID()];
-  if (!B) {
-    // Create new block, and add all of its phi nodes to InstructionMap.
-    // This has to be done before we process a Goto.
-    unsigned Nargs = E->arguments().size();
-    B = newBlock(Nargs, E->numPredecessors());
-    BlockMap[E->blockID()] = B;
+SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
+  beginSCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
 
-    for (unsigned i = 0; i < Nargs; ++i) {
-      Phi *Ph = E->arguments()[i];
-      if (Ph && Ph->instrID() > 0)
-        InstructionMap[Ph->instrID()] = B->arguments()[i];
-    }
-  }
+  BlockMap[Orig.entry()->blockID()] = currentCFG()->entry();
+  BlockMap[Orig.exit()->blockID()]  = currentCFG()->exit();
+  InstructionMap[Orig.exit()->arguments()[0]->instrID()] =
+    currentCFG()->exit()->arguments()[0];
+  return currentCFG();
+}
+
+
+SCFG* CopyReducer::reduceSCFG_End(SCFG* Scfg) {
+  endSCFG();
+  Scfg->renumber();
+  return Scfg;
+}
+
+
+BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
+  BasicBlock *B = reduceWeak(&Orig);
+  beginBlock(B);
   return B;
 }
+
+
+BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
+  // Sanity check.
+  // If Term isn't null, then writing the terminator should end the block.
+  if (currentBB())
+    endBlock(nullptr);
+  return B;
+}
+
+
+// Create new blocks on demand, as we encounter jumps to them.
+BasicBlock* CopyReducer::reduceWeak(BasicBlock *B) {
+  auto *B2 = BlockMap[B->blockID()];
+  if (!B2) {
+    // Create new block, and add all of its Phi nodes to InstructionMap.
+    // This has to be done before we process a Goto.
+    unsigned Nargs = B->arguments().size();
+    B2 = newBlock(Nargs, B->numPredecessors());
+    mapBlock(B, B2);
+  }
+  return B2;
+}
+
 
 }  // end namespace ohmu
