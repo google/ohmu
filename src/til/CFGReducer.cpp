@@ -23,6 +23,24 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
+/// A Future which creates a new CFG from the traversal.
+class CFGFuture : public LazyCopyFuture<CFGReducer> {
+public:
+  CFGFuture(SExpr* E, CFGReducer* R, VarContext* VCtx)
+      : LazyCopyFuture(E, R, VCtx)
+  { }
+
+  virtual SExpr* traversePending() override {
+    Reducer->beginSCFG(nullptr);
+    Reducer->VarCtx = std::move(this->VarCtx);
+    Reducer->traverse(PendingExpr, TRV_Tail);
+    auto *Res = Reducer->currentCFG();
+    Reducer->endSCFG();
+    return Res;
+  }
+};
+
+
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
   if (auto* F = dyn_cast<Function>(e)) {
     pendingPathArgs_.push_back(a);
@@ -120,15 +138,41 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 }
 
 
+
 SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
-  VarDecl* vd = varCtx().lookup(orig.name());
-  // TODO: emit warning on name-not-found.
-  if (vd) {
-    if (vd->kind() == VarDecl::VK_Let ||
-        vd->kind() == VarDecl::VK_Letrec)
-      return vd->definition();
-    return new (Arena) Variable(vd);
+  StringRef s = orig.name();
+
+  // Search backward through the context until we find a match.
+  for (unsigned i=0,n=VarCtx->size(); i < n; ++i) {
+    VarDecl* vd = (*VarCtx)[i];
+    if (!vd)
+      continue;
+    if (vd->name() == s) {
+      // Translate identifier to a named variable.
+      if (vd->kind() == VarDecl::VK_Let ||
+          vd->kind() == VarDecl::VK_Letrec)
+        // Map let variables directly to their definitions.
+        return vd->definition();
+      return new (Arena) Variable(vd);
+    }
+    else if (vd->kind() == VarDecl::VK_SFun) {
+      if (!vd->definition())
+        continue;
+
+      // Map identifiers to slots for record self-variables.
+      auto* sfun = cast<SFunction>(vd->definition());
+      if (Record *r = dyn_cast<Record>(sfun->body())) {
+        if (Slot *slt = r->findSlot(s)) {
+          auto* svar = new (Arena) Variable(vd);
+          auto* sapp = new (Arena) SApply(svar);
+          return new (Arena) Project(sapp, s);
+        }
+      }
+    }
   }
+
+  // TODO: emit warning on name-not-found.
+  std::cerr << "error: Identifier " << s << " not found.\n";
   return new (Arena) Identifier(orig);
 }
 
@@ -142,14 +186,9 @@ SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
 
 
 SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
-  auto Nt = self()->traverse(e->returnType(), TRV_Type);
-  SExpr *Nb = nullptr;
-  if (!currentCFG()) {
-    beginSCFG(nullptr);
-    self()->traverse(e->body(), TRV_Tail);
-    Nb = currentCFG();
-    endSCFG();
-  }
+  auto* Nt = self()->traverse(e->returnType(), TRV_Type);
+  auto* Nb = new (Arena) CFGFuture(e->body(), this, VarCtx->clone());
+  FutureQueue.push(Nb);
   return self()->reduceCode(*e, Nt, Nb);
 }
 
@@ -242,9 +281,9 @@ void CFGReducer::endSCFG() {
   setContinuation(nullptr);
   traversePendingBlocks();
 
-  currentCFG()->renumber();
-  std::cerr << "\n===== Lowered ======\n";
-  TILDebugPrinter::print(currentCFG(), std::cerr);
+  // currentCFG()->renumber();
+  // std::cerr << "\n===== Lowered ======\n";
+  // TILDebugPrinter::print(currentCFG(), std::cerr);
 
   currentCFG()->computeNormalForm();
   SCFG* Scfg = currentCFG();
@@ -266,7 +305,7 @@ void CFGReducer::endSCFG() {
 
 SExpr* CFGReducer::lower(SExpr *e, MemRegionRef a) {
   CFGReducer traverser(a);
-  return traverser.traverse(e, TRV_Tail);
+  return traverser.traverseAll(e);
 }
 
 

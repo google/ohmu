@@ -652,9 +652,10 @@ protected:
   }
 
   void printFuture(const Future *E, StreamType &SS) {
-    SS << "#future(";
-    self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
-    SS << ")";
+    if (E->maybeGetResult())
+      self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
+    else
+      SS << "#future";
   }
 
   void printUndefined(const Undefined *E, StreamType &SS) {

@@ -48,8 +48,7 @@ struct PendingBlock {
 };
 
 
-class CFGReducer : public CopyReducer,
-                   public Traversal<CFGReducer, SExprReducerMap> {
+class CFGReducer : public CopyReducer, public LazyCopyTraversal<CFGReducer> {
 public:
   typedef Traversal<CFGReducer, SExprReducerMap> SuperTv;
 

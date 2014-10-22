@@ -543,6 +543,8 @@ public:
   SlotArray& slots() { return Slots; }
   const SlotArray& slots() const { return Slots; }
 
+  Slot* findSlot(StringRef S);
+
   DECLARE_TRAVERSE_AND_COMPARE(Record)
 
 private:
@@ -1470,6 +1472,11 @@ public:
   void setResult(SExpr *Res) {
     Result = Res;
     Status = FS_done;
+  }
+
+  virtual SExpr* force() {
+    assert(true && "Future cannot be forced.");
+    return nullptr;
   }
 
   DECLARE_TRAVERSE_AND_COMPARE(Future)

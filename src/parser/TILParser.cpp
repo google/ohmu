@@ -232,7 +232,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       assert(arity == 2);
       Token* t = tok(0);
       auto* v = new (arena_) VarDecl(copyStr(t->string()), nullptr);
-      auto* e = new (arena_) Function(v, sexpr(1));
+      auto* e = new (arena_) SFunction(v, sexpr(1));
       delete t;
       return ParseResult(TILP_SExpr, e);
     }
@@ -275,8 +275,12 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_SApply: {
-      assert(arity == 2);
-      auto* e = new (arena_) SApply(sexpr(0), sexpr(1));
+      assert(arity == 1 || arity == 2);
+      SExpr* e = nullptr;
+      if (arity == 1)
+        e = new (arena_) SApply(sexpr(0));
+      else if (arity == 2)
+        e = new (arena_) SApply(sexpr(0), sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Project: {

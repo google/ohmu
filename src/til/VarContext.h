@@ -42,9 +42,6 @@ public:
     return VarDeclMap[size()-1-i];
   }
 
-  /// Look up a variable by name.
-  VarDecl* lookup(StringRef s) const;
-
   /// Look up a VarDecl by index.
   VarDecl* map(unsigned i) const { return VarDeclMap[i]; }
 
@@ -61,6 +58,7 @@ private:
 };
 
 
+
 class ScopeHandler {
 public:
   ScopeHandler() : VarCtx(new VarContext()) { }
@@ -73,7 +71,7 @@ public:
 
   VarContext& varCtx() { return *VarCtx; }
 
-protected:
+public:
   std::unique_ptr<VarContext> VarCtx;
 };
 

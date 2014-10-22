@@ -23,17 +23,6 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-VarDecl* VarContext::lookup(StringRef s) const {
-  for (unsigned i=0,n=VarDeclMap.size(); i < n; ++i) {
-    VarDecl* vd = VarDeclMap[n-i-1];
-    if (vd && vd->name() == s) {
-      return vd;
-    }
-  }
-  return nullptr;
-}
-
-
 void ScopeHandler::enterScope(VarDecl *orig, VarDecl *nv) {
   // VarDecls are initially unnumbered, so assign indexes if need be.
   if (orig->varIndex() == 0) {

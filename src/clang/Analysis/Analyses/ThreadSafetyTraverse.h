@@ -85,6 +85,11 @@ public:
   /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
+  /// Initial starting point, to be called by external routines.
+  MAPTYPE(RMap, SExpr) traverseAll(SExpr* E) {
+    return self()->traverse(E, TRV_Tail);
+  }
+
   /// Invoked by SExpr classes to traverse writable data members.
   /// Do not override.
   MAPTYPE(RMap, SExpr) handleTraverse(SExpr** Eptr) {

@@ -216,25 +216,101 @@ public:
 };
 
 
-/*
-template<class Self>
-class CopyTraversal : public Traversal<Self, SExprReducerMap> {
 
+/// An implementation of Future for lazy, non-destructive traversals.
+/// Visitor extends CopyReducer
+template<class Visitor>
+class LazyCopyFuture : public Future {
 public:
+  LazyCopyFuture(SExpr* E, Visitor* R, VarContext* VCtx)
+    : PendingExpr(E), Reducer(R), VarCtx(VCtx)
+  { }
 
+  /// Traverse PendingExpr and return the result.
+  virtual SExpr* traversePending() {
+    Reducer->VarCtx = std::move(this->VarCtx);
+    return Reducer->traverse(PendingExpr, TRV_Tail);
+  }
+
+  /// Force the future.
+  virtual SExpr* force() override {
+    if (status() == Future::FS_done)
+      return maybeGetResult();
+    assert(status() == Future::FS_pending && "Infinite loop!");
+
+    setStatus(Future::FS_evaluating);
+    auto *Res = traversePending();
+    PendingExpr = nullptr;
+    setResult(Res);
+    return Res;
+  }
+
+protected:
+  SExpr*    PendingExpr;                // The expression to be rewritten
+  Visitor*  Reducer;                    // The reducer object.
+  std::unique_ptr<VarContext> VarCtx;   // The context in which it occurs
 };
-*/
+
+
+
+/// Base class for non-destructive, lazy traversals.
+template<class Self, class FutureType = LazyCopyFuture<Self> >
+class LazyCopyTraversal : public Traversal<Self, SExprReducerMap> {
+public:
+  typedef Traversal<Self, SExprReducerMap> SuperTv;
+
+  Self* self() { return static_cast<Self*>(this); }
+
+  /// Factory method to create a future in the current context.
+  /// Default implementation works for LazyFuture; override for other types.
+  FutureType* makeFuture(SExpr *E) {
+    auto *F = new (self()->Arena)
+      FutureType(E, self(), self()->VarCtx->clone());
+    FutureQueue.push(F);
+    return F;
+  }
+
+  /// Traverse E, returning a future if K == TRV_Lazy.
+  template<class T>
+  MAPTYPE(SExprReducerMap, T) traverse(SExpr *E, TraversalKind K) {
+    if (K == TRV_Lazy)
+      return self()->makeFuture(E);
+    return SuperTv::traverse(E, K);
+  }
+
+  /// Lazy traversals cannot be done on types other than SExpr.
+  template<class T>
+  MAPTYPE(SExprReducerMap, T) traverse(T *E, TraversalKind K) {
+    return SuperTv::traverse(E, K);
+  }
+
+  /// Perform a lazy traversal.
+  SExpr* traverseAll(SExpr *E) {
+    SExpr *Result = self()->traverse(E, TRV_Tail);
+
+    // Process futures in queue.
+    while (!FutureQueue.empty()) {
+      auto *F = FutureQueue.front();
+      FutureQueue.pop();
+      F->force();
+    }
+    return Result;
+  }
+
+protected:
+  std::queue<FutureType*> FutureQueue;
+};
+
 
 
 /// This class will make a deep copy of a term.
-class SExprCopier : public CopyReducer,
-                    public Traversal<SExprCopier, SExprReducerMap> {
+class SExprCopier : public CopyReducer, public LazyCopyTraversal<SExprCopier> {
 public:
-  SExprCopier(MemRegionRef a) : CopyReducer(a) { }
+  SExprCopier(MemRegionRef A) : CopyReducer(A) { }
 
-  static SExpr* copy(SExpr* e, MemRegionRef a) {
-    SExprCopier copier(a);
-    return copier.traverse(e, TRV_Tail);
+  static SExpr* copy(SExpr *E, MemRegionRef A) {
+    SExprCopier Copier(A);
+    return Copier.traverseAll(E);
   }
 };
 

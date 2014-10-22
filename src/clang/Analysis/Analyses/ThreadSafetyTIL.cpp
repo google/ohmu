@@ -61,6 +61,17 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+Slot* Record::findSlot(StringRef S) {
+  // FIXME -- look this up in a hash table, please.
+  for (auto* Slt : slots()) {
+    if (Slt->name() == S)
+      return Slt;
+  }
+  return nullptr;
+}
+
+
+
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
