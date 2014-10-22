@@ -20,6 +20,8 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
+#include <vector>
+
 
 #ifndef OHMU_TIL_CFGBUILDER_H_
 #define OHMU_TIL_CFGBUILDER_H_

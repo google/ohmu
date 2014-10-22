@@ -33,6 +33,11 @@
 #include "til/CFGBuilder.h"
 #include "til/VarContext.h"
 
+#include <cstddef>
+#include <memory>
+#include <queue>
+#include <vector>
+
 
 namespace ohmu {
 

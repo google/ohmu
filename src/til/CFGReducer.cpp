@@ -40,8 +40,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
     auto it = codeMap_.find(c);
     if (it != codeMap_.end()) {
       // This is a locally-defined function, which maps to a basic block.
-      unsigned pi      = it->second;
-      PendingBlock& pb = pendingBlocks_[pi];
+      PendingBlock* pb = it->second;
 
       // All calls are tail calls.  Make a continuation if we don't have one.
       BasicBlock* cont = currentContinuation();
@@ -50,21 +49,18 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
       // Set the continuation of the pending block to the current continuation.
       // If there are multiple calls, the continuations must match.
-      if (pb.continuation)
-        assert(pb.continuation == cont && "Cannot transform to tail call!");
-      else
-        pb.continuation = cont;
+      if (pb->continuation) {
+        assert(pb->continuation == cont && "Cannot transform to tail call!");
+      }
+      else {
+        pb->continuation = cont;
+        // Once we have a continuation, we can add pb to the queue.
+        pendingBlockQueue_.push(pb);
+      }
 
       // End current block with a jump to the new one.
-      unsigned nargs = numPendingArgs();
-      SExpr** pbegin = &pendingPathArgs_[pendingPathArgs_.size()-nargs];
-      newGoto(pb.block, ArrayRef<SExpr*>(pbegin, nargs));
-
-      // Add the pending block to the queue of reachable blocks, which will
-      // be rewritten later.
-      pendingBlockQueue_.push(pi);
-      for (unsigned i = 0; i < nargs; ++i)
-        pendingPathArgs_.pop_back();
+      newGoto(pb->block, pendingArgs());
+      clearPendingArgs();
 
       // If this was a newly-created continuation, then continue where we
       // left off.
@@ -76,9 +72,12 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
     }
   }
 
+  // Create Apply exprs for all pending arguments, and return a Call expr.
   SExpr *f = e;
-  for (auto *a : pendingPathArgs_)
+  for (auto *a : pendingArgs())
     f = new (Arena) Apply(f, a);
+  clearPendingArgs();
+
   return CopyReducer::reduceCall(orig, f);
 }
 
@@ -88,8 +87,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
     return CopyReducer::reduceCode(orig, e0, e1);
 
   // Code blocks inside a CFG will be lowered to basic blocks.
-
-  // Function arguments in the context will become phi nodes in the block.
+  // Function arguments will become phi nodes in the block.
   unsigned nargs = 0;
   unsigned sz = varCtx().size();
   while (nargs < sz && varCtx()[nargs]->kind() == VarDecl::VK_Fun)
@@ -110,13 +108,14 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
     (*nvc)[j] = new (Arena) VarDecl(nm, b->arguments()[i]);
   }
 
-  // Add the new blocks to the pending blocks array.
-  unsigned pi = pendingBlocks_.size();
-  pendingBlocks_.push_back(PendingBlock(orig.body(), b, nvc));
+  // Add pb to the array of pending blocks.
+  // It will not be enqueued until we see a call to the block.
+  auto* pb = new PendingBlock(orig.body(), b, nvc);
+  pendingBlocks_.emplace_back(std::unique_ptr<PendingBlock>(pb));
 
   // Create a code expr, and add it to the code map.
   Code* c = CopyReducer::reduceCode(orig, e0, nullptr);
-  codeMap_.insert(std::make_pair(c, pi));
+  codeMap_.insert(std::make_pair(c, pb));
   return c;
 }
 
@@ -199,12 +198,11 @@ void CFGReducer::traversePendingBlocks() {
 
   // Process pending blocks.
   while (!pendingBlockQueue_.empty()) {
-    unsigned pi = pendingBlockQueue_.front();
+    PendingBlock* pb = pendingBlockQueue_.front();
     pendingBlockQueue_.pop();
 
-    PendingBlock* pb = &pendingBlocks_[pi];
-    if (!pb->continuation || pb->processed)
-      continue;   // unreachable or already processed block.
+    if (!pb->continuation)
+      continue;   // unreachable block.
 
     // std::cerr << "processing pending block " << pi << "\n";
     // TILDebugPrinter::print(pb->expr, std::cerr);
@@ -219,10 +217,12 @@ void CFGReducer::traversePendingBlocks() {
 
     setContinuation(nullptr);
     VarCtx = nullptr;
-
-    // traversal may have invalidated pb
-    pendingBlocks_[pi].processed = true;  // mark block as processed.
   }
+
+  // Delete all pending blocks.
+  // We wait until all blocks have been processed before deleting them.
+  pendingBlocks_.clear();
+  codeMap_.shrink_and_clear();
 
   // Restore the current context.
   VarCtx = std::move(oldVarCtx);
@@ -241,11 +241,16 @@ SCFG* CFGReducer::beginSCFG(SCFG *Cfg, unsigned NBlocks, unsigned NInstrs) {
 void CFGReducer::endSCFG() {
   setContinuation(nullptr);
   traversePendingBlocks();
+
+  currentCFG()->renumber();
+  std::cerr << "\n===== Lowered ======\n";
+  TILDebugPrinter::print(currentCFG(), std::cerr);
+
   currentCFG()->computeNormalForm();
   SCFG* Scfg = currentCFG();
   CopyReducer::endSCFG();
 
-  //std::cerr << "\n===== Lowered ======\n";
+  //std::cerr << "\n===== Normalized ======\n";
   //TILDebugPrinter::print(Scfg, std::cerr);
 
   SSAPass::ssaTransform(Scfg, Arena);

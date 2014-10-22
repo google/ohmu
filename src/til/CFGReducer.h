@@ -41,10 +41,9 @@ struct PendingBlock {
   BasicBlock* block;
   BasicBlock* continuation;
   std::unique_ptr<VarContext> ctx;
-  bool processed;
 
   PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
-    : expr(e), block(b), continuation(nullptr), ctx(c), processed(false)
+    : expr(e), block(b), continuation(nullptr), ctx(c)
   { }
 };
 
@@ -76,23 +75,45 @@ public:
   SCFG* beginSCFG(SCFG *Cfg, unsigned NBlocks=0, unsigned NInstrs=0) override;
   void  endSCFG() override;
 
+  /// Lower e by building CFGs for all code blocks.
   static SExpr* lower(SExpr *e, MemRegionRef a);
 
 
 protected:
+  /// Return the number of pending function arguments.
+  /// Function call arguments are saved in a pending list until a Call expr.
   unsigned numPendingArgs() {
     return pendingPathArgs_.size() - pendingPathArgLen_;
   }
+
+  /// Return the pending arguments.
+  ArrayRef<SExpr*> pendingArgs() {
+    unsigned nargs = numPendingArgs();
+    SExpr** pbegin = &pendingPathArgs_[pendingPathArgs_.size()-nargs];
+    return ArrayRef<SExpr*>(pbegin, nargs);
+  }
+
+  /// Clear all pending arguments.
+  void clearPendingArgs() {
+    unsigned nargs = numPendingArgs();
+    for (unsigned i = 0; i < nargs; ++i)
+      pendingPathArgs_.pop_back();
+  }
+
+  /// Save pending arguments on a stack.
+  /// Return a value that can be passed to restorePendingArgs later.
   unsigned savePendingArgs() {
     unsigned plen = pendingPathArgLen_;
     pendingPathArgLen_ = pendingPathArgs_.size();
     return plen;
   }
+
+  /// Restore a list of previously saved arguments.
   void restorePendingArgs(unsigned plen) {
     pendingPathArgLen_ = plen;
   }
 
-  // Implement lazy block traversal.
+  /// Implement lazy block traversal.
   void traversePendingBlocks();
 
 public:
@@ -102,13 +123,13 @@ public:
   ~CFGReducer() { }
 
 private:
-  BasicBlock* currentContinuation_;      //< continuation for current block.
-  unsigned    pendingPathArgLen_;
+  BasicBlock*  currentContinuation_;      //< continuation for current block.
+  unsigned     pendingPathArgLen_;
+  std::vector<SExpr*> pendingPathArgs_;
 
-  std::vector<SExpr*>        pendingPathArgs_;
-  DenseMap<Code*, unsigned>  codeMap_;
-  std::vector<PendingBlock>  pendingBlocks_;
-  std::queue<unsigned>       pendingBlockQueue_;
+  std::vector<std::unique_ptr<PendingBlock>> pendingBlocks_;
+  std::queue<PendingBlock*>                  pendingBlockQueue_;
+  DenseMap<Code*, PendingBlock*>             codeMap_;
 };
 
 

@@ -53,6 +53,8 @@ public:
     map_.insert(KV);
   }
 
+  void shrink_and_clear() { map_.clear(); }
+
 private:
   std::unordered_map<K, V> map_;
 };
