@@ -41,8 +41,8 @@ void ScopeHandler::enterScope(VarDecl *orig, VarDecl *nv) {
   // Copy names of let-variables to their definitions.
   if (nv->kind() == VarDecl::VK_Let && nv->definition()) {
     if (Instruction *I = dyn_cast<Instruction>(nv->definition()))
-      if (I->name().length() == 0)
-        I->setName(nv->name());
+      if (I->instrName().length() == 0)
+        I->setInstrName(nv->name());
   }
 }
 

@@ -587,7 +587,7 @@ public:
   BasicBlock* block() const { return Block; }
 
   /// Return the name (if any) of this instruction.
-  StringRef name() const { return Name; }
+  StringRef instrName() const { return Name; }
 
   /// Set the basic block and instruction ID for this instruction.
   void setInstrID(unsigned id) { InstrID = id; }
@@ -599,7 +599,7 @@ public:
   void setDepth(unsigned D) { Depth = D; }
 
   /// Sets the name of this instructions.
-  void setName(StringRef N) { Name = N; }
+  void setInstrName(StringRef N) { Name = N; }
 
 protected:
   ValueType    ValType;

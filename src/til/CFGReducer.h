@@ -55,6 +55,7 @@ public:
   BasicBlock* currentContinuation()   { return currentContinuation_; }
   void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }
 
+  SExpr* reduceProject(Project &orig, SExpr* e);
   SExpr* reduceApply(Apply &orig, SExpr* e, SExpr *a);
   SExpr* reduceCall(Call &orig, SExpr *e);
   SExpr* reduceCode(Code& orig, SExpr* e0, SExpr* e1);

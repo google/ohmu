@@ -139,7 +139,7 @@ protected:
     }
     if (Sub) {
       if (const auto *I = E->asCFGInstruction()) {
-        SS << printableName(I->name()) << I->instrID();
+        SS << printableName(I->instrName()) << I->instrID();
         return;
       }
     }
@@ -497,7 +497,7 @@ protected:
     }
     self()->newline(SS);
     if (E->opcode() != COP_Store) {
-      SS << "let " << printableName(E->name()) << E->instrID() << " = ";
+      SS << "let " << printableName(E->instrName()) << E->instrID() << " = ";
     }
     self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";
@@ -652,8 +652,11 @@ protected:
   }
 
   void printFuture(const Future *E, StreamType &SS) {
-    if (E->maybeGetResult())
-      self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
+    if (E->maybeGetResult()) {
+      SS << "#f(";
+      self()->printSExpr(E->maybeGetResult(), SS, Prec_MAX);
+      SS << ")";
+    }
     else
       SS << "#future";
   }

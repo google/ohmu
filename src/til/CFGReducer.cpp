@@ -42,11 +42,26 @@ public:
 
 
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
-  if (auto* F = dyn_cast<Function>(e)) {
+  if (auto* f = dyn_cast<Function>(e)) {
     pendingPathArgs_.push_back(a);
-    return F->body();
+    return f->body();
   }
+  assert(numPendingArgs() == 0 && "Internal error.");
   return CopyReducer::reduceApply(orig, e, a);
+}
+
+
+SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
+  if (auto *r = dyn_cast<Record>(e)) {
+    if (Slot* slt = r->findSlot(orig.slotName())) {
+      return slt->definition();
+    }
+    else {
+      std::cerr << "Slot not found: " << orig.slotName() << "\n";
+      return new (Arena) Undefined();
+    }
+  }
+  return CopyReducer::reduceProject(orig, e);
 }
 
 
@@ -100,6 +115,21 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 }
 
 
+
+SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
+  auto* nt = self()->traverse(e->returnType(), TRV_Type);
+  // If we're not in a CFG, then evaluate body in a Future that creates one.
+  // Otherwise set the body to null; it will be handled as a pending block.
+  if (!currentCFG()) {
+    auto* nb = new (Arena) CFGFuture(e->body(), this, VarCtx->clone());
+    FutureQueue.push(nb);
+    return self()->reduceCode(*e, nt, nb);
+  }
+  return self()->reduceCode(*e, nt, nullptr);
+}
+
+
+
 SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   if (!currentCFG())
     return CopyReducer::reduceCode(orig, e0, e1);
@@ -122,7 +152,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   for (unsigned i = 0; i < nargs; ++i) {
     unsigned j   = nargs-1-i;
     StringRef nm = varCtx()[j]->name();
-    b->arguments()[i]->setName(nm);
+    b->arguments()[i]->setInstrName(nm);
     (*nvc)[j] = new (Arena) VarDecl(nm, b->arguments()[i]);
   }
 
@@ -162,7 +192,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       // Map identifiers to slots for record self-variables.
       auto* sfun = cast<SFunction>(vd->definition());
       if (Record *r = dyn_cast<Record>(sfun->body())) {
-        if (Slot *slt = r->findSlot(s)) {
+        if (r->findSlot(s)) {
           auto* svar = new (Arena) Variable(vd);
           auto* sapp = new (Arena) SApply(svar);
           return new (Arena) Project(sapp, s);
@@ -177,6 +207,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
 }
 
 
+
 SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
   if (currentCFG())
     return b;   // eliminate the let
@@ -184,13 +215,6 @@ SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
     return CopyReducer::reduceLet(orig, nvd, b);
 }
 
-
-SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
-  auto* Nt = self()->traverse(e->returnType(), TRV_Type);
-  auto* Nb = new (Arena) CFGFuture(e->body(), this, VarCtx->clone());
-  FutureQueue.push(Nb);
-  return self()->reduceCode(*e, Nt, Nb);
-}
 
 
 SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
@@ -229,6 +253,7 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
   assert(cont->arguments().size() > 0);
   return cont->arguments()[0];
 }
+
 
 
 void CFGReducer::traversePendingBlocks() {
