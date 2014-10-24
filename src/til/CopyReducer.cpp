@@ -30,18 +30,14 @@ using namespace clang::threadSafety::til;
 
 
 SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
-  beginSCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
-
-  BlockMap[Orig.entry()->blockID()] = currentCFG()->entry();
-  BlockMap[Orig.exit()->blockID()]  = currentCFG()->exit();
-  InstructionMap[Orig.exit()->arguments()[0]->instrID()] =
-    currentCFG()->exit()->arguments()[0];
+  beginCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
+  Scope->enterCFG(&Orig, currentCFG());
   return currentCFG();
 }
 
-
 SCFG* CopyReducer::reduceSCFG_End(SCFG* Scfg) {
-  endSCFG();
+  Scope->exitCFG();
+  endCFG();
   Scfg->renumber();
   return Scfg;
 }
@@ -65,13 +61,13 @@ BasicBlock* CopyReducer::reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
 
 // Create new blocks on demand, as we encounter jumps to them.
 BasicBlock* CopyReducer::reduceWeak(BasicBlock *B) {
-  auto *B2 = BlockMap[B->blockID()];
+  auto *B2 = Scope->lookupBlock(B);
   if (!B2) {
     // Create new block, and add all of its Phi nodes to InstructionMap.
     // This has to be done before we process a Goto.
     unsigned Nargs = B->arguments().size();
     B2 = newBlock(Nargs, B->numPredecessors());
-    mapBlock(B, B2);
+    Scope->updateBlockMap(B, B2);
   }
   return B2;
 }

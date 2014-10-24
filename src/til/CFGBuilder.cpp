@@ -24,10 +24,8 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
-SCFG* CFGBuilder::beginSCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
+SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
   assert(!CurrentCFG && !CurrentBB && "Already inside a CFG");
-  assert(InstructionMap.empty());
-  assert(BlockMap.empty());
 
   if (!Cfg) {
     CurrentCFG = new (Arena) SCFG(Arena, 0);
@@ -39,19 +37,15 @@ SCFG* CFGBuilder::beginSCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
     NumInstrs = Cfg->numInstructions();
   }
 
-  BlockMap.resize(NumBlocks, nullptr);
-  InstructionMap.resize(NumInstrs, nullptr);
   return CurrentCFG;
 }
 
 
-void CFGBuilder::endSCFG() {
+void CFGBuilder::endCFG() {
   assert(CurrentCFG && "Not inside a CFG.");
   // assert(!CurrentBB && "Never finished the last block.");
 
   CurrentCFG = nullptr;
-  BlockMap.clear();
-  InstructionMap.clear();
 }
 
 
@@ -102,23 +96,6 @@ void CFGBuilder::endBlock(Terminator *Term) {
   CurrentArgs.clear();
   CurrentInstrs.clear();
   CurrentBB = nullptr;
-}
-
-
-/// Add block to blockmap, and add its arguments to InstructionMap.
-void CFGBuilder::mapBlock(BasicBlock *B, BasicBlock *B2) {
-  // Create a map from B1 to B2
-  BlockMap[B->blockID()] = B2;
-
-  // Create a map from the arguments of B1 to the arguments of B2
-  unsigned Nargs = B->arguments().size();
-  assert(Nargs == B2->arguments().size() && "Block arguments don't match.");
-
-  for (unsigned i = 0; i < Nargs; ++i) {
-    Phi *Ph = B->arguments()[i];
-    if (Ph && Ph->instrID() > 0)
-      InstructionMap[Ph->instrID()] = B2->arguments()[i];
-  }
 }
 
 
@@ -193,12 +170,12 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
 
 // This is a really a reducer method, not a builder method,
 // But it's shared between CopyReducer and InplaceReducer.
-void CFGBuilder::rewritePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
+void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
   // First find whatever Ph was rewritten to.
-  Phi *Ph = dyn_cast_or_null<Phi>(InstructionMap[Orig.instrID()]);
+  Phi *Ph = dyn_cast_or_null<Phi>(Ne);
   if (Ph && Ph->block() == NG->targetBlock()) {
-    // The blocks match, so we know that Orig was rewritten to Ph.
-    // (It might have been eliminated by rewriting to something else.)
+    // The blocks match, so we know that Ph is a rewritten Phi node.
+    // (The original might have been eliminated by rewriting to something else.)
     unsigned j = NG->phiIndex();
     Ph->values().resize(j+1, Arena, nullptr);  // Make room if we need to.
     if (!OverwriteInstructions)

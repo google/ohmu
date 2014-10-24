@@ -40,10 +40,10 @@ struct PendingBlock {
   SExpr*      expr;
   BasicBlock* block;
   BasicBlock* continuation;
-  std::unique_ptr<VarContext> ctx;
+  std::unique_ptr<ScopeFrame> scope;
 
-  PendingBlock(SExpr *e, BasicBlock *b, VarContext* c)
-    : expr(e), block(b), continuation(nullptr), ctx(c)
+  PendingBlock(SExpr *e, BasicBlock *b, ScopeFrame* s)
+    : expr(e), block(b), continuation(nullptr), scope(s)
   { }
 };
 
@@ -72,8 +72,8 @@ public:
   // additional basic blocks.
   SExpr* traverseIfThenElse(IfThenElse *e, TraversalKind k);
 
-  SCFG* beginSCFG(SCFG *Cfg, unsigned NBlocks=0, unsigned NInstrs=0) override;
-  void  endSCFG() override;
+  SCFG* beginCFG(SCFG *Cfg, unsigned NBlocks=0, unsigned NInstrs=0) override;
+  void  endCFG() override;
 
   /// Lower e by building CFGs for all code blocks.
   static SExpr* lower(SExpr *e, MemRegionRef a);

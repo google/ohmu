@@ -42,20 +42,17 @@ public:
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
   /// If Cfg is not null, then NumBlocks and NumInstrs are ignored.
-  virtual SCFG* beginSCFG(SCFG *Cfg, unsigned NumBlocks = 0,
-                                     unsigned NumInstrs = 0);
+  virtual SCFG* beginCFG(SCFG *Cfg, unsigned NumBlocks = 0,
+                                    unsigned NumInstrs = 0);
 
   /// Finish working on the current CFG.
-  virtual void endSCFG();
+  virtual void endCFG();
 
   /// Start working on the given basic block.
   virtual void beginBlock(BasicBlock *B);
 
   /// Finish working on the current basic block.
   virtual void endBlock(Terminator *Term);
-
-  /// Map B->B2 in BlockMap, and map their arguments in InstructionMap.
-  virtual void mapBlock(BasicBlock *B, BasicBlock *B2);
 
   /// Handle futures that are inserted into the instruction stream.
   virtual void handleFutureInstr(Instruction** Iptr, Future* F) { }
@@ -91,7 +88,7 @@ public:
 
   /// Utility function for rewriting phi nodes.
   /// Implementation of handlePhiArg used by CopyReducer and InplaceReducer.
-  void rewritePhiArg(Phi &Orig, Goto *NG, SExpr *Res);
+  void rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res);
 
   CFGBuilder()
     : OverwriteArguments(false), OverwriteInstructions(false),
@@ -112,9 +109,6 @@ protected:
   BasicBlock*                CurrentBB;
   std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
-
-  std::vector<SExpr*>        InstructionMap;  //< map old to new instrs
-  std::vector<BasicBlock*>   BlockMap;        //< map old to new blocks
 };
 
 

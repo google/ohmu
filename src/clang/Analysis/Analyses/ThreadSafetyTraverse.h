@@ -771,7 +771,7 @@ typename C::CType Function::compare(const Function* E, C& Cmp) const {
     return Ct;
   Cmp.enterScope(variableDecl(), E->variableDecl());
   Ct = Cmp.compare(body(), E->body());
-  Cmp.leaveScope();
+  Cmp.exitScope();
   return Ct;
 }
 
@@ -779,7 +779,7 @@ template <class C>
 typename C::CType SFunction::compare(const SFunction* E, C& Cmp) const {
   Cmp.enterScope(variableDecl(), E->variableDecl());
   typename C::CType Ct = Cmp.compare(body(), E->body());
-  Cmp.leaveScope();
+  Cmp.exitScope();
   return Ct;
 }
 
@@ -1002,7 +1002,7 @@ typename C::CType Let::compare(const Let* E, C& Cmp) const {
     return Ct;
   Cmp.enterScope(variableDecl(), E->variableDecl());
   Ct = Cmp.compare(body(), E->body());
-  Cmp.leaveScope();
+  Cmp.exitScope();
   return Ct;
 }
 
@@ -1013,7 +1013,7 @@ typename C::CType Letrec::compare(const Letrec* E, C& Cmp) const {
     return Ct;
   Cmp.enterScope(variableDecl(), E->variableDecl());
   Ct = Cmp.compare(body(), E->body());
-  Cmp.leaveScope();
+  Cmp.exitScope();
   return Ct;
 }
 
@@ -1052,7 +1052,7 @@ public:
 
   // TODO -- handle alpha-renaming of variables
   void enterScope(const VarDecl* V1, const VarDecl* V2) { }
-  void leaveScope() { }
+  void exitScope() { }
 
   bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;
@@ -1092,7 +1092,7 @@ public:
 
   // TODO -- handle alpha-renaming of variables
   void enterScope(const VarDecl* V1, const VarDecl* V2) { }
-  void leaveScope() { }
+  void exitScope() { }
 
   bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;

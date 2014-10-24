@@ -41,8 +41,7 @@ struct SSABlockInfo {
 
 
 class SSAPass : public InplaceReducer,
-                public Traversal<SSAPass, SExprReducerMap>,
-                public DefaultScopeHandler<SExprReducerMap> {
+                public Traversal<SSAPass, SExprReducerMap> {
 public:
   static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
     SSAPass Pass(A);

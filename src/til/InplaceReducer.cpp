@@ -21,5 +21,19 @@ namespace ohmu {
 
 using namespace clang::threadSafety::til;
 
+SCFG* InplaceReducer::reduceSCFG_Begin(SCFG &Orig) {
+  beginCFG(&Orig);
+  Scope->enterCFG(&Orig, &Orig);
+  return &Orig;
+}
+
+
+SCFG* InplaceReducer::reduceSCFG_End(SCFG* Scfg) {
+  Scope->exitCFG();
+  endCFG();
+  Scfg->renumber();
+  return Scfg;
+}
+
 
 }  // end namespace ohmu

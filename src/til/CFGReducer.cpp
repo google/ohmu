@@ -26,17 +26,17 @@ using namespace clang::threadSafety::til;
 /// A Future which creates a new CFG from the traversal.
 class CFGFuture : public LazyCopyFuture<CFGReducer> {
 public:
-  CFGFuture(SExpr* E, CFGReducer* R, VarContext* VCtx)
-      : LazyCopyFuture(E, R, VCtx)
+  CFGFuture(SExpr* e, CFGReducer* r, ScopeFrame* s)
+      : LazyCopyFuture(e, r, s)
   { }
 
   virtual SExpr* traversePending() override {
-    Reducer->beginSCFG(nullptr);
-    Reducer->VarCtx = std::move(this->VarCtx);
+    Reducer->beginCFG(nullptr);
+    Reducer->Scope = std::move(this->Scope);
     Reducer->traverse(PendingExpr, TRV_Tail);
-    auto *Res = Reducer->currentCFG();
-    Reducer->endSCFG();
-    return Res;
+    auto *res = Reducer->currentCFG();
+    Reducer->endCFG();
+    return res;
   }
 };
 
@@ -121,7 +121,7 @@ SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
   // If we're not in a CFG, then evaluate body in a Future that creates one.
   // Otherwise set the body to null; it will be handled as a pending block.
   if (!currentCFG()) {
-    auto* nb = new (Arena) CFGFuture(e->body(), this, VarCtx->clone());
+    auto* nb = new (Arena) CFGFuture(e->body(), this, Scope->clone());
     FutureQueue.push(nb);
     return self()->reduceCode(*e, nt, nb);
   }
@@ -137,28 +137,33 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   // Code blocks inside a CFG will be lowered to basic blocks.
   // Function arguments will become phi nodes in the block.
   unsigned nargs = 0;
-  unsigned sz = varCtx().size();
-  while (nargs < sz && varCtx()[nargs]->kind() == VarDecl::VK_Fun)
-    ++nargs;
+  unsigned sz = scope().numVars();
+  while (nargs < sz) {
+    VarDecl* vd = scope().varDecl(nargs);
+    if (vd && vd->kind() == VarDecl::VK_Fun)
+      ++nargs;
+    else
+      break;
+  }
 
   // TODO: right now, we assume that all local functions will become blocks.
   // Eventually, we'll need to handle proper nested lambdas.
 
   // Create a new block.
   BasicBlock *b = newBlock(nargs);
-  // Clone the current context, but replace function parameters with phi nodes
-  // in the new block.
-  VarContext* nvc = varCtx().clone();
+  // Clone the current context, but replace function parameters with
+  // let-variables that refer to Phi nodes in the new block.
+  ScopeFrame* ns = scope().clone();
   for (unsigned i = 0; i < nargs; ++i) {
     unsigned j   = nargs-1-i;
-    StringRef nm = varCtx()[j]->name();
+    StringRef nm = scope().varDecl(j)->name();
     b->arguments()[i]->setInstrName(nm);
-    (*nvc)[j] = new (Arena) VarDecl(nm, b->arguments()[i]);
+    ns->setVar(j, new (Arena) VarDecl(nm, b->arguments()[i]));
   }
 
   // Add pb to the array of pending blocks.
   // It will not be enqueued until we see a call to the block.
-  auto* pb = new PendingBlock(orig.body(), b, nvc);
+  auto* pb = new PendingBlock(orig.body(), b, ns);
   pendingBlocks_.emplace_back(std::unique_ptr<PendingBlock>(pb));
 
   // Create a code expr, and add it to the code map.
@@ -173,10 +178,11 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
   StringRef s = orig.name();
 
   // Search backward through the context until we find a match.
-  for (unsigned i=0,n=VarCtx->size(); i < n; ++i) {
-    VarDecl* vd = (*VarCtx)[i];
+  for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
+    VarDecl* vd = scope().varDecl(i);
     if (!vd)
       continue;
+
     if (vd->name() == s) {
       // Translate identifier to a named variable.
       if (vd->kind() == VarDecl::VK_Let ||
@@ -258,7 +264,7 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
 
 void CFGReducer::traversePendingBlocks() {
   // Save the current context.
-  std::unique_ptr<VarContext> oldVarCtx = std::move(VarCtx);
+  std::unique_ptr<ScopeFrame> oldScope = std::move(Scope);
 
   // Process pending blocks.
   while (!pendingBlockQueue_.empty()) {
@@ -272,7 +278,7 @@ void CFGReducer::traversePendingBlocks() {
     // TILDebugPrinter::print(pb->expr, std::cerr);
     // std::cerr << "\n";
 
-    VarCtx = std::move(pb->ctx);
+    Scope = std::move(pb->scope);
     setContinuation(pb->continuation);
     beginBlock(pb->block);
     SExpr *e = pb->expr;
@@ -280,7 +286,7 @@ void CFGReducer::traversePendingBlocks() {
     traverse(e, TRV_Tail);  // may invalidate pb
 
     setContinuation(nullptr);
-    VarCtx = nullptr;
+    Scope = nullptr;
   }
 
   // Delete all pending blocks.
@@ -289,20 +295,20 @@ void CFGReducer::traversePendingBlocks() {
   codeMap_.shrink_and_clear();
 
   // Restore the current context.
-  VarCtx = std::move(oldVarCtx);
+  Scope = std::move(oldScope);
 }
 
 
 
-SCFG* CFGReducer::beginSCFG(SCFG *Cfg, unsigned NBlocks, unsigned NInstrs) {
-  CopyReducer::beginSCFG(Cfg, NBlocks, NInstrs);
+SCFG* CFGReducer::beginCFG(SCFG *Cfg, unsigned NBlocks, unsigned NInstrs) {
+  CopyReducer::beginCFG(Cfg, NBlocks, NInstrs);
   beginBlock(currentCFG()->entry());
   setContinuation(currentCFG()->exit());
   return currentCFG();
 }
 
 
-void CFGReducer::endSCFG() {
+void CFGReducer::endCFG() {
   setContinuation(nullptr);
   traversePendingBlocks();
 
@@ -312,7 +318,7 @@ void CFGReducer::endSCFG() {
 
   currentCFG()->computeNormalForm();
   SCFG* Scfg = currentCFG();
-  CopyReducer::endSCFG();
+  CopyReducer::endCFG();
 
   //std::cerr << "\n===== Normalized ======\n";
   //TILDebugPrinter::print(Scfg, std::cerr);

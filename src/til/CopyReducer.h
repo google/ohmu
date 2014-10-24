@@ -31,7 +31,7 @@
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 #include "til/CFGBuilder.h"
-#include "til/VarContext.h"
+#include "til/Scope.h"
 
 #include <cstddef>
 #include <memory>
@@ -50,13 +50,11 @@ using namespace clang::threadSafety::til;
 class CopyReducer : public CFGBuilder, public ScopeHandler {
 public:
   SExpr* reduceWeak(Instruction* E) {
-    return InstructionMap[E->instrID()];
+    return Scope->lookupInstr(E);
   }
-
   VarDecl* reduceWeak(VarDecl *E) {
-    return VarCtx->map(E->varIndex());
+    return dyn_cast_or_null<VarDecl>(Scope->lookupVar(E));
   }
-
   BasicBlock* reduceWeak(BasicBlock *E);
 
   // This is a non-destructive rewrite; just return the result.
@@ -67,15 +65,14 @@ public:
     E->slots().push_back(Res);
   }
   void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(Orig, NG, Res);
+    rewritePhiArg(Scope->lookupInstr(&Orig), NG, Res);
   }
   void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (OverwriteArguments && Orig.instrID() > 0)
-      InstructionMap[Orig.instrID()] = Res;
+    if (OverwriteArguments)
+      scope().updateInstructionMap(&Orig, Res);
   }
   void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    if (Orig.instrID() > 0)
-      InstructionMap[Orig.instrID()] = Res;
+    scope().updateInstructionMap(&Orig, Res);
   }
   void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
     /* BlockMap updated by reduceWeak(BasicBlock). */
@@ -178,6 +175,7 @@ public:
   Branch* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return newBranch(C, B0, B1);
   }
+
   Return* reduceReturn(Return &O, SExpr* E) {
     auto *Rt = new (Arena) Return(O, E);
     endBlock(Rt);
@@ -222,13 +220,13 @@ public:
 template<class Visitor>
 class LazyCopyFuture : public Future {
 public:
-  LazyCopyFuture(SExpr* E, Visitor* R, VarContext* VCtx)
-    : PendingExpr(E), Reducer(R), VarCtx(VCtx)
+  LazyCopyFuture(SExpr* E, Visitor* R, ScopeFrame* S)
+    : PendingExpr(E), Reducer(R), Scope(S)
   { }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* traversePending() {
-    Reducer->VarCtx = std::move(this->VarCtx);
+    Reducer->Scope = std::move(this->Scope);
     return Reducer->traverse(PendingExpr, TRV_Tail);
   }
 
@@ -248,7 +246,7 @@ public:
 protected:
   SExpr*    PendingExpr;                // The expression to be rewritten
   Visitor*  Reducer;                    // The reducer object.
-  std::unique_ptr<VarContext> VarCtx;   // The context in which it occurs
+  std::unique_ptr<ScopeFrame> Scope;    // The context in which it occurs
 };
 
 
@@ -265,7 +263,7 @@ public:
   /// Default implementation works for LazyFuture; override for other types.
   FutureType* makeFuture(SExpr *E) {
     auto *F = new (self()->Arena)
-      FutureType(E, self(), self()->VarCtx->clone());
+      FutureType(E, self(), self()->Scope->clone());
     FutureQueue.push(F);
     return F;
   }

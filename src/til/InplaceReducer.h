@@ -31,6 +31,7 @@
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 #include "til/CFGBuilder.h"
+#include "til/Scope.h"
 
 
 namespace ohmu {
@@ -43,7 +44,7 @@ using namespace clang::threadSafety::til;
 ///
 /// It is intended to be used as a basic class for destructive in-place
 /// transformations.
-class InplaceReducer : public CFGBuilder {
+class InplaceReducer : public CFGBuilder, public ScopeHandler {
 public:
   // Destructively update SExprs by writing back results.
   template <class T>
@@ -60,29 +61,26 @@ public:
     /* Slots can only be replaced with themselves. */
   }
   void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(Orig, NG, Res);
+    rewritePhiArg(scope().lookupInstr(&Orig), NG, Res);
   }
   void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (Orig.instrID() > 0)
-      InstructionMap[Orig.instrID()] = Res;
+    if (OverwriteArguments)
+      scope().updateInstructionMap(&Orig, Res);
   }
   void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    if (Orig.instrID() > 0)
-      InstructionMap[Orig.instrID()] = Res;
+    scope().updateInstructionMap(&Orig, Res);
   }
   void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
     /* Blocks can only be replaced with themselves. */
   }
 
-  SExpr* reduceWeak(Instruction* I) {
-    return InstructionMap[I->instrID()];
-  }
-  VarDecl* reduceWeak(VarDecl *E) { return E; }
-  Slot*    reduceWeak(Slot *S)    { return S; }
+  SExpr*   reduceWeak(Instruction* I) { return scope().lookupInstr(I); }
+  VarDecl* reduceWeak(VarDecl *E)     { return E; }
+  Slot*    reduceWeak(Slot *S)        { return S; }
 
   BasicBlock* reduceWeak(BasicBlock *B) {
-    if (!BlockMap[B->blockID()])
-      mapBlock(B, B);   // Update InstructionMap for B
+    if (!Scope->lookupBlock(B))
+      Scope->updateBlockMap(B, B);
     return B;
   }
 
@@ -157,18 +155,14 @@ public:
     beginBlock(&Orig);
     return &Orig;
   }
+
   BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
     endBlock(cast<Terminator>(Term));
     return B;
   }
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig) {
-    return beginSCFG(&Orig);
-  }
-  SCFG* reduceSCFG_End(SCFG* Scfg) {
-    endSCFG();
-    return Scfg;
-  }
+  SCFG* reduceSCFG_Begin(SCFG &Orig);
+  SCFG* reduceSCFG_End(SCFG* Scfg);
 
   SExpr* reduceUndefined(Undefined &Orig) { return &Orig; }
   SExpr* reduceWildcard(Wildcard &Orig)   { return &Orig; }

@@ -5,8 +5,8 @@ add_library(tilpasslib STATIC
   CFGReducer.cpp
   CopyReducer.cpp
   InplaceReducer.cpp
+  Scope.cpp
   SSAPass.cpp
-  VarContext.cpp
 )
 
 target_link_libraries(tilpasslib base ohmu_til)
