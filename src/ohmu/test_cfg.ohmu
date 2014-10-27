@@ -264,13 +264,22 @@ testPhiNodeRewriting(i: Int, j: Int): Int -> {
 testDualRecursion(n: Int): Int -> {
   letrec r = struct {
     foo(i: Int, total: Int): Int -> {
-      if (i == 0) then total else r.bar(i-1, total+1);
+      if (i == 0) then total else r.bar(i-1, total+i);
     };
     bar(j: Int, total: Int): Int -> {
-      if (j == 0) then total else r.foo(j-1, total*2);
+      if (j == 0) then total else r.foo(j-1, total+j);
     };
   };
   if (n % 2 == 0) then r.bar(100, 0) else r.foo(100, 0);
 };
 
+
+// Test simple module.
+module = \@self struct {
+  foo(i: Int): Int ->
+    if (i == 0) then 0 else i + bar(i-1);
+
+  bar(j: Int): Int ->
+    if (j == 0) then 0 else j + foo(j-1);
+};
 
