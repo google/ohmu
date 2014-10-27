@@ -32,7 +32,7 @@ struct ValueType {
     BT_Int,
     BT_Float,
     BT_String,    // String literals
-    BT_Pointer,
+    BT_Pointer,   // Base type for all pointers
     BT_ValueRef
   };
 
@@ -50,6 +50,13 @@ struct ValueType {
 
   template <class T>
   inline static ValueType getValueType();
+
+  // Encode as 32-bit integer
+  inline unsigned asInt32() {
+    return (VectSize << 24) | (Signed << 16) | (Size << 8) | Base;
+  }
+
+  const char* getTypeName();
 
   ValueType(BaseType B, SizeType Sz, bool S, unsigned char VS)
       : Base(B), Size(Sz), Signed(S), VectSize(VS)

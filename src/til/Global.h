@@ -30,11 +30,14 @@ using namespace clang::threadSafety::til;
 class Global {
 public:
   Global()
-      : GlobalRec(nullptr), GlobalSFun(nullptr), StringArena(&StringRegion),
+      : GlobalRec(nullptr), GlobalSFun(nullptr),
+        LangArena(&LangRegion), StringArena(&StringRegion),
         ParseArena(&ParseRegion), DefArena(&DefRegion)
   { }
 
   inline SExpr* global() { return GlobalSFun; }
+
+  void createPrelude();
 
   // Add Defs to the set of global, newly parsed definitions.
   void addDefinitions(std::vector<SExpr*> &Defs);
@@ -46,14 +49,17 @@ public:
   void print(std::ostream &SS);
 
 private:
+  MemRegion LangRegion;    // Standard language definitions.
   MemRegion StringRegion;  // Region to hold string constants.
   MemRegion ParseRegion;   // Region for the initial AST produced by the parser.
   MemRegion DefRegion;     // Region for rewritten definitions.
 
   Record    *GlobalRec;
   SFunction *GlobalSFun;
+  std::vector<Slot*> PreludeDefs;
 
 public:
+  MemRegionRef LangArena;
   MemRegionRef StringArena;
   MemRegionRef ParseArena;
   MemRegionRef DefArena;

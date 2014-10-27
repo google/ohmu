@@ -25,15 +25,53 @@ namespace ohmu {
 using namespace clang::threadSafety::til;
 
 
+template<class T>
+inline Slot* scalarTypeSlot(Global &G, StringRef Name) {
+  auto* Ty = new (G.LangArena) ScalarType(ValueType::getValueType<T>());
+  auto* Slt = new (G.ParseArena) Slot(Name, Ty);
+  Slt->setModifier(Slot::SLT_Final);
+  return Slt;
+}
+
+void Global::createPrelude() {
+  PreludeDefs.push_back( scalarTypeSlot<void>     (*this, "Void")   );
+  PreludeDefs.push_back( scalarTypeSlot<bool>     (*this, "Bool")   );
+  PreludeDefs.push_back( scalarTypeSlot<int8_t>   (*this, "Int8")   );
+  PreludeDefs.push_back( scalarTypeSlot<uint8_t>  (*this, "UInt8")  );
+  PreludeDefs.push_back( scalarTypeSlot<int16_t>  (*this, "Int16")  );
+  PreludeDefs.push_back( scalarTypeSlot<uint16_t> (*this, "UInt16") );
+  PreludeDefs.push_back( scalarTypeSlot<int32_t>  (*this, "Int32")  );
+  PreludeDefs.push_back( scalarTypeSlot<uint32_t> (*this, "UInt32") );
+  PreludeDefs.push_back( scalarTypeSlot<int64_t>  (*this, "Int64")  );
+  PreludeDefs.push_back( scalarTypeSlot<uint64_t> (*this, "UInt64") );
+  PreludeDefs.push_back( scalarTypeSlot<float>    (*this, "Float")  );
+  PreludeDefs.push_back( scalarTypeSlot<double>   (*this, "Double") );
+  PreludeDefs.push_back( scalarTypeSlot<StringRef>(*this, "String") );
+  PreludeDefs.push_back( scalarTypeSlot<void*>    (*this, "PointerType") );
+
+  PreludeDefs.push_back( scalarTypeSlot<int32_t>(*this, "Int")  );
+  PreludeDefs.push_back( scalarTypeSlot<int32_t>(*this, "UInt") );
+}
+
+
 void Global::addDefinitions(std::vector<SExpr*>& Defs) {
   assert(GlobalRec == nullptr && "FIXME: support multiple calls.");
 
-  GlobalRec = new (ParseArena) Record(ParseArena, Defs.size());
+  if (PreludeDefs.empty())
+    createPrelude();
+
+  unsigned Sz = PreludeDefs.size() + Defs.size();
+  GlobalRec = new (ParseArena) Record(ParseArena, Sz);
+
+  for (auto *Slt : PreludeDefs) {
+    GlobalRec->slots().push_back(Slt);
+  }
   for (auto *E : Defs) {
     auto *Slt = dyn_cast_or_null<Slot>(E);
     if (Slt)
       GlobalRec->slots().push_back(Slt);
   }
+
   auto *Vd = new (ParseArena) VarDecl("global", nullptr);
   GlobalSFun = new (ParseArena) SFunction(Vd, GlobalRec);
 }

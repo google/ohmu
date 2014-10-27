@@ -230,6 +230,9 @@ public:
   }
   R_Record reduceRecordEnd(R_Record R) { return R; }
 
+  R_SExpr reduceScalarType(ScalarType &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
 
   R_SExpr reduceLiteral(Literal &Orig) {
     return self()->reduceSExpr(Orig);
@@ -470,6 +473,11 @@ MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
     Vs.handleRecordSlot(Nr, Vs.traverse(Slt, TRV_SubExpr));
   }
   return Vs.reduceRecordEnd(Nr);
+}
+
+template<class V>
+MAPTYPE(V::RMap, ScalarType) ScalarType::traverse(V &Vs) {
+  return Vs.reduceScalarType(*this);
 }
 
 
@@ -813,6 +821,11 @@ typename C::CType Record::compare(const Record* E, C& Cmp) const {
       return Ct;
   }
   return Ct;
+}
+
+template <class C>
+typename C::CType ScalarType::compare(const ScalarType* E, C& Cmp) const {
+  return Cmp.compareIntegers(valueType().asInt32(), E->valueType().asInt32());
 }
 
 

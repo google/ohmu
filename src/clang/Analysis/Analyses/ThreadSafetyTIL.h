@@ -162,9 +162,10 @@ public:
   /// Return true if this is a trivial SExpr (constant or variable name).
   bool isTrivial() {
     switch (Opcode) {
-      case COP_Literal:   return true;
-      case COP_Variable:  return true;
-      default:            return false;
+      case COP_ScalarType: return true;
+      case COP_Literal:    return true;
+      case COP_Variable:   return true;
+      default:             return false;
     }
   }
 
@@ -383,6 +384,12 @@ class Slot : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
 
+  enum SlotKind {
+    SLT_Normal   = 0,
+    SLT_Final    = 1,
+    SLT_Override = 2
+  };
+
   Slot(StringRef N, SExpr *D) : SExpr(COP_Slot), Name(N), Definition(D) { }
   Slot(const Slot &S, SExpr *D) : SExpr(S), Name(S.Name), Definition(D) { }
 
@@ -390,6 +397,10 @@ public:
 
   SExpr *definition() { return Definition; }
   const SExpr *definition() const { return Definition; }
+
+  unsigned hasModifier  (SlotKind K) { return (Flags & K) != 0; }
+  void     setModifier  (SlotKind K) { Flags = Flags | K;  }
+  void     clearModifier(SlotKind K) { Flags = Flags & ~K; }
 
   DECLARE_TRAVERSE_AND_COMPARE(Slot)
 
@@ -427,6 +438,25 @@ private:
 
 
 
+/// Simple scalar types, e.g. Int, Float, etc.
+class ScalarType : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
+
+  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
+  ScalarType(const ScalarType &S) : SExpr(S), ValType(S.ValType) { }
+
+  /// Return the type of this instruction
+  ValueType valueType() const { return ValType; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
+
+private:
+  ValueType ValType;
+};
+
+
+
 /// Instructions are expressions with computational effect that can appear
 /// inside basic blocks.
 class Instruction : public SExpr {
@@ -438,11 +468,11 @@ public:
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
 
   Instruction(TIL_Opcode Op, ValueType VT = ValueType::getValueType<void>())
-      : SExpr(Op), ValType(VT), InstrID(0), Depth(0), Block(nullptr),
+      : SExpr(Op), ValType(VT), InstrID(0), StackID(0), Block(nullptr),
         Name("", 0) { }
   Instruction(const Instruction &E)
       : SExpr(E), ValType(E.ValType),
-        InstrID(0), Depth(0), Block(nullptr), Name(E.Name) { }
+        InstrID(0), StackID(0), Block(nullptr), Name(E.Name) { }
 
   /// Return the type of this instruction
   ValueType valueType() const { return ValType; }
@@ -453,7 +483,7 @@ public:
 
   /// Returns the depth of this instruction on the stack.
   /// This is used when interpreting a program using a stack machine.
-  unsigned depth() const { return Depth; }
+  unsigned stackID() const { return StackID; }
 
   /// Returns the block, if this is an instruction in a basic block,
   /// otherwise returns null.
@@ -468,8 +498,8 @@ public:
   /// Set the basic block for this instruction.
   void setBlock(BasicBlock *B) { Block = B; }
 
-  /// Set the depth for this instruction.
-  void setDepth(unsigned D) { Depth = D; }
+  /// Set the stack ID for this instruction.
+  void setStackID(unsigned D) { StackID = D; }
 
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { Name = N; }
@@ -477,7 +507,7 @@ public:
 protected:
   ValueType    ValType;
   unsigned     InstrID;
-  unsigned     Depth;
+  unsigned     StackID;
   BasicBlock*  Block;
   StringRef    Name;
 };

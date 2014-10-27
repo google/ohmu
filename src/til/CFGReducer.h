@@ -50,7 +50,7 @@ struct PendingBlock {
 
 class CFGReducer : public CopyReducer, public LazyCopyTraversal<CFGReducer> {
 public:
-  typedef Traversal<CFGReducer, SExprReducerMap> SuperTv;
+  typedef LazyCopyTraversal<CFGReducer> SuperTv;
 
   BasicBlock* currentContinuation()   { return currentContinuation_; }
   void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }

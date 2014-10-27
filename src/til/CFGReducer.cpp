@@ -198,7 +198,12 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       // Map identifiers to slots for record self-variables.
       auto* sfun = cast<SFunction>(vd->definition());
       if (Record *r = dyn_cast<Record>(sfun->body())) {
-        if (r->findSlot(s)) {
+        if (auto *slt = r->findSlot(s)) {
+          if (slt->hasModifier(Slot::SLT_Final) &&
+              slt->definition()->isTrivial()) {
+            // FIXME!!  This is a hack that should be removed ASAP.
+            return slt->definition();
+          }
           auto* svar = new (Arena) Variable(vd);
           auto* sapp = new (Arena) SApply(svar);
           return new (Arena) Project(sapp, s);

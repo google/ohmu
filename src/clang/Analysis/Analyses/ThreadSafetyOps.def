@@ -22,6 +22,7 @@ TIL_OPCODE_DEF(Code)
 TIL_OPCODE_DEF(Field)
 TIL_OPCODE_DEF(Slot)
 TIL_OPCODE_DEF(Record)
+TIL_OPCODE_DEF(ScalarType)
 
 // CFG constructs
 TIL_OPCODE_DEF(SCFG)
@@ -57,7 +58,7 @@ TIL_OPCODE_DEF(Return)
 TIL_OPCODE_DEF(Future)
 
 
-// pseudo-terms
+// Pseudo-terms
 TIL_OPCODE_DEF(Undefined)
 TIL_OPCODE_DEF(Wildcard)
 

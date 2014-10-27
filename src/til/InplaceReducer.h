@@ -99,6 +99,8 @@ public:
   Record* reduceRecordBegin(Record &Orig)                 { return &Orig; }
   Record* reduceRecordEnd(Record *R)                      { return R; }
 
+  SExpr*  reduceScalarType(ScalarType &Orig)              { return &Orig; }
+
   SExpr* reduceLiteral(Literal &Orig)                     { return &Orig; }
   template<class T>
   SExpr* reduceLiteralT(LiteralT<T> &Orig)                { return &Orig; }

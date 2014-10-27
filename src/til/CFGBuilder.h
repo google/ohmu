@@ -36,6 +36,8 @@ class CFGBuilder {
 public:
   void setArena(MemRegionRef A) { Arena = A; }
 
+  MemRegionRef& arena() { return Arena; }
+
   SCFG*       currentCFG() { return CurrentCFG; }
   BasicBlock* currentBB()  { return CurrentBB;  }
 

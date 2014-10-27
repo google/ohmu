@@ -28,21 +28,6 @@ namespace til {
 // Pretty printer for TIL expressions
 template <typename Self, typename StreamType>
 class PrettyPrinter {
-private:
-  bool Verbose;  // Print out additional information
-  bool CStyle;   // Print exprs in C-like syntax.
-  unsigned Indent;
-
-public:
-  PrettyPrinter(bool V = false, bool CS = true)
-     : Verbose(V), CStyle(CS), Indent(0)
-  {}
-
-  static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
-    Self printer;
-    printer.printSExpr(E, SS, Prec_MAX, Sub);
-  }
-
 protected:
   Self *self() { return reinterpret_cast<Self *>(this); }
 
@@ -74,6 +59,7 @@ protected:
       case COP_Field:      return Prec_Decl;
       case COP_Slot:       return Prec_Decl;
       case COP_Record:     return Prec_Atom;
+      case COP_ScalarType: return Prec_Atom;
 
       case COP_Literal:    return Prec_Atom;
       case COP_Variable:   return Prec_Atom;
@@ -162,6 +148,10 @@ protected:
 
   void printNull(StreamType &SS) {
     SS << "#null";
+  }
+
+  void printScalarType(const ScalarType *E, StreamType &SS) {
+    SS << E->valueType().getTypeName();
   }
 
   template<class T>
@@ -648,9 +638,15 @@ protected:
 
   void printFuture(const Future *E, StreamType &SS) {
     if (E->maybeGetResult()) {
-      SS << "#f(";
-      self()->printSExpr(E->maybeGetResult(), SS, Prec_MAX);
-      SS << ")";
+      if (Verbose) {
+        SS << "#f(";
+        self()->printSExpr(E->maybeGetResult(), SS, Prec_MAX);
+        SS << ")";
+      }
+      else {
+        // Hack -- we assume decl precedence for all lazy positions.
+        self()->printSExpr(E->maybeGetResult(), SS, Prec_Decl);
+      }
     }
     else
       SS << "#future";
@@ -663,6 +659,22 @@ protected:
   void printWildcard(const Wildcard *E, StreamType &SS) {
     SS << "*";
   }
+
+
+public:
+  PrettyPrinter(bool V = false, bool CS = true)
+     : Verbose(V), CStyle(CS), Indent(0)
+  {}
+
+  static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
+    Self printer;
+    printer.printSExpr(E, SS, Prec_MAX, Sub);
+  }
+
+private:
+  bool Verbose;  // Print out additional information
+  bool CStyle;   // Print exprs in C-like syntax.
+  unsigned Indent;
 };
 
 

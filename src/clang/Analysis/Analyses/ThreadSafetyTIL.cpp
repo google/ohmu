@@ -16,6 +16,44 @@ namespace threadSafety {
 namespace til {
 
 
+const char* ValueType::getTypeName() {
+  switch (Base) {
+    case BT_Void: return "Void";
+    case BT_Bool: return "Bool";
+    case BT_Int: {
+      switch (Size) {
+      case ST_8:
+        if (Signed) return "Int8";
+        else        return "UInt8";
+      case ST_16:
+        if (Signed) return "Int16";
+        else        return "UInt16";
+      case ST_32:
+        if (Signed) return "Int32";
+        else        return "UInt32";
+      case ST_64:
+        if (Signed) return "Int64";
+        else        return "UInt64";
+      default:
+        break;
+      }
+    }
+    case BT_Float: {
+      switch (Size) {
+      case ST_32: return "Float";
+      case ST_64: return "Double";
+      default:
+        break;
+      }
+    }
+    case BT_String:   return "String";
+    case BT_Pointer:  return "PointerType";
+    case BT_ValueRef: return "ValueType";
+  }
+  return "InvalidType";
+}
+
+
 StringRef getOpcodeString(TIL_Opcode Op) {
   switch (Op) {
 #define TIL_OPCODE_DEF(X)                                                   \

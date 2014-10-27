@@ -105,6 +105,9 @@ public:
   }
   Record* reduceRecordEnd(Record *R) { return R; }
 
+  SExpr*  reduceScalarType(ScalarType &Orig) {
+    return &Orig;  // Scalar types are globally defined; we share pointers.
+  }
 
   Literal* reduceLiteral(Literal &Orig) {
     return new (Arena) Literal(Orig);
@@ -259,16 +262,15 @@ public:
   /// Factory method to create a future in the current context.
   /// Default implementation works for LazyFuture; override for other types.
   FutureType* makeFuture(SExpr *E) {
-    auto *F = new (self()->Arena)
+    auto *F = new (self()->arena())
       FutureType(E, self(), self()->Scope->clone());
     FutureQueue.push(F);
     return F;
   }
 
   /// Traverse E, returning a future if K == TRV_Lazy.
-  template<class T>
-  MAPTYPE(SExprReducerMap, T) traverse(SExpr *E, TraversalKind K) {
-    if (K == TRV_Lazy)
+  MAPTYPE(SExprReducerMap, SExpr) traverse(SExpr *E, TraversalKind K) {
+    if (K == TRV_Lazy || K == TRV_Type)
       return self()->makeFuture(E);
     return SuperTv::traverse(E, K);
   }
