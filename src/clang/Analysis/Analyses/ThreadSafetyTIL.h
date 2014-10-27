@@ -139,7 +139,6 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
 
 
 
-
 /// Macro for the ugly template return type of SExpr::traverse
 #define MAPTYPE(R, X) typename R::template TypeMap<X>::Ty
 
@@ -149,6 +148,7 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
                                                               \
   template <class C>                                          \
   typename C::CType compare(const X* E, C& Cmp) const;
+
 
 
 class BasicBlock;
