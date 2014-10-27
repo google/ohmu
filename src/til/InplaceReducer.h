@@ -102,7 +102,6 @@ public:
   SExpr* reduceLiteral(Literal &Orig)                     { return &Orig; }
   template<class T>
   SExpr* reduceLiteralT(LiteralT<T> &Orig)                { return &Orig; }
-  SExpr* reduceLiteralPtr(LiteralPtr &Orig)               { return &Orig; }
   SExpr* reduceVariable(Variable &Orig, VarDecl* VD)      { return &Orig; }
 
   SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1)   { return &Orig; }

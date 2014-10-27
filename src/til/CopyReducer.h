@@ -113,9 +113,6 @@ public:
   LiteralT<T>* reduceLiteralT(LiteralT<T> &Orig) {
     return new (Arena) LiteralT<T>(Orig);
   }
-  LiteralPtr* reduceLiteralPtr(LiteralPtr &Orig) {
-    return new (Arena) LiteralPtr(Orig);
-  }
   Variable* reduceVariable(Variable &Orig, VarDecl* VD) {
     return new (Arena) Variable(Orig, VD);
   }

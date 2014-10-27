@@ -238,9 +238,6 @@ public:
   R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
     return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceLiteralPtr(LiteralPtr &Orig) {
-    return self()->reduceSExpr(Orig);
-  }
   R_SExpr reduceVariable(Variable &Orig, R_VarDecl VD) {
     return self()->reduceSExpr(Orig);
   }
@@ -529,11 +526,6 @@ MAPTYPE(V::RMap, Literal) Literal::traverse(V &Vs) {
     break;
   }
   return Vs.reduceLiteral(*this);
-}
-
-template <class V>
-MAPTYPE(V::RMap, LiteralPtr) LiteralPtr::traverse(V &Vs) {
-  return Vs.reduceLiteralPtr(*this);
 }
 
 template<class V>
@@ -828,11 +820,6 @@ template <class C>
 typename C::CType Literal::compare(const Literal* E, C& Cmp) const {
   // TODO: defer actual comparison to LiteralT
   return Cmp.trueResult();
-}
-
-template <class C>
-typename C::CType LiteralPtr::compare(const LiteralPtr* E, C& Cmp) const {
-  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
 }
 
 template <class C>

@@ -30,7 +30,6 @@ TIL_OPCODE_DEF(BasicBlock)
 
 // Instructions
 TIL_OPCODE_DEF(Literal)
-TIL_OPCODE_DEF(LiteralPtr)
 TIL_OPCODE_DEF(Variable)
 
 // Paths

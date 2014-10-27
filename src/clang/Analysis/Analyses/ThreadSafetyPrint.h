@@ -76,7 +76,6 @@ protected:
       case COP_Record:     return Prec_Atom;
 
       case COP_Literal:    return Prec_Atom;
-      case COP_LiteralPtr: return Prec_Atom;
       case COP_Variable:   return Prec_Atom;
       case COP_Apply:      return Prec_Postfix;
       case COP_SApply:     return Prec_Postfix;
@@ -247,10 +246,6 @@ protected:
       return;
     }
     }
-  }
-
-  void printLiteralPtr(const LiteralPtr *E, StreamType &SS) {
-    SS << E->clangDecl()->getNameAsString();
   }
 
   void printVariable(const Variable *E, StreamType &SS) {

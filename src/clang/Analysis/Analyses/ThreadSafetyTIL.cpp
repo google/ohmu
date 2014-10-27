@@ -96,79 +96,6 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
 }
 
 
-// If E is a variable, then trace back through any aliases or redundant
-// Phi nodes to find the canonical definition.
-const SExpr *getCanonicalVal(const SExpr *E) {
-  while (true) {
-    if (auto *V = dyn_cast<VarDecl>(E)) {
-      if (V->kind() == VarDecl::VK_Let) {
-        E = V->definition();
-        continue;
-      }
-    }
-    if (const Phi *Ph = dyn_cast<Phi>(E)) {
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        continue;
-      }
-    }
-    break;
-  }
-  return E;
-}
-
-
-// If E is a variable, then trace back through any aliases or redundant
-// Phi nodes to find the canonical definition.
-// The non-const version will simplify incomplete Phi nodes.
-SExpr *simplifyToCanonicalVal(SExpr *E) {
-  while (true) {
-    if (auto *V = dyn_cast<VarDecl>(E)) {
-      if (V->kind() != VarDecl::VK_Let)
-        return V;
-      // Eliminate redundant variables, e.g. x = y, or x = 5,
-      // but keep anything more complicated.
-      if (V->definition()->isTrivial()) {
-        E = V->definition();
-        continue;
-      }
-      return V;
-    }
-    if (auto *Ph = dyn_cast<Phi>(E)) {
-      if (Ph->status() == Phi::PH_Incomplete)
-        simplifyIncompleteArg(Ph);
-      // Eliminate redundant Phi nodes.
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        continue;
-      }
-    }
-    return E;
-  }
-}
-
-
-// Trace the arguments of an incomplete Phi node to see if they have the same
-// canonical definition.  If so, mark the Phi node as redundant.
-// getCanonicalVal() will recursively call simplifyIncompletePhi().
-void simplifyIncompleteArg(til::Phi *Ph) {
-  assert(Ph && Ph->status() == Phi::PH_Incomplete);
-
-  // eliminate infinite recursion -- assume that this node is not redundant.
-  Ph->setStatus(Phi::PH_MultiVal);
-
-  SExpr *E0 = simplifyToCanonicalVal(Ph->values()[0]);
-  for (unsigned i=1, n=Ph->values().size(); i<n; ++i) {
-    SExpr *Ei = simplifyToCanonicalVal(Ph->values()[i]);
-    if (Ei == Ph)
-      continue;  // Recursive reference to itself.  Don't count.
-    if (Ei != E0) {
-      return;    // Status is already set to MultiVal.
-    }
-  }
-  Ph->setStatus(Phi::PH_SingleVal);
-}
-
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
 unsigned BasicBlock::renumber(unsigned ID) {
@@ -191,7 +118,7 @@ unsigned BasicBlock::renumber(unsigned ID) {
 
 // Renumber instructions in all blocks
 void SCFG::renumber() {
-  unsigned InstrID = 1;
+  unsigned InstrID = 1;    // ID of 0 means unnumbered.
   unsigned BlockID = 0;
   for (auto *Block : Blocks) {
     InstrID = Block->renumber(InstrID);

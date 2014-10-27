@@ -50,6 +50,8 @@
 // All clang include dependencies for this file must be put in
 // ThreadSafetyUtil.h.
 #include "ThreadSafetyUtil.h"
+#include "ThreadSafetyType.h"
+
 
 #include <stdint.h>
 #include <algorithm>
@@ -136,134 +138,6 @@ StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
 StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
 
 
-/// ValueTypes are data types that can actually be held in registers.
-/// All variables and expressions must have a value type.
-/// Pointer types are further subdivided into the various heap-allocated
-/// types, such as functions, records, etc.
-/// Structured types that are passed by value (e.g. complex numbers)
-/// require special handling; they use BT_ValueRef, and size ST_0.
-struct ValueType {
-  enum BaseType : unsigned char {
-    BT_Void = 0,
-    BT_Bool,
-    BT_Int,
-    BT_Float,
-    BT_String,    // String literals
-    BT_Pointer,
-    BT_ValueRef
-  };
-
-  enum SizeType : unsigned char {
-    ST_0 = 0,
-    ST_1,
-    ST_8,
-    ST_16,
-    ST_32,
-    ST_64,
-    ST_128
-  };
-
-  inline static SizeType getSizeType(unsigned nbytes);
-
-  template <class T>
-  inline static ValueType getValueType();
-
-  ValueType(BaseType B, SizeType Sz, bool S, unsigned char VS)
-      : Base(B), Size(Sz), Signed(S), VectSize(VS)
-  { }
-
-  BaseType      Base;
-  SizeType      Size;
-  bool          Signed;
-  unsigned char VectSize;  // 0 for scalar, otherwise num elements in vector
-};
-
-
-inline ValueType::SizeType ValueType::getSizeType(unsigned nbytes) {
-  switch (nbytes) {
-    case 1: return ST_8;
-    case 2: return ST_16;
-    case 4: return ST_32;
-    case 8: return ST_64;
-    case 16: return ST_128;
-    default: return ST_0;
-  }
-}
-
-template<>
-inline ValueType ValueType::getValueType<void>() {
-  return ValueType(BT_Void, ST_0, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<bool>() {
-  return ValueType(BT_Bool, ST_1, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<int8_t>() {
-  return ValueType(BT_Int, ST_8, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<uint8_t>() {
-  return ValueType(BT_Int, ST_8, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<int16_t>() {
-  return ValueType(BT_Int, ST_16, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<uint16_t>() {
-  return ValueType(BT_Int, ST_16, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<int32_t>() {
-  return ValueType(BT_Int, ST_32, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<uint32_t>() {
-  return ValueType(BT_Int, ST_32, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<int64_t>() {
-  return ValueType(BT_Int, ST_64, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<uint64_t>() {
-  return ValueType(BT_Int, ST_64, false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<float>() {
-  return ValueType(BT_Float, ST_32, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<double>() {
-  return ValueType(BT_Float, ST_64, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<long double>() {
-  return ValueType(BT_Float, ST_128, true, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<StringRef>() {
-  return ValueType(BT_String, getSizeType(sizeof(StringRef)), false, 0);
-}
-
-template<>
-inline ValueType ValueType::getValueType<void*>() {
-  return ValueType(BT_Pointer, getSizeType(sizeof(void*)), false, 0);
-}
 
 
 /// Macro for the ugly template return type of SExpr::traverse
@@ -288,11 +162,10 @@ public:
   /// Return true if this is a trivial SExpr (constant or variable name).
   bool isTrivial() {
     switch (Opcode) {
-      case COP_Literal:    return true;
-      case COP_LiteralPtr: return true;
-      case COP_Variable:   return true;
+      case COP_Literal:   return true;
+      case COP_Variable:  return true;
+      default:            return false;
     }
-    return false;
   }
 
   /// Cast this SExpr to a CFG instruction, or return null if it is not one.
@@ -651,27 +524,6 @@ public:
 
 private:
   T Val;
-};
-
-
-/// A Literal pointer to an object allocated in memory.
-/// At compile time, pointer literals are represented by symbolic names.
-class LiteralPtr : public Instruction {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_LiteralPtr; }
-
-  LiteralPtr(const clang::ValueDecl *D)
-     : Instruction(COP_LiteralPtr), Cvdecl(D) { }
-  LiteralPtr(const LiteralPtr &R)
-     : Instruction(R), Cvdecl(R.Cvdecl) { }
-
-  // The clang declaration for the value that this pointer points to.
-  const clang::ValueDecl *clangDecl() const { return Cvdecl; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(LiteralPtr)
-
-private:
-  const clang::ValueDecl *Cvdecl;
 };
 
 
@@ -1622,13 +1474,8 @@ inline bool Goto::isBackEdge() const {
 
 
 
-const SExpr *getCanonicalVal(const SExpr *E);
-SExpr* simplifyToCanonicalVal(SExpr *E);
-void simplifyIncompleteArg(til::Phi *Ph);
-
-
-} // end namespace til
-} // end namespace threadSafety
-} // end namespace clang
+}  // end namespace til
+}  // end namespace threadSafety
+}  // end namespace clang
 
 #endif
