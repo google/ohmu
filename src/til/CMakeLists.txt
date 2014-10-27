@@ -4,6 +4,7 @@ add_library(tilpasslib STATIC
   CFGBuilder.cpp
   CFGReducer.cpp
   CopyReducer.cpp
+  Global.cpp
   InplaceReducer.cpp
   Scope.cpp
   SSAPass.cpp

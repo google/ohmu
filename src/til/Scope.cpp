@@ -1,4 +1,4 @@
-//===- VarContext.cpp ------------------------------------------*- C++ --*-===//
+//===- Scope.cpp -----------------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
 // Licensed under the Apache License, Version 2.0 (the "License");

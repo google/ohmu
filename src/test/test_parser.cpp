@@ -1,4 +1,4 @@
-//===- test_TILParser.cpp --------------------------------------*- C++ --*-===//
+//===- test_parser.cpp -----------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,89 +15,48 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "parser/DefaultLexer.h"
-#include "parser/BNFParser.h"
-#include "parser/TILParser.h"
-#include "til/CFGReducer.h"
+#include "test/Driver.h"
 #include "til/VisitCFG.h"
 
-#include <iostream>
 
 using namespace ohmu;
 using namespace ohmu::parsing;
-using namespace clang::threadSafety;
+using namespace clang::threadSafety::til;
 
-void printSExpr(til::SExpr* e) {
+
+void printSExpr(SExpr* e) {
   TILDebugPrinter::print(e, std::cout);
 }
 
 
+
 int main(int argc, const char** argv) {
-  DefaultLexer lexer;
-  TILParser tilParser(&lexer);
-
-
-  const char* grammarFileName = "src/grammar/ohmu.grammar";
-  FILE* file = fopen(grammarFileName, "r");
-  if (!file) {
-    std::cout << "File " << grammarFileName << " not found.\n";
-    return -1;
-  }
-
-  BNFParser::initParserFromFile(tilParser, file, false);
-  std::cout << "\n";
-  // if (success)
-  //   tilParser.printSyntax(std::cout);
-
-  fclose(file);
-
-  if (argc == 0)
-    return 0;
-
-  // Read the ohmu file.
-  auto *startRule = tilParser.findDefinition("definitions");
-  if (!startRule) {
-    std::cout << "Grammar does not contain rule named 'definitions'.\n";
-    return -1;
-  }
-
-  file = fopen(argv[1], "r");
-  if (!file) {
-    std::cout << "File " << argv[1] << " not found.\n";
-    return -1;
-  }
-
-  std::cout << "\nParsing " << argv[1] << "...\n";
-  FileStream fs(file);
-  lexer.setStream(&fs);
-  // tilParser.setTrace(true);
-  ParseResult result = tilParser.parse(startRule);
-  if (tilParser.parseError())
-    return -1;
-
-  // Pretty print the parsed ohmu code.
-  auto* v = result.getList<til::SExpr>(TILParser::TILP_SExpr);
-  if (!v) {
-    std::cout << "No definitions found.\n";
+  if (argc == 0) {
+    std::cerr << "No file to parse.\n";
     return 0;
   }
 
+  Global global;
+  Driver driver;
+
+  // Load up the ohmu grammar.
+  bool success = driver.initParser("src/grammar/ohmu.grammar");
+  if (!success)
+    return -1;
+
+  // Parse the ohmu source file.
+  success = driver.parseDefinitions(&global, argv[1]);
+  if (!success)
+    return -1;
+
+  // Convert high-level AST to low-level IR.
+  global.lower();
+  std::cout << "\n------ Ohmu IR ------\n";
+  global.print(std::cout);
+
+  // Find all of the CFGs.
   VisitCFG visitCFG;
-
-  for (SExpr* e : *v) {
-    std::cout << "\n====== Initial AST: ======\n";
-    printSExpr(e);
-    SExpr* e2 = CFGReducer::lower(e, tilParser.arena());
-    std::cout << "\n====== Lowered AST: ======\n";
-    printSExpr(e2);
-    visitCFG.traverse(e2, TRV_Tail);
-    //std::cout << "\n====== Doing SSA Pass: ======\n";
-    //SSAPass::ssaTransform(cfg, tilParser.arena());
-    //printSExpr(cfg);
-  }
-  delete v;
+  visitCFG.traverse(global.global(), TRV_Tail);
 
   std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
   return 0;

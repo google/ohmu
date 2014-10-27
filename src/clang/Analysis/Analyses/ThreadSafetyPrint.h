@@ -301,7 +301,7 @@ protected:
   }
 
   void printSFunction(const SFunction *E, StreamType &SS) {
-    SS << "@";
+    SS << "\\@";
     self()->printVarDecl(E->variableDecl(), SS);
     SS << " ";
     self()->printSExpr(E->body(), SS, Prec_Decl);
