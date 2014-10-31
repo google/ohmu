@@ -186,13 +186,13 @@ public:
   void operator delete(void *) LLVM_DELETED_FUNCTION;
 
 protected:
-  SExpr(TIL_Opcode Op)
-    : Opcode(Op), Reserved(0), Flags(0) {}
+  SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
+    : Opcode(Op), SubOpcode(SubOp), Flags(0) {}
   SExpr(const SExpr &E)
-    : Opcode(E.Opcode), Reserved(0), Flags(E.Flags) {}
+    : Opcode(E.Opcode), SubOpcode(E.SubOpcode), Flags(E.Flags) {}
 
   const unsigned char Opcode;
-  unsigned char Reserved;
+  const unsigned char SubOpcode;
   unsigned short Flags;
 
 private:
@@ -214,9 +214,9 @@ public:
 
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
 
-  Instruction(TIL_Opcode Op, ValueType VT = ValueType::getValueType<void>())
-      : SExpr(Op), ValType(VT), InstrID(0), StackID(0), Block(nullptr),
-        Name("", 0) { }
+  Instruction(TIL_Opcode Op, unsigned char SubOp = 0)
+      : SExpr(Op, SubOp), ValType(ValueType::getValueType<void>()),
+        InstrID(0), StackID(0), Block(nullptr), Name("", 0) { }
   Instruction(const Instruction &E)
       : SExpr(E), ValType(E.ValType),
         InstrID(0), StackID(0), Block(nullptr), Name(E.Name) { }
@@ -275,7 +275,7 @@ class Future : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
 
-  enum FutureStatus {
+  enum FutureStatus : unsigned char {
     FS_pending,
     FS_evaluating,
     FS_done
@@ -397,26 +397,22 @@ class VarDecl : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
 
-  enum VariableKind {
+  enum VariableKind : unsigned char {
     VK_Fun,     ///< Function parameter
     VK_SFun,    ///< SFunction (self) parameter
     VK_Let,     ///< Let-variable
     VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
   };
 
-  VarDecl(StringRef s, SExpr *D)
-      : SExpr(COP_VarDecl), VarIndex(0), Name(s), Definition(D) {
-    Flags = VK_Let;
-  }
+  VarDecl(VariableKind K, StringRef s, SExpr *D)
+      : SExpr(COP_VarDecl, K), VarIndex(0), Name(s), Definition(D) { }
   VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
-      : SExpr(Vd), VarIndex(0), Name(Vd.Name), Definition(D) {
-    Flags = Vd.kind();
-  }
+      : SExpr(Vd), VarIndex(0), Name(Vd.Name), Definition(D) { }
 
   void rewrite(SExpr *D) { Definition.reset(D); }
 
   /// Return the kind of variable (let, function param, or self)
-  VariableKind kind() const { return static_cast<VariableKind>(Flags); }
+  VariableKind kind() const { return static_cast<VariableKind>(SubOpcode); }
 
   /// Return the de-bruin index of the variable.
   unsigned varIndex() const { return VarIndex; }
@@ -430,9 +426,8 @@ public:
   SExpr *definition() { return Definition.get(); }
   const SExpr *definition() const { return Definition.get(); }
 
-  void setVarIndex(unsigned i) { VarIndex = i; }
   void setName(StringRef S)    { Name = S;  }
-  void setKind(VariableKind K) { Flags = K; }
+  void setVarIndex(unsigned i) { VarIndex = i; }
   void setDefinition(SExpr *E) { Definition.reset(E); }
 
   DECLARE_TRAVERSE_AND_COMPARE(VarDecl)
@@ -458,11 +453,11 @@ public:
 
   Function(VarDecl *Vd, SExpr *Bd)
       : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Fun);
+    assert(Vd->kind() == VarDecl::VK_Fun);
   }
   Function(const Function &F, VarDecl *Vd, SExpr *Bd) // rewrite constructor
       : SExpr(F), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Fun);
+    assert(Vd->kind() == VarDecl::VK_Fun);
   }
 
   void rewrite(VarDecl *Vd, SExpr *Bd) {
@@ -493,14 +488,14 @@ public:
 
   SFunction(VarDecl *Vd, SExpr *B)
       : SExpr(COP_SFunction), VDecl(Vd), Body(B) {
+    assert(Vd->kind() == VarDecl::VK_SFun);
     assert(Vd->Definition == nullptr);
-    Vd->setKind(VarDecl::VK_SFun);
     Vd->Definition = this;
   }
   SFunction(const SFunction &F, VarDecl *Vd, SExpr *B) // rewrite constructor
       : SExpr(F), VDecl(Vd), Body(B) {
+    assert(Vd->kind() == VarDecl::VK_SFun);
     assert(Vd->Definition == nullptr);
-    Vd->setKind(VarDecl::VK_SFun);
     Vd->Definition = this;
   }
 
@@ -584,7 +579,7 @@ class Slot : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
 
-  enum SlotKind {
+  enum SlotKind : unsigned short {
     SLT_Normal   = 0,
     SLT_Final    = 1,
     SLT_Override = 2
@@ -666,7 +661,7 @@ class Literal : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
 
-  Literal(ValueType VT) : Instruction(COP_Literal, VT)  { }
+  Literal(ValueType VT) : Instruction(COP_Literal) { ValType = VT; }
   Literal(const Literal &L) : Instruction(L) { }
 
   template<class T> const LiteralT<T>& as() const {
@@ -786,6 +781,8 @@ class Project : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Project; }
 
+  static const short PRJ_Arrow = 0x01;
+
   Project(SExpr *R, StringRef SName)
       : Instruction(COP_Project), Rec(R), SlotName(SName), Cvdecl(nullptr) { }
   Project(SExpr *R, const clang::ValueDecl *Cvd)
@@ -801,10 +798,10 @@ public:
 
   const clang::ValueDecl *clangDecl() const { return Cvdecl; }
 
-  bool isArrow() const { return (Flags & 0x01) != 0; }
+  bool isArrow() const { return (Flags & PRJ_Arrow) != 0; }
   void setArrow(bool b) {
-    if (b) Flags |= 0x01;
-    else Flags &= 0xFFFE;
+    if (b) Flags |= PRJ_Arrow;
+    else Flags &= ~PRJ_Arrow;
   }
 
   StringRef slotName() const {
@@ -848,21 +845,18 @@ class Alloc : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Alloc; }
 
-  enum AllocKind {
-    AK_Stack,
-    AK_Heap
+  enum AllocKind : unsigned char {
+    AK_Local,  // Local variable, which must get lowered to SSA.
+    AK_Stack,  // Stack-allocated structure, which may get lowered to SSA.
+    AK_Heap    // Heap-allocated structure
   };
 
-  Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc), InitExpr(E) {
-    Flags = K;
-  }
-  Alloc(const Alloc &A, SExpr *E) : Instruction(A), InitExpr(E) {
-    Flags = A.kind();
-  }
+  Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc, K), InitExpr(E) { }
+  Alloc(const Alloc &A, SExpr *E) : Instruction(A), InitExpr(E) { }
 
   void rewrite(SExpr *I) { InitExpr.reset(I); }
 
-  AllocKind kind() const { return static_cast<AllocKind>(Flags); }
+  AllocKind kind() const { return static_cast<AllocKind>(SubOpcode); }
 
   SExpr *initializer() { return InitExpr.get(); }
   const SExpr *initializer() const { return InitExpr.get(); }
@@ -998,17 +992,14 @@ class UnaryOp : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_UnaryOp; }
 
-  UnaryOp(TIL_UnaryOpcode Op, SExpr *E) : Instruction(COP_UnaryOp), Expr0(E) {
-    Flags = Op;
-  }
-  UnaryOp(const UnaryOp &U, SExpr *E) : Instruction(U), Expr0(E) {
-    Flags = U.Flags;
-  }
+  UnaryOp(TIL_UnaryOpcode Op, SExpr *E)
+      : Instruction(COP_UnaryOp, Op), Expr0(E) { }
+  UnaryOp(const UnaryOp &U, SExpr *E) : Instruction(U), Expr0(E) { }
 
   void rewrite(SExpr *E) { Expr0.reset(E); }
 
   TIL_UnaryOpcode unaryOpcode() const {
-    return static_cast<TIL_UnaryOpcode>(Flags);
+    return static_cast<TIL_UnaryOpcode>(SubOpcode);
   }
 
   SExpr *expr() { return Expr0.get(); }
@@ -1028,13 +1019,9 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_BinaryOp; }
 
   BinaryOp(TIL_BinaryOpcode Op, SExpr *E0, SExpr *E1)
-      : Instruction(COP_BinaryOp), Expr0(E0), Expr1(E1) {
-    Flags = Op;
-  }
+      : Instruction(COP_BinaryOp, Op), Expr0(E0), Expr1(E1) { }
   BinaryOp(const BinaryOp &B, SExpr *E0, SExpr *E1)
-      : Instruction(B), Expr0(E0), Expr1(E1) {
-    Flags = B.Flags;
-  }
+      : Instruction(B), Expr0(E0), Expr1(E1) { }
 
   void rewrite(SExpr *E0, SExpr *E1) {
     Expr0.reset(E0);
@@ -1042,7 +1029,7 @@ public:
   }
 
   TIL_BinaryOpcode binaryOpcode() const {
-    return static_cast<TIL_BinaryOpcode>(Flags);
+    return static_cast<TIL_BinaryOpcode>(SubOpcode);
   }
 
   SExpr *expr0() { return Expr0.get(); }
@@ -1066,17 +1053,14 @@ class Cast : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Cast; }
 
-  Cast(TIL_CastOpcode Op, SExpr *E) : Instruction(COP_Cast), Expr0(E) {
-      Flags = Op;
-  }
-  Cast(const Cast &C, SExpr *E) : Instruction(C), Expr0(E) {
-      Flags = C.Flags;
-  }
+  Cast(TIL_CastOpcode Op, SExpr *E)
+      : Instruction(COP_Cast, Op), Expr0(E) { }
+  Cast(const Cast &C, SExpr *E) : Instruction(C), Expr0(E) { }
 
   void rewrite(SExpr *E) { Expr0.reset(E); }
 
   TIL_CastOpcode castOpcode() const {
-    return static_cast<TIL_CastOpcode>(Flags);
+    return static_cast<TIL_CastOpcode>(SubOpcode);
   }
 
   SExpr *expr() { return Expr0.get(); }
@@ -1102,7 +1086,7 @@ public:
   // In minimal SSA form, all Phi nodes are MultiVal.
   // During conversion to SSA, incomplete Phi nodes may be introduced, which
   // are later determined to be SingleVal, and are thus redundant.
-  enum Status {
+  enum Status : unsigned short {
     PH_MultiVal = 0, // Phi node has multiple distinct values.  (Normal)
     PH_SingleVal,    // Phi node has one distinct value, and can be eliminated
     PH_Incomplete    // Phi node is incomplete
@@ -1575,10 +1559,10 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Let; }
 
   Let(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Let), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Let);
+    assert(Vd->kind() == VarDecl::VK_Let);
   }
   Let(const Let &L, VarDecl *Vd, SExpr *Bd) : SExpr(L), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Let);
+     assert(Vd->kind() == VarDecl::VK_Let);
   }
 
   void rewrite(VarDecl *Vd, SExpr *B) {
@@ -1607,11 +1591,11 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Letrec; }
 
   Letrec(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Letrec), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Letrec);
+     assert(Vd->kind() == VarDecl::VK_Letrec);
   }
   Letrec(const Letrec &Lr, VarDecl *Vd, SExpr *Bd)
       : SExpr(Lr), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Letrec);
+     assert(Vd->kind() == VarDecl::VK_Letrec);
   }
 
   void rewrite(VarDecl *Vd, SExpr *B) {

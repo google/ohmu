@@ -223,7 +223,8 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_Function: {
       assert(arity == 3);
       Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(copyStr(t->string()), sexpr(1));
+      auto* v = new (arena_) VarDecl(VarDecl::VK_Fun,
+                                     copyStr(t->string()), sexpr(1));
       auto* e = new (arena_) Function(v, sexpr(2));
       delete t;
       return ParseResult(TILP_SExpr, e);
@@ -231,7 +232,8 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_SFunction: {
       assert(arity == 2);
       Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(copyStr(t->string()), nullptr);
+      auto* v = new (arena_) VarDecl(VarDecl::VK_SFun,
+                                     copyStr(t->string()), nullptr);
       auto* e = new (arena_) SFunction(v, sexpr(1));
       delete t;
       return ParseResult(TILP_SExpr, e);
@@ -298,7 +300,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
 
     case TCOP_Alloc: {
       assert(arity == 1);
-      auto* e = new (arena_) Alloc(sexpr(0), Alloc::AK_Stack);
+      auto* e = new (arena_) Alloc(sexpr(0), Alloc::AK_Local);
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Load: {
@@ -350,7 +352,8 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_Let: {
       assert(arity == 3);
       Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(copyStr(t->string()), sexpr(1));
+      auto* v = new (arena_) VarDecl(VarDecl::VK_Let,
+                                     copyStr(t->string()), sexpr(1));
       auto* e = new (arena_) Let(v, sexpr(2));
       delete t;
       return ParseResult(TILP_SExpr, e);
@@ -358,7 +361,8 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_Letrec: {
       assert(arity == 3);
       Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(copyStr(t->string()), sexpr(1));
+      auto* v = new (arena_) VarDecl(VarDecl::VK_Letrec,
+                                     copyStr(t->string()), sexpr(1));
       auto* e = new (arena_) Letrec(v, sexpr(2));
       delete t;
       return ParseResult(TILP_SExpr, e);

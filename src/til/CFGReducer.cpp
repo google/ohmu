@@ -159,7 +159,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
     unsigned j   = nargs-1-i;
     StringRef nm = scope().varDecl(j)->name();
     b->arguments()[i]->setInstrName(nm);
-    ns->setVar(j, new (Arena) VarDecl(nm, b->arguments()[i]));
+    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, nm, b->arguments()[i]));
   }
 
   // Add pb to the array of pending blocks.

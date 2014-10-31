@@ -72,7 +72,7 @@ void Global::addDefinitions(std::vector<SExpr*>& Defs) {
       GlobalRec->slots().push_back(Slt);
   }
 
-  auto *Vd = new (ParseArena) VarDecl("global", nullptr);
+  auto *Vd = new (ParseArena) VarDecl(VarDecl::VK_SFun, "global", nullptr);
   GlobalSFun = new (ParseArena) SFunction(Vd, GlobalRec);
 }
 
