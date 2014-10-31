@@ -53,25 +53,6 @@ public:
 
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
 
-  template <class T>
-  T* handleResult(SExpr** Eptr, T* Res) {
-    if (Future *F = dyn_cast_or_null<Future>(Res))
-      Pending.push_back(PendingFuture(Eptr, F));
-    *Eptr = Res;
-    return Res;
-  }
-
-  void handleFutureInstr(Instruction **Iptr, Future *F) override {
-    Pending.push_back(PendingFuture(Iptr, F));
-  }
-  void handleFuturePhiArg(SExpr **Eptr, Future *F) override {
-    Pending.push_back(PendingFuture(Eptr, F));
-  }
-
-  BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
-  VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
-  Slot*       handleResult(Slot** S,       Slot *Res)       { return Res; }
-
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0);
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1);
   SExpr* reduceLoad(Load &Orig, SExpr* E0);
@@ -83,26 +64,11 @@ protected:
     FutureLoad(Load* L, Alloc* A) : LoadInstr(L), AllocInstr(A) { }
     ~FutureLoad() LLVM_DELETED_FUNCTION;
 
+    /// We don't use evaluate(); FutureLoads are forced manually.
+    SExpr* evaluate() override { return nullptr; }
+
     Load  *LoadInstr;
     Alloc *AllocInstr;
-  };
-
-  // Pointer to a Future object, along with the position where it occurs.
-  // Forcing the future will write the result to the position.
-  struct PendingFuture {
-    PendingFuture(Instruction **Pos, Future *F)
-      : IPos(Pos), Fut(reinterpret_cast<FutureLoad*>(F)), BBInstr(true)
-    { }
-
-    PendingFuture(SExpr **Pos, Future *F)
-      // The cast is safe here because IPos is write-only.
-      : IPos(reinterpret_cast<Instruction**>(Pos)),
-        Fut(reinterpret_cast<FutureLoad*>(F)), BBInstr(false)
-    { }
-
-    Instruction **IPos;   // The location where the future occurs.
-    FutureLoad  *Fut;     // The future.
-    bool        BBInstr;  // True if IPos is a basic block instruction.
   };
 
   // Look up variable in the cache.
@@ -133,8 +99,8 @@ private:
 
   LocalVarMap* CurrentVarMap;
 
-  std::vector<SSABlockInfo>  BInfoMap;  //< Side table for basic blocks.
-  std::vector<PendingFuture> Pending;   //< Loads that need to be rewritten.
+  std::vector<SSABlockInfo> BInfoMap;  //< Side table for basic blocks.
+  std::vector<FutureLoad*>  Pending;   //< Loads that need to be rewritten.
   LocalVarMap VarMapCache;
 };
 

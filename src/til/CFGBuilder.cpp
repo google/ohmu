@@ -73,9 +73,8 @@ void CFGBuilder::endBlock(Terminator *Term) {
   if (CurrentArgs.size() > 0) {
     auto Sz = CurrentBB->arguments().size();
     CurrentBB->arguments().reserve(Sz + CurrentArgs.size(), Arena);
-    for (auto *E : CurrentArgs) {
+    for (auto *E : CurrentArgs)
       CurrentBB->addArgument(E);
-    }
   }
 
   // Overwrite existing instructions with CurrentInstrs, if requested.
@@ -85,11 +84,8 @@ void CFGBuilder::endBlock(Terminator *Term) {
   if (CurrentInstrs.size() > 0) {
     auto Sz = CurrentBB->instructions().size();
     CurrentBB->instructions().reserve(Sz + CurrentInstrs.size(), Arena);
-    for (auto *E : CurrentInstrs) {
+    for (auto *E : CurrentInstrs)
       CurrentBB->addInstruction(E);
-      if (Future *F = dyn_cast<Future>(E))
-        handleFutureInstr(&CurrentBB->instructions().back(), F);
-    }
   }
   CurrentBB->setTerminator(Term);
 
@@ -171,7 +167,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
 // This is a really a reducer method, not a builder method,
 // But it's shared between CopyReducer and InplaceReducer.
 void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
-  // First find whatever Ph was rewritten to.
+  // Ne is what the Phi node was rewritten to.
   Phi *Ph = dyn_cast_or_null<Phi>(Ne);
   if (Ph && Ph->block() == NG->targetBlock()) {
     // The blocks match, so we know that Ph is a rewritten Phi node.
@@ -179,10 +175,8 @@ void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
     unsigned j = NG->phiIndex();
     Ph->values().resize(j+1, Arena, nullptr);  // Make room if we need to.
     if (!OverwriteInstructions)
-      assert(!Ph->values()[j] && "We already handled this node.");
-    Ph->values()[j] = Res;                     // Write the argument into Ph
-    if (Future *F = dyn_cast<Future>(Res))
-      handleFuturePhiArg(&Ph->values()[j], F);
+      assert(!Ph->values()[j].get() && "We already handled this node.");
+    Ph->values()[j].reset(Res);                // Write the argument into Ph
   }
 }
 

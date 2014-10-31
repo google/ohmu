@@ -328,9 +328,9 @@ protected:
   void printRecord(const Record *E, StreamType &SS) {
     SS << "struct {";
     self()->indent();
-    for (Slot* S : E->slots()) {
+    for (auto &S : E->slots()) {
       self()->newline(SS);
-      self()->printSlot(S, SS);
+      self()->printSlot(S.get(), SS);
     }
     self()->unindent();
     self()->newline(SS);
@@ -523,13 +523,13 @@ protected:
   void printPhi(const Phi *E, StreamType &SS) {
     SS << "phi(";
     if (E->status() == Phi::PH_SingleVal)
-      self()->printSExpr(E->values()[0], SS, Prec_MAX);
+      self()->printSExpr(E->values()[0].get(), SS, Prec_MAX);
     else {
       unsigned i = 0;
-      for (auto *V : E->values()) {
+      for (auto &V : E->values()) {
         if (i++ > 0)
           SS << ", ";
-        self()->printSExpr(V, SS, Prec_MAX);
+        self()->printSExpr(V.get(), SS, Prec_MAX);
       }
     }
     SS << ")";
@@ -638,15 +638,9 @@ protected:
 
   void printFuture(const Future *E, StreamType &SS) {
     if (E->maybeGetResult()) {
-      if (Verbose) {
-        SS << "#f(";
-        self()->printSExpr(E->maybeGetResult(), SS, Prec_MAX);
-        SS << ")";
-      }
-      else {
-        // Hack -- we assume decl precedence for all lazy positions.
-        self()->printSExpr(E->maybeGetResult(), SS, Prec_Decl);
-      }
+      SS << "#f(";
+      self()->printSExpr(E->maybeGetResult(), SS, Prec_MAX);
+      SS << ")";
     }
     else
       SS << "#future";

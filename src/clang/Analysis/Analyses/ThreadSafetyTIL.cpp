@@ -99,11 +99,66 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+SExpr* Future::addPosition(SExpr **Eptr) {
+  // If the future has already been forced, return the forced value.
+  if (Status == FS_done)
+    return Result;
+  // Otherwise connect Eptr to this future, and return this future.
+  Positions.push_back(Eptr);
+  return this;
+}
+
+
+void Future::setResult(SExpr *Res) {
+  assert(Status != FS_done && "Future has already been forced.");
+
+  Result = Res;
+  Status = FS_done;
+
+  if (IPos) {
+    // If Res has already been added to a block, then it's a weak reference
+    // to a previously added instruction; ignore it.
+    if (auto *I = dyn_cast<Instruction>(Res)) {
+      if (I->block() == nullptr && !Res->isTrivial()) {
+        I->setBlock(block());
+        *IPos = I;
+      }
+      else {
+        *IPos = nullptr;
+      }
+    }
+  }
+  for (SExpr **Eptr : Positions) {
+    assert(*Eptr == this && "Invalid position for future.");
+    *Eptr = Res;
+  }
+
+  IPos = nullptr;
+  Positions.clear();
+  Positions.shrink_to_fit();
+  assert(Positions.capacity() == 0 && "Memory Leak.");
+}
+
+
+
+SExpr* Future::force() {
+  if (Status == Future::FS_done)
+    return Result;
+  assert(status() == Future::FS_pending && "Infinite loop!");
+
+  Status = FS_evaluating;
+  auto *Res = evaluate();
+  setResult(Res);
+  return Res;
+}
+
+
+
 Slot* Record::findSlot(StringRef S) {
   // FIXME -- look this up in a hash table, please.
-  for (auto* Slt : slots()) {
+  for (auto &Slt : slots()) {
     if (Slt->name() == S)
-      return Slt;
+      return Slt.get();
   }
   return nullptr;
 }
@@ -180,8 +235,8 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (PostDominatorNode.Parent)
     ID = PostDominatorNode.Parent->topologicalSort(Blocks, ID);
 
-  for (auto *Block : successors())
-    ID = Block->topologicalSort(Blocks, ID);
+  for (auto &B : successors())
+    ID = B->topologicalSort(Blocks, ID);
 
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
@@ -205,8 +260,8 @@ int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (DominatorNode.Parent)
     ID = DominatorNode.Parent->postTopologicalSort(Blocks, ID);
 
-  for (auto *Block : predecessors())
-    ID = Block->postTopologicalSort(Blocks, ID);
+  for (auto *B : predecessors())
+    ID = B->postTopologicalSort(Blocks, ID);
 
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
@@ -251,16 +306,16 @@ void BasicBlock::computeDominator() {
 void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk forward from each successor to find the common post-dominator node.
-  for (auto *Succ : successors()) {
+  for (auto &Succ : successors()) {
     // Skip back-edges
     if (Succ->PostBlockID >= PostBlockID) continue;
     // If we don't yet have a candidate for post-dominator yet, take this one.
     if (Candidate == nullptr) {
-      Candidate = Succ;
+      Candidate = Succ.get();
       continue;
     }
     // Walk the alternate and current candidate back to find a common ancestor.
-    auto *Alternate = Succ;
+    auto *Alternate = Succ.get();
     while (Alternate != Candidate) {
       if (Candidate->PostBlockID > Alternate->PostBlockID)
         Candidate = Candidate->PostDominatorNode.Parent;

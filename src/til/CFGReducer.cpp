@@ -30,12 +30,13 @@ public:
       : LazyCopyFuture(e, r, s)
   { }
 
-  virtual SExpr* traversePending() override {
+  virtual SExpr* evaluate() override {
     Reducer->beginCFG(nullptr);
     Reducer->Scope = std::move(this->Scope);
     Reducer->traverse(PendingExpr, TRV_Tail);
     auto *res = Reducer->currentCFG();
     Reducer->endCFG();
+    PendingExpr = nullptr;
     return res;
   }
 };
@@ -325,8 +326,8 @@ void CFGReducer::endCFG() {
   SCFG* Scfg = currentCFG();
   CopyReducer::endCFG();
 
-  //std::cerr << "\n===== Normalized ======\n";
-  //TILDebugPrinter::print(Scfg, std::cerr);
+  // std::cerr << "\n===== Normalized ======\n";
+  // TILDebugPrinter::print(Scfg, std::cerr);
 
   SSAPass::ssaTransform(Scfg, Arena);
   //std::cerr << "\n===== SSA ======\n";

@@ -203,259 +203,6 @@ private:
 };
 
 
-// Nodes which declare variables
-class Function;
-class SFunction;
-class Let;
-class Letrec;
-
-
-/// A declaration for a named variable.
-/// There are three ways to introduce a new variable:
-///   Let-expressions:           (Let (x = t) u)
-///   Functions:                 (Function (x : t) u)
-///   Self-applicable functions  (SFunction (x) t)
-class VarDecl : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
-
-  enum VariableKind {
-    VK_Fun,     ///< Function parameter
-    VK_SFun,    ///< SFunction (self) parameter
-    VK_Let,     ///< Let-variable
-    VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
-  };
-
-  VarDecl(StringRef s, SExpr *D)
-      : SExpr(COP_VarDecl), VarIndex(0), Name(s), Definition(D) {
-    Flags = VK_Let;
-  }
-  VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
-      : SExpr(Vd), VarIndex(0), Name(Vd.Name), Definition(D) {
-    Flags = Vd.kind();
-  }
-
-  /// Return the kind of variable (let, function param, or self)
-  VariableKind kind() const { return static_cast<VariableKind>(Flags); }
-
-  /// Return the de-bruin index of the variable.
-  unsigned varIndex() const { return VarIndex; }
-
-  /// Return the name of the variable, if any.
-  StringRef name() const { return Name; }
-
-  /// Return the definition of the variable.
-  /// For let-vars, this is the setting expression.
-  /// For function and self parameters, it is the type of the variable.
-  SExpr *definition() { return Definition; }
-  const SExpr *definition() const { return Definition; }
-
-  void setVarIndex(unsigned i) { VarIndex = i; }
-  void setName(StringRef S)    { Name = S;  }
-  void setKind(VariableKind K) { Flags = K; }
-  void setDefinition(SExpr *E) { Definition = E; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(VarDecl)
-
-private:
-  friend class Function;
-  friend class SFunction;
-  friend class Let;
-  friend class Letrec;
-
-  unsigned  VarIndex;      // The de-bruin index of the variable.
-  StringRef Name;          // The name of the variable.
-  SExpr*    Definition;    // The TIL type or definition.
-};
-
-
-/// A function -- a.k.a. lambda abstraction.
-/// Functions with multiple arguments are created by currying,
-/// e.g. (Function (x: Int) (Function (y: Int) (Code { return x + y; })))
-class Function : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Function; }
-
-  Function(VarDecl *Vd, SExpr *Bd)
-      : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Fun);
-  }
-  Function(const Function &F, VarDecl *Vd, SExpr *Bd) // rewrite constructor
-      : SExpr(F), VDecl(Vd), Body(Bd) {
-    Vd->setKind(VarDecl::VK_Fun);
-  }
-
-  VarDecl *variableDecl()  { return VDecl; }
-  const VarDecl *variableDecl() const { return VDecl; }
-
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Function)
-
-private:
-  VarDecl *VDecl;
-  SExpr* Body;
-};
-
-
-/// A self-applicable function.
-/// A self-applicable function can be applied to itself.  It's useful for
-/// implementing objects and late binding.
-class SFunction : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_SFunction; }
-
-  SFunction(VarDecl *Vd, SExpr *B)
-      : SExpr(COP_SFunction), VDecl(Vd), Body(B) {
-    assert(Vd->Definition == nullptr);
-    Vd->setKind(VarDecl::VK_SFun);
-    Vd->Definition = this;
-  }
-  SFunction(const SFunction &F, VarDecl *Vd, SExpr *B) // rewrite constructor
-      : SExpr(F), VDecl(Vd), Body(B) {
-    assert(Vd->Definition == nullptr);
-    Vd->setKind(VarDecl::VK_SFun);
-    Vd->Definition = this;
-  }
-
-  VarDecl *variableDecl() { return VDecl; }
-  const VarDecl *variableDecl() const { return VDecl; }
-
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(SFunction)
-
-private:
-  VarDecl *VDecl;
-  SExpr* Body;
-};
-
-
-/// A block of code -- e.g. the body of a function.
-class Code : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Code; }
-
-  Code(SExpr *T, SExpr *B) : SExpr(COP_Code), ReturnType(T), Body(B) {}
-  Code(const Code &C, SExpr *T, SExpr *B) // rewrite constructor
-      : SExpr(C), ReturnType(T), Body(B) {}
-
-  SExpr *returnType() { return ReturnType; }
-  const SExpr *returnType() const { return ReturnType; }
-
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Code)
-
-private:
-  SExpr* ReturnType;
-  SExpr* Body;
-};
-
-
-/// A typed, writable location in memory
-class Field : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Field; }
-
-  Field(SExpr *R, SExpr *B) : SExpr(COP_Field), Range(R), Body(B) {}
-  Field(const Field &C, SExpr *R, SExpr *B) // rewrite constructor
-      : SExpr(C), Range(R), Body(B) {}
-
-  SExpr *range() { return Range; }
-  const SExpr *range() const { return Range; }
-
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Field)
-
-private:
-  SExpr* Range;
-  SExpr* Body;
-};
-
-
-/// A Slot (i.e. a named definition) in a Record.
-class Slot : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
-
-  enum SlotKind {
-    SLT_Normal   = 0,
-    SLT_Final    = 1,
-    SLT_Override = 2
-  };
-
-  Slot(StringRef N, SExpr *D) : SExpr(COP_Slot), Name(N), Definition(D) { }
-  Slot(const Slot &S, SExpr *D) : SExpr(S), Name(S.Name), Definition(D) { }
-
-  StringRef name() const { return Name; }
-
-  SExpr *definition() { return Definition; }
-  const SExpr *definition() const { return Definition; }
-
-  unsigned hasModifier  (SlotKind K) { return (Flags & K) != 0; }
-  void     setModifier  (SlotKind K) { Flags = Flags | K;  }
-  void     clearModifier(SlotKind K) { Flags = Flags & ~K; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Slot)
-
-private:
-  StringRef Name;
-  SExpr*    Definition;
-};
-
-
-/// A record, which is similar to a C struct.
-/// A record is essentially a function from slot names to definitions.
-class Record : public SExpr {
-public:
-  typedef SimpleArray<Slot*> SlotArray;
-  typedef DenseMap<std::string, unsigned> SlotMap;
-
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
-
-  Record(MemRegionRef A, unsigned NSlots)
-    : SExpr(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
-  Record(const Record &R, MemRegionRef A)
-    : SExpr(R), Slots(A, R.Slots.size()), SMap(R.SMap) {}
-
-  SlotArray& slots() { return Slots; }
-  const SlotArray& slots() const { return Slots; }
-
-  Slot* findSlot(StringRef S);
-
-  DECLARE_TRAVERSE_AND_COMPARE(Record)
-
-private:
-  SlotArray Slots;    //< The slots in the record.
-  SlotMap*  SMap;     //< A map from slot names to indices.
-};
-
-
-
-/// Simple scalar types, e.g. Int, Float, etc.
-class ScalarType : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
-
-  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
-  ScalarType(const ScalarType &S) : SExpr(S), ValType(S.ValType) { }
-
-  /// Return the type of this instruction
-  ValueType valueType() const { return ValType; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
-
-private:
-  ValueType ValType;
-};
-
-
 
 /// Instructions are expressions with computational effect that can appear
 /// inside basic blocks.
@@ -521,6 +268,397 @@ inline Instruction* SExpr::asCFGInstruction() {
 }
 
 
+
+/// Placeholder for an expression that has not yet been created.
+/// Used to implement lazy copy and rewriting strategies.
+class Future : public Instruction {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
+
+  enum FutureStatus {
+    FS_pending,
+    FS_evaluating,
+    FS_done
+  };
+
+  Future()
+      : Instruction(COP_Future), Status(FS_pending),
+        Result(nullptr), IPos(nullptr)  { }
+
+public:
+  // Return the result of this future if it exists, otherwise return null.
+  SExpr *maybeGetResult() const { return Result; }
+  FutureStatus status() const { return Status; }
+  void setStatus(FutureStatus FS) { Status = FS; }
+
+  // Connect this future to the given position.
+  // Forcing the future will overwrite the value at the position.
+  SExpr* addPosition(SExpr **Eptr);
+
+  // Connect this future to the given position in a basic block.
+  void addPosition(Instruction **Iptr) {
+    assert(!IPos);
+    IPos = Iptr;
+  }
+
+  /// Derived classes must override evaluate to compute the future.
+  virtual SExpr* evaluate() = 0;
+
+  /// Return the result, calling evaluate() and setResult() if necessary.
+  SExpr* force();
+
+  /// Set the result of this future, and overwrite occurrences with the result.
+  void setResult(SExpr *Res);
+
+  DECLARE_TRAVERSE_AND_COMPARE(Future)
+
+private:
+  FutureStatus Status;
+  SExpr *Result;
+  Instruction** IPos;
+  std::vector<SExpr**> Positions;
+};
+
+
+inline SExpr* maybeRegisterFuture(SExpr** Eptr, SExpr* P) {
+  if (auto *F = dyn_cast_or_null<Future>(P))
+    return F->addPosition(Eptr);
+  return P;
+}
+
+template<class T>
+inline T* maybeRegisterFuture(T** Eptr, T* P) {
+  // Futures can only be stored in places that can hold any SExpr.
+  assert(P->opcode() != COP_Future);
+  return P;
+}
+
+
+/// Owning reference to an SExpr.
+/// All SExprs should use this class to refer to subexpressions.
+template<class T>
+class SExprRefT {
+public:
+  SExprRefT() : Ptr(nullptr) { }
+  SExprRefT(std::nullptr_t) : Ptr(nullptr) { }
+  SExprRefT(T* P) : Ptr(maybeRegisterFuture(&Ptr, P)) { }
+
+  T&       operator*()        { return *Ptr; }
+  const T& operator*() const  { return *Ptr; }
+  T*       operator->()       { return Ptr; }
+  const T* operator->() const { return Ptr; }
+
+  T*       get()       { return Ptr; }
+  const T* get() const { return Ptr; }
+
+  void reset(std::nullptr_t) {
+    assert(!Ptr || !isa<Future>(Ptr) && "Reset before future was forced.");
+    Ptr = nullptr;
+  }
+
+  void reset(T* P) {
+    assert(!Ptr || !isa<Future>(Ptr) && "Reset before future was forced.");
+    Ptr = maybeRegisterFuture(&Ptr, P);
+  }
+
+  bool operator==(const SExprRefT<T> &P) const { return Ptr == P.Ptr; }
+  bool operator==(const T* P)            const { return Ptr == P; }
+  bool operator==(std::nullptr_t)        const { return Ptr == nullptr; }
+
+  bool operator!=(const SExprRefT<T> &P) const { return Ptr != P.Ptr; }
+  bool operator!=(const T* P)            const { return Ptr != P; }
+  bool operator!=(std::nullptr_t)        const { return Ptr != nullptr; }
+
+private:
+  friend class Future;
+
+  SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
+
+  T* Ptr;
+};
+
+typedef SExprRefT<SExpr> SExprRef;
+
+
+
+// Nodes which declare variables
+class Function;
+class SFunction;
+class Let;
+class Letrec;
+
+
+/// A declaration for a named variable.
+/// There are three ways to introduce a new variable:
+///   Let-expressions:           (Let (x = t) u)
+///   Functions:                 (Function (x : t) u)
+///   Self-applicable functions  (SFunction (x) t)
+class VarDecl : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
+
+  enum VariableKind {
+    VK_Fun,     ///< Function parameter
+    VK_SFun,    ///< SFunction (self) parameter
+    VK_Let,     ///< Let-variable
+    VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
+  };
+
+  VarDecl(StringRef s, SExpr *D)
+      : SExpr(COP_VarDecl), VarIndex(0), Name(s), Definition(D) {
+    Flags = VK_Let;
+  }
+  VarDecl(const VarDecl &Vd, SExpr *D)  // rewrite constructor
+      : SExpr(Vd), VarIndex(0), Name(Vd.Name), Definition(D) {
+    Flags = Vd.kind();
+  }
+
+  void rewrite(SExpr *D) { Definition.reset(D); }
+
+  /// Return the kind of variable (let, function param, or self)
+  VariableKind kind() const { return static_cast<VariableKind>(Flags); }
+
+  /// Return the de-bruin index of the variable.
+  unsigned varIndex() const { return VarIndex; }
+
+  /// Return the name of the variable, if any.
+  StringRef name() const { return Name; }
+
+  /// Return the definition of the variable.
+  /// For let-vars, this is the setting expression.
+  /// For function and self parameters, it is the type of the variable.
+  SExpr *definition() { return Definition.get(); }
+  const SExpr *definition() const { return Definition.get(); }
+
+  void setVarIndex(unsigned i) { VarIndex = i; }
+  void setName(StringRef S)    { Name = S;  }
+  void setKind(VariableKind K) { Flags = K; }
+  void setDefinition(SExpr *E) { Definition.reset(E); }
+
+  DECLARE_TRAVERSE_AND_COMPARE(VarDecl)
+
+private:
+  friend class Function;
+  friend class SFunction;
+  friend class Let;
+  friend class Letrec;
+
+  unsigned  VarIndex;      // The de-bruin index of the variable.
+  StringRef Name;          // The name of the variable.
+  SExprRef  Definition;    // The TIL type or definition.
+};
+
+
+/// A function -- a.k.a. lambda abstraction.
+/// Functions with multiple arguments are created by currying,
+/// e.g. (Function (x: Int) (Function (y: Int) (Code { return x + y; })))
+class Function : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Function; }
+
+  Function(VarDecl *Vd, SExpr *Bd)
+      : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Fun);
+  }
+  Function(const Function &F, VarDecl *Vd, SExpr *Bd) // rewrite constructor
+      : SExpr(F), VDecl(Vd), Body(Bd) {
+    Vd->setKind(VarDecl::VK_Fun);
+  }
+
+  void rewrite(VarDecl *Vd, SExpr *Bd) {
+    VDecl.reset(Vd);
+    Body.reset(Bd);
+  }
+
+  VarDecl *variableDecl()  { return VDecl.get(); }
+  const VarDecl *variableDecl() const { return VDecl.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Function)
+
+private:
+  SExprRefT<VarDecl> VDecl;
+  SExprRef           Body;
+};
+
+
+/// A self-applicable function.
+/// A self-applicable function can be applied to itself.  It's useful for
+/// implementing objects and late binding.
+class SFunction : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_SFunction; }
+
+  SFunction(VarDecl *Vd, SExpr *B)
+      : SExpr(COP_SFunction), VDecl(Vd), Body(B) {
+    assert(Vd->Definition == nullptr);
+    Vd->setKind(VarDecl::VK_SFun);
+    Vd->Definition = this;
+  }
+  SFunction(const SFunction &F, VarDecl *Vd, SExpr *B) // rewrite constructor
+      : SExpr(F), VDecl(Vd), Body(B) {
+    assert(Vd->Definition == nullptr);
+    Vd->setKind(VarDecl::VK_SFun);
+    Vd->Definition = this;
+  }
+
+  void rewrite(VarDecl *Vd, SExpr *Bd) {
+    VDecl.reset(Vd);
+    Body.reset(Bd);
+  }
+
+  VarDecl *variableDecl() { return VDecl.get(); }
+  const VarDecl *variableDecl() const { return VDecl.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  DECLARE_TRAVERSE_AND_COMPARE(SFunction)
+
+private:
+  SExprRefT<VarDecl> VDecl;
+  SExprRef           Body;
+};
+
+
+/// A block of code -- e.g. the body of a function.
+class Code : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Code; }
+
+  Code(SExpr *T, SExpr *B) : SExpr(COP_Code), ReturnType(T), Body(B) {}
+  Code(const Code &C, SExpr *T, SExpr *B) // rewrite constructor
+      : SExpr(C), ReturnType(T), Body(B) {}
+
+  void rewrite(SExpr *T, SExpr *B) {
+    ReturnType.reset(T);
+    Body.reset(B);
+  }
+
+  SExpr *returnType() { return ReturnType.get(); }
+  const SExpr *returnType() const { return ReturnType.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Code)
+
+private:
+  SExprRef ReturnType;
+  SExprRef Body;
+};
+
+
+/// A typed, writable location in memory
+class Field : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Field; }
+
+  Field(SExpr *R, SExpr *B) : SExpr(COP_Field), Range(R), Body(B) {}
+  Field(const Field &C, SExpr *R, SExpr *B) // rewrite constructor
+      : SExpr(C), Range(R), Body(B) {}
+
+  void rewrite(SExpr *R, SExpr *B) {
+    Range.reset(R);
+    Body.reset(B);
+  }
+
+  SExpr *range() { return Range.get(); }
+  const SExpr *range() const { return Range.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Field)
+
+private:
+  SExprRef Range;
+  SExprRef Body;
+};
+
+
+/// A Slot (i.e. a named definition) in a Record.
+class Slot : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
+
+  enum SlotKind {
+    SLT_Normal   = 0,
+    SLT_Final    = 1,
+    SLT_Override = 2
+  };
+
+  Slot(StringRef N, SExpr *D) : SExpr(COP_Slot), Name(N), Definition(D) { }
+  Slot(const Slot &S, SExpr *D) : SExpr(S), Name(S.Name), Definition(D) { }
+
+  void rewrite(SExpr *D) { Definition.reset(D); }
+
+  StringRef name() const { return Name; }
+
+  SExpr *definition() { return Definition.get(); }
+  const SExpr *definition() const { return Definition.get(); }
+
+  unsigned hasModifier  (SlotKind K) { return (Flags & K) != 0; }
+  void     setModifier  (SlotKind K) { Flags = Flags | K;  }
+  void     clearModifier(SlotKind K) { Flags = Flags & ~K; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(Slot)
+
+private:
+  StringRef Name;
+  SExprRef  Definition;
+};
+
+
+/// A record, which is similar to a C struct.
+/// A record is essentially a function from slot names to definitions.
+class Record : public SExpr {
+public:
+  typedef SimpleArray<SExprRefT<Slot>> SlotArray;
+  typedef DenseMap<std::string, unsigned> SlotMap;
+
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
+
+  Record(MemRegionRef A, unsigned NSlots)
+    : SExpr(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
+  Record(const Record &R, MemRegionRef A)
+    : SExpr(R), Slots(A, R.Slots.size()), SMap(R.SMap) {}
+
+  SlotArray& slots() { return Slots; }
+  const SlotArray& slots() const { return Slots; }
+
+  Slot* findSlot(StringRef S);
+
+  DECLARE_TRAVERSE_AND_COMPARE(Record)
+
+private:
+  SlotArray Slots;    //< The slots in the record.
+  SlotMap*  SMap;     //< A map from slot names to indices.
+};
+
+
+
+/// Simple scalar types, e.g. Int, Float, etc.
+class ScalarType : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
+
+  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
+  ScalarType(const ScalarType &S) : SExpr(S), ValType(S.ValType) { }
+
+  /// Return the type of this instruction
+  ValueType valueType() const { return ValType; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
+
+private:
+  ValueType ValType;
+};
+
+
+
 template <class T> class LiteralT;
 
 /// Base class for literal values.
@@ -567,13 +705,15 @@ public:
   Variable(const Variable &V, VarDecl *VD)
      : Instruction(V), VDecl(VD) { }
 
-  const VarDecl* variableDecl() const { return VDecl; }
-  VarDecl* variableDecl() { return VDecl; }
+  void rewrite(VarDecl *D) { VDecl.reset(D); }
+
+  const VarDecl* variableDecl() const { return VDecl.get(); }
+  VarDecl* variableDecl() { return VDecl.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Variable)
 
 private:
-  VarDecl* VDecl;
+  SExprRefT<VarDecl> VDecl;
 };
 
 
@@ -591,17 +731,22 @@ public:
       : Instruction(A), Fun(F), Arg(Ar)
   {}
 
-  SExpr *fun() { return Fun; }
-  const SExpr *fun() const { return Fun; }
+  void rewrite(SExpr *F, SExpr *A) {
+    Fun.reset(F);
+    Arg.reset(A);
+  }
 
-  SExpr *arg() { return Arg; }
-  const SExpr *arg() const { return Arg; }
+  SExpr *fun() { return Fun.get(); }
+  const SExpr *fun() const { return Fun.get(); }
+
+  SExpr *arg() { return Arg.get(); }
+  const SExpr *arg() const { return Arg.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Apply)
 
 private:
-  SExpr* Fun;
-  SExpr* Arg;
+  SExprRef Fun;
+  SExprRef Arg;
 };
 
 
@@ -615,19 +760,24 @@ public:
   SApply(SApply &A, SExpr *Sf, SExpr *Ar = nullptr) // rewrite constructor
       : Instruction(A), Sfun(Sf), Arg(Ar) {}
 
-  SExpr *sfun() { return Sfun; }
-  const SExpr *sfun() const { return Sfun; }
+  void rewrite(SExpr *Sf, SExpr *A) {
+    Sfun.reset(Sf);
+    Arg.reset(A);
+  }
 
-  SExpr *arg() { return Arg ? Arg : Sfun; }
-  const SExpr *arg() const { return Arg ? Arg : Sfun; }
+  SExpr *sfun() { return Sfun.get(); }
+  const SExpr *sfun() const { return Sfun.get(); }
+
+  SExpr *arg() { return Arg.get() ? Arg.get() : Sfun.get(); }
+  const SExpr *arg() const { return Arg.get() ? Arg.get() : Sfun.get(); }
 
   bool isDelegation() const { return Arg != nullptr; }
 
   DECLARE_TRAVERSE_AND_COMPARE(SApply)
 
 private:
-  SExpr* Sfun;
-  SExpr* Arg;
+  SExprRef Sfun;
+  SExprRef Arg;
 };
 
 
@@ -644,8 +794,10 @@ public:
   Project(const Project &P, SExpr *R)
       : Instruction(P), Rec(R), SlotName(P.SlotName), Cvdecl(P.Cvdecl) { }
 
-  SExpr *record() { return Rec; }
-  const SExpr *record() const { return Rec; }
+  void rewrite(SExpr *R) { Rec.reset(R); }
+
+  SExpr *record() { return Rec.get(); }
+  const SExpr *record() const { return Rec.get(); }
 
   const clang::ValueDecl *clangDecl() const { return Cvdecl; }
 
@@ -665,7 +817,7 @@ public:
   DECLARE_TRAVERSE_AND_COMPARE(Project)
 
 private:
-  SExpr* Rec;
+  SExprRef Rec;
   StringRef SlotName;
   const clang::ValueDecl *Cvdecl;
 };
@@ -679,13 +831,15 @@ public:
   Call(SExpr *T) : Instruction(COP_Call), Target(T) { }
   Call(const Call &C, SExpr *T) : Instruction(C), Target(T) { }
 
-  SExpr *target() { return Target; }
-  const SExpr *target() const { return Target; }
+  void rewrite(SExpr *T) { Target.reset(T); }
+
+  SExpr *target() { return Target.get(); }
+  const SExpr *target() const { return Target.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Call)
 
 private:
-  SExpr* Target;
+  SExprRef Target;
 };
 
 
@@ -706,10 +860,12 @@ public:
     Flags = A.kind();
   }
 
+  void rewrite(SExpr *I) { InitExpr.reset(I); }
+
   AllocKind kind() const { return static_cast<AllocKind>(Flags); }
 
-  SExpr *initializer() { return InitExpr; }
-  const SExpr *initializer() const { return InitExpr; }
+  SExpr *initializer() { return InitExpr.get(); }
+  const SExpr *initializer() const { return InitExpr.get(); }
 
   // For an alloca, return an index into a virtual stack.
   // Used for SSA renaming and abstract interpretation.
@@ -720,7 +876,7 @@ public:
   DECLARE_TRAVERSE_AND_COMPARE(Alloc)
 
 private:
-  SExpr*   InitExpr;
+  SExprRef InitExpr;
   unsigned AllocID;
 };
 
@@ -733,13 +889,15 @@ public:
   Load(SExpr *P) : Instruction(COP_Load), Ptr(P) {}
   Load(const Load &L, SExpr *P) : Instruction(L), Ptr(P) {}
 
-  SExpr *pointer() { return Ptr; }
-  const SExpr *pointer() const { return Ptr; }
+  void rewrite(SExpr *P) { Ptr.reset(P); }
+
+  SExpr *pointer() { return Ptr.get(); }
+  const SExpr *pointer() const { return Ptr.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Load)
 
 private:
-  SExpr* Ptr;
+  SExprRef Ptr;
 };
 
 
@@ -754,17 +912,22 @@ public:
   Store(const Store &S, SExpr *P, SExpr *V)
       : Instruction(S), Dest(P), Source(V) {}
 
-  SExpr *destination() { return Dest; }  // Address to store to
-  const SExpr *destination() const { return Dest; }
+  void rewrite(SExpr *D, SExpr *S) {
+    Dest.reset(D);
+    Source.reset(S);
+  }
 
-  SExpr *source() { return Source; }     // Value to store
-  const SExpr *source() const { return Source; }
+  SExpr *destination() { return Dest.get(); }  // Address to store to
+  const SExpr *destination() const { return Dest.get(); }
+
+  SExpr *source() { return Source.get(); }     // Value to store
+  const SExpr *source() const { return Source.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Store)
 
 private:
-  SExpr* Dest;
-  SExpr* Source;
+  SExprRef Dest;
+  SExprRef Source;
 };
 
 
@@ -779,17 +942,22 @@ public:
   ArrayIndex(const ArrayIndex &E, SExpr *A, SExpr *N)
       : Instruction(E), Array(A), Index(N) {}
 
-  SExpr *array() { return Array; }
-  const SExpr *array() const { return Array; }
+  void rewrite(SExpr *A, SExpr *I) {
+    Array.reset(A);
+    Index.reset(I);
+  }
 
-  SExpr *index() { return Index; }
-  const SExpr *index() const { return Index; }
+  SExpr *array() { return Array.get(); }
+  const SExpr *array() const { return Array.get(); }
+
+  SExpr *index() { return Index.get(); }
+  const SExpr *index() const { return Index.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(ArrayIndex)
 
 private:
-  SExpr* Array;
-  SExpr* Index;
+  SExprRef Array;
+  SExprRef Index;
 };
 
 
@@ -805,17 +973,22 @@ public:
   ArrayAdd(const ArrayAdd &E, SExpr *A, SExpr *N)
       : Instruction(E), Array(A), Index(N) {}
 
-  SExpr *array() { return Array; }
-  const SExpr *array() const { return Array; }
+  void rewrite(SExpr *A, SExpr *I) {
+    Array.reset(A);
+    Index.reset(I);
+  }
 
-  SExpr *index() { return Index; }
-  const SExpr *index() const { return Index; }
+  SExpr *array() { return Array.get(); }
+  const SExpr *array() const { return Array.get(); }
+
+  SExpr *index() { return Index.get(); }
+  const SExpr *index() const { return Index.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(ArrayAdd)
 
 private:
-  SExpr* Array;
-  SExpr* Index;
+  SExprRef Array;
+  SExprRef Index;
 };
 
 
@@ -832,17 +1005,19 @@ public:
     Flags = U.Flags;
   }
 
+  void rewrite(SExpr *E) { Expr0.reset(E); }
+
   TIL_UnaryOpcode unaryOpcode() const {
     return static_cast<TIL_UnaryOpcode>(Flags);
   }
 
-  SExpr *expr() { return Expr0; }
-  const SExpr *expr() const { return Expr0; }
+  SExpr *expr() { return Expr0.get(); }
+  const SExpr *expr() const { return Expr0.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(UnaryOp)
 
 private:
-  SExpr* Expr0;
+  SExprRef Expr0;
 };
 
 
@@ -861,21 +1036,26 @@ public:
     Flags = B.Flags;
   }
 
+  void rewrite(SExpr *E0, SExpr *E1) {
+    Expr0.reset(E0);
+    Expr1.reset(E1);
+  }
+
   TIL_BinaryOpcode binaryOpcode() const {
     return static_cast<TIL_BinaryOpcode>(Flags);
   }
 
-  SExpr *expr0() { return Expr0; }
-  const SExpr *expr0() const { return Expr0; }
+  SExpr *expr0() { return Expr0.get(); }
+  const SExpr *expr0() const { return Expr0.get(); }
 
-  SExpr *expr1() { return Expr1; }
-  const SExpr *expr1() const { return Expr1; }
+  SExpr *expr1() { return Expr1.get(); }
+  const SExpr *expr1() const { return Expr1.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(BinaryOp)
 
 private:
-  SExpr* Expr0;
-  SExpr* Expr1;
+  SExprRef Expr0;
+  SExprRef Expr1;
 };
 
 
@@ -893,17 +1073,19 @@ public:
       Flags = C.Flags;
   }
 
+  void rewrite(SExpr *E) { Expr0.reset(E); }
+
   TIL_CastOpcode castOpcode() const {
     return static_cast<TIL_CastOpcode>(Flags);
   }
 
-  SExpr *expr() { return Expr0; }
-  const SExpr *expr() const { return Expr0; }
+  SExpr *expr() { return Expr0.get(); }
+  const SExpr *expr() const { return Expr0.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Cast)
 
 private:
-  SExpr* Expr0;
+  SExprRef Expr0;
 };
 
 
@@ -915,7 +1097,7 @@ class SCFG;
 /// depending on where control flow comes from.
 class Phi : public Instruction {
 public:
-  typedef SimpleArray<SExpr *> ValArray;
+  typedef SimpleArray<SExprRef> ValArray;
 
   // In minimal SSA form, all Phi nodes are MultiVal.
   // During conversion to SSA, incomplete Phi nodes may be introduced, which
@@ -955,16 +1137,18 @@ public:
     return E->opcode() >= COP_Goto && E->opcode() <= COP_Return;
   }
 
+  typedef ArrayRef<SExprRefT<BasicBlock>> BlockArray;
+
 protected:
   Terminator(TIL_Opcode Op) : Instruction(Op) { }
   Terminator(const Instruction &E) : Instruction(E) { }
 
 public:
-  /// Return the list of basic blocks that this terminator can branch to.
-  ArrayRef<BasicBlock*> successors();
+  BlockArray successors();
 
-  ArrayRef<BasicBlock*> successors() const {
-    return const_cast<const Terminator*>(this)->successors();
+  /// Return the list of basic blocks that this terminator can branch to.
+  BlockArray successors() const {
+    return const_cast<Terminator*>(this)->successors();
   }
 };
 
@@ -983,8 +1167,13 @@ public:
   Goto(const Goto &G, BasicBlock *B, unsigned I)
       : Terminator(COP_Goto), TargetBlock(B), Index(I) {}
 
-  const BasicBlock *targetBlock() const { return TargetBlock; }
-  BasicBlock *targetBlock() { return TargetBlock; }
+  void rewrite(BasicBlock* B, unsigned Idx) {
+    TargetBlock.reset(B);
+    Index = Idx;
+  }
+
+  const BasicBlock *targetBlock() const { return TargetBlock.get(); }
+  BasicBlock *targetBlock() { return TargetBlock.get(); }
 
   /// Returns the argument index into the Phi nodes for this branch.
   unsigned phiIndex() const { return Index; }
@@ -992,14 +1181,12 @@ public:
   bool isBackEdge() const;
 
   /// Return the list of basic blocks that this terminator can branch to.
-  ArrayRef<BasicBlock*> successors() {
-    return ArrayRef<BasicBlock*>(&TargetBlock, 1);
-  }
+  BlockArray successors() { return BlockArray(&TargetBlock, 1); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Goto)
 
 private:
-  BasicBlock *TargetBlock;
+  SExprRefT<BasicBlock> TargetBlock;
   unsigned Index;
 };
 
@@ -1022,25 +1209,29 @@ public:
     Branches[1] = E;
   }
 
-  const SExpr *condition() const { return Condition; }
-  SExpr *condition() { return Condition; }
+  void rewrite(SExpr *C, BasicBlock *B1, BasicBlock *B2) {
+    Condition.reset(C);
+    Branches[0].reset(B1);
+    Branches[1].reset(B2);
+  }
 
-  const BasicBlock *thenBlock() const { return Branches[0]; }
-  BasicBlock *thenBlock() { return Branches[0]; }
+  const SExpr *condition() const { return Condition.get(); }
+  SExpr *condition() { return Condition.get(); }
 
-  const BasicBlock *elseBlock() const { return Branches[1]; }
-  BasicBlock *elseBlock() { return Branches[1]; }
+  const BasicBlock *thenBlock() const { return Branches[0].get(); }
+  BasicBlock *thenBlock() { return Branches[0].get(); }
+
+  const BasicBlock *elseBlock() const { return Branches[1].get(); }
+  BasicBlock *elseBlock() { return Branches[1].get(); }
 
   /// Return the list of basic blocks that this terminator can branch to.
-  ArrayRef<BasicBlock*> successors() {
-    return ArrayRef<BasicBlock*>(Branches, 2);
-  }
+  BlockArray successors() { return BlockArray(Branches, 2); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Branch)
 
 private:
-  SExpr*     Condition;
-  BasicBlock *Branches[2];
+  SExprRef              Condition;
+  SExprRefT<BasicBlock> Branches[2];
 };
 
 
@@ -1053,28 +1244,28 @@ public:
   Return(SExpr* Rval) : Terminator(COP_Return), Retval(Rval) {}
   Return(const Return &R, SExpr* Rval) : Terminator(R), Retval(Rval) {}
 
-  /// Return an empty list.
-  ArrayRef<BasicBlock*> successors() {
-    return ArrayRef<BasicBlock*>();
-  }
+  void rewrite(SExpr *R) { Retval.reset(R); }
 
-  SExpr *returnValue() { return Retval; }
-  const SExpr *returnValue() const { return Retval; }
+  /// Return an empty list.
+  BlockArray successors() { return BlockArray(); }
+
+  SExpr *returnValue() { return Retval.get(); }
+  const SExpr *returnValue() const { return Retval.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Return)
 
 private:
-  SExpr* Retval;
+  SExprRef Retval;
 };
 
 
-inline ArrayRef<BasicBlock*> Terminator::successors() {
+inline Terminator::BlockArray Terminator::successors() {
   switch (opcode()) {
     case COP_Goto:   return cast<Goto>(this)->successors();
     case COP_Branch: return cast<Branch>(this)->successors();
     case COP_Return: return cast<Return>(this)->successors();
     default:
-      return ArrayRef<BasicBlock*>();
+      return BlockArray();
   }
 }
 
@@ -1144,11 +1335,11 @@ public:
   BlockArray &predecessors() { return Predecessors; }
   const BlockArray &predecessors() const { return Predecessors; }
 
-  ArrayRef<BasicBlock*> successors() {
-    return TermInstr ? TermInstr->successors() : ArrayRef<BasicBlock*>();
+  Terminator::BlockArray successors() {
+    return TermInstr ? TermInstr->successors() : Terminator::BlockArray();
   }
-  ArrayRef<BasicBlock*> successors() const {
-    return TermInstr ? TermInstr->successors() : ArrayRef<BasicBlock*>();
+  Terminator::BlockArray successors() const {
+    return TermInstr ? TermInstr->successors() : Terminator::BlockArray();
   }
 
   const Terminator *terminator() const { return TermInstr; }
@@ -1174,12 +1365,16 @@ public:
     Args.push_back(E);
     E->setBlock(this);
   }
+
   /// Add a new instruction.
   void addInstruction(Instruction *E) {
     Instrs.reserveCheck(1, Arena);
     Instrs.push_back(E);
     E->setBlock(this);
+    if (auto *F = dyn_cast<Future>(E))
+      F->addPosition(&Instrs.back());
   }
+
   void setTerminator(Terminator *E) {
     TermInstr = E;
     if (E)
@@ -1330,44 +1525,6 @@ private:
 };
 
 
-/// Placeholder for an expression that has not yet been created.
-/// Used to implement lazy copy and rewriting strategies.
-class Future : public Instruction {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
-
-  enum FutureStatus {
-    FS_pending,
-    FS_evaluating,
-    FS_done
-  };
-
-  Future() : Instruction(COP_Future), Status(FS_pending), Result(nullptr) { }
-
-public:
-  // Return the result of this future if it exists, otherwise return null.
-  SExpr *maybeGetResult() const { return Result; }
-  FutureStatus status() const { return Status; }
-
-  void setStatus(FutureStatus FS) { Status = FS; }
-
-  void setResult(SExpr *Res) {
-    Result = Res;
-    Status = FS_done;
-  }
-
-  virtual SExpr* force() {
-    assert(true && "Future cannot be forced.");
-    return nullptr;
-  }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Future)
-
-private:
-  FutureStatus Status;
-  SExpr *Result;
-};
-
 
 /// Placeholder for expressions that cannot be represented in the TIL.
 class Undefined : public SExpr {
@@ -1424,17 +1581,22 @@ public:
     Vd->setKind(VarDecl::VK_Let);
   }
 
-  VarDecl *variableDecl()  { return VDecl; }
-  const VarDecl *variableDecl() const { return VDecl; }
+  void rewrite(VarDecl *Vd, SExpr *B) {
+    VDecl.reset(Vd);
+    Body.reset(B);
+  }
 
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
+  VarDecl *variableDecl()  { return VDecl.get(); }
+  const VarDecl *variableDecl() const { return VDecl.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Let)
 
 private:
-  VarDecl *VDecl;
-  SExpr* Body;
+  SExprRefT<VarDecl> VDecl;
+  SExprRef Body;
 };
 
 
@@ -1452,17 +1614,22 @@ public:
     Vd->setKind(VarDecl::VK_Letrec);
   }
 
-  VarDecl *variableDecl()  { return VDecl; }
-  const VarDecl *variableDecl() const { return VDecl; }
+  void rewrite(VarDecl *Vd, SExpr *B) {
+    VDecl.reset(Vd);
+    Body.reset(B);
+  }
 
-  SExpr *body() { return Body; }
-  const SExpr *body() const { return Body; }
+  VarDecl *variableDecl()  { return VDecl.get(); }
+  const VarDecl *variableDecl() const { return VDecl.get(); }
+
+  SExpr *body() { return Body.get(); }
+  const SExpr *body() const { return Body.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Letrec)
 
 private:
-  VarDecl *VDecl;
-  SExpr* Body;
+  SExprRefT<VarDecl> VDecl;
+  SExprRef Body;
 };
 
 
@@ -1480,21 +1647,27 @@ public:
     : SExpr(I), Condition(C), ThenExpr(T), ElseExpr(E)
   { }
 
-  SExpr *condition() { return Condition; }   // Address to store to
-  const SExpr *condition() const { return Condition; }
+  void rewrite(SExpr *C, SExpr *E0, SExpr* E1) {
+    Condition.reset(C);
+    ThenExpr.reset(E0);
+    ElseExpr.reset(E1);
+  }
 
-  SExpr *thenExpr() { return ThenExpr; }     // Value to store
-  const SExpr *thenExpr() const { return ThenExpr; }
+  SExpr *condition() { return Condition.get(); }   // Address to store to
+  const SExpr *condition() const { return Condition.get(); }
 
-  SExpr *elseExpr() { return ElseExpr; }     // Value to store
-  const SExpr *elseExpr() const { return ElseExpr; }
+  SExpr *thenExpr() { return ThenExpr.get(); }     // Value to store
+  const SExpr *thenExpr() const { return ThenExpr.get(); }
+
+  SExpr *elseExpr() { return ElseExpr.get(); }     // Value to store
+  const SExpr *elseExpr() const { return ElseExpr.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(IfThenElse)
 
 private:
-  SExpr* Condition;
-  SExpr* ThenExpr;
-  SExpr* ElseExpr;
+  SExprRef Condition;
+  SExprRef ThenExpr;
+  SExprRef ElseExpr;
 };
 
 

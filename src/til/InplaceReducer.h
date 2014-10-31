@@ -46,17 +46,6 @@ using namespace clang::threadSafety::til;
 /// transformations.
 class InplaceReducer : public CFGBuilder, public ScopeHandler {
 public:
-  // Destructively update SExprs by writing back results.
-  template <class T>
-  T* handleResult(SExpr** Eptr, T* Res) {
-    *Eptr = Res;
-    return Res;
-  }
-  BasicBlock* handleResult(BasicBlock** B, BasicBlock* Res) { return Res; }
-  VarDecl*    handleResult(VarDecl** VD,   VarDecl *Res)    { return Res; }
-  Slot*       handleResult(Slot** VD,      Slot *Res)       { return Res; }
-
-
   void handleRecordSlot(Record *E, Slot *Res) {
     /* Slots can only be replaced with themselves. */
   }
@@ -71,7 +60,7 @@ public:
     scope().updateInstructionMap(&Orig, Res);
   }
   void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
-    /* Blocks can only be replaced with themselves. */
+    assert(&Orig == Res && "Blocks cannot be replaced.");
   }
 
   SExpr*   reduceWeak(Instruction* I) { return scope().lookupInstr(I); }
@@ -84,57 +73,93 @@ public:
     return B;
   }
 
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E)      { return &Orig; }
+  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
+    Orig.rewrite(E);
+    return &Orig;
+  }
   VarDecl* reduceVarDeclLetrec(VarDecl* Nvd, SExpr* D) { return Nvd; }
 
   SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
+    Orig.rewrite(Nvd, E0);
     return &Orig;
   }
   SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
+    Orig.rewrite(Nvd, E0);
     return &Orig;
   }
-  SExpr*  reduceCode(Code &Orig, SExpr* E0, SExpr* E1)    { return &Orig; }
-  SExpr*  reduceField(Field &Orig, SExpr* E0, SExpr* E1)  { return &Orig; }
-  Slot*   reduceSlot(Slot &Orig, SExpr *E0)               { return &Orig; }
-  Record* reduceRecordBegin(Record &Orig)                 { return &Orig; }
-  Record* reduceRecordEnd(Record *R)                      { return R; }
+  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
+    return &Orig;
+  }
+  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
+    return &Orig;
+  }
+  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
+    Orig.rewrite(E0);
+    return &Orig;
+  }
+  Record* reduceRecordBegin(Record &Orig)    { return &Orig; }
+  Record* reduceRecordEnd(Record *R)         { return R;     }
 
-  SExpr*  reduceScalarType(ScalarType &Orig)              { return &Orig; }
+  SExpr*  reduceScalarType(ScalarType &Orig) { return &Orig; }
 
-  SExpr* reduceLiteral(Literal &Orig)                     { return &Orig; }
+  SExpr* reduceLiteral(Literal &Orig)        { return &Orig; }
   template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig)                { return &Orig; }
-  SExpr* reduceVariable(Variable &Orig, VarDecl* VD)      { return &Orig; }
+  SExpr* reduceLiteralT(LiteralT<T> &Orig)   { return &Orig; }
 
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1)   { return &Orig; }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) { return &Orig; }
-  SExpr* reduceProject(Project &Orig, SExpr* E0)          { return &Orig; }
+  SExpr* reduceVariable(Variable &Orig, VarDecl* Vd) {
+    Orig.rewrite(Vd);
+    return &Orig;
+  }
+
+  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
+    return &Orig;
+  }
+  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
+    return &Orig;
+  }
+  SExpr* reduceProject(Project &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
+    return &Orig;
+  }
 
   SExpr* reduceCall(Call &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
     return addInstr(&Orig);
   }
   SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
     return addInstr(&Orig);
   }
   SExpr* reduceLoad(Load &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
     return addInstr(&Orig);
   }
   SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
     return addInstr(&Orig);
   }
   SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
     return addInstr(&Orig);
   }
   SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
     return addInstr(&Orig);
   }
   SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
     return addInstr(&Orig);
   }
   SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
+    Orig.rewrite(E0, E1);
     return addInstr(&Orig);
   }
   SExpr* reduceCast(Cast &Orig, SExpr* E0) {
+    Orig.rewrite(E0);
     return addInstr(&Orig);
   }
 
@@ -145,10 +170,12 @@ public:
   Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) { return &Orig; }
   Goto* reduceGotoEnd(Goto* G) { return G; }
 
-  SExpr* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    return &O;
+  SExpr* reduceBranch(Branch &Orig, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
+    Orig.rewrite(C, B0, B1);
+    return &Orig;
   }
   SExpr* reduceReturn(Return &Orig, SExpr* E) {
+    Orig.rewrite(E);
     return &Orig;
   }
 
@@ -165,13 +192,20 @@ public:
   SCFG* reduceSCFG_Begin(SCFG &Orig);
   SCFG* reduceSCFG_End(SCFG* Scfg);
 
-  SExpr* reduceUndefined(Undefined &Orig) { return &Orig; }
-  SExpr* reduceWildcard(Wildcard &Orig)   { return &Orig; }
-
+  SExpr* reduceUndefined (Undefined &Orig)  { return &Orig; }
+  SExpr* reduceWildcard  (Wildcard &Orig)   { return &Orig; }
   SExpr* reduceIdentifier(Identifier &Orig) { return &Orig; }
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) { return &Orig; }
-  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) { return &Orig; }
+
+  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
+    Orig.rewrite(Nvd, B);
+    return &Orig;
+  }
+  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
+    Orig.rewrite(Nvd, B);
+    return &Orig;
+  }
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
+    Orig.rewrite(C, T, E);
     return &Orig;
   }
 

@@ -70,10 +70,8 @@ BasicBlock* SSAPass::reduceBasicBlockBegin(BasicBlock &Orig) {
 void SSAPass::replacePendingLoads() {
   // Second pass:  Go back and replace all loads with phi nodes or values.
   CurrentBB = CurrentCFG->entry();
-  unsigned CurrentInstrID = CurrentCFG->numInstructions();
 
-  for (PendingFuture &PF : Pending) {
-    auto *F = PF.Fut;
+  for (auto *F : Pending) {
     SExpr *E = F->maybeGetResult();
     if (!E) {
       Load  *L = F->LoadInstr;
@@ -89,25 +87,6 @@ void SSAPass::replacePendingLoads() {
       E = lookupInPredecessors(L->block(), A->allocID());
       F->setResult(E);
     }
-    assert(PF.IPos && "Unhandled Future.");
-
-    Instruction* I2 = cast<Instruction>(E);
-    if (PF.BBInstr) {
-      // If I2 is a new, non-trivial instruction, then add it to the
-      // current block.
-      if (I2->instrID() == 0 && !I2->isTrivial() && !isa<Phi>(I2)) {
-        *PF.IPos = I2;
-        I2->setInstrID(CurrentInstrID++);
-      }
-      // Otherwise, eliminate it, because it's a reference to a previously
-      // added instruction.
-      else {
-        *PF.IPos = nullptr;
-      }
-    }
-    else {
-      *PF.IPos = I2;
-    }
   }
   VarMapCache.clear();
 };
@@ -120,6 +99,7 @@ SExpr* SSAPass::reduceAlloc(Alloc &Orig, SExpr* E0) {
     Orig.setAllocID(CurrentVarMap->size());
     CurrentVarMap->push_back(E0);
   }
+  // Note: the instruction gets removed, since we don't add it.
   return &Orig;
 }
 
@@ -132,6 +112,7 @@ SExpr* SSAPass::reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
       return E1;
     }
   }
+  // Note: the instruction gets removed, since we don't add it.
   return &Orig;
 }
 
@@ -142,10 +123,14 @@ SExpr* SSAPass::reduceLoad(Load &Orig, SExpr* E0) {
     if (auto* A = dyn_cast_or_null<Alloc>(E0)) {
       if (auto *Av = CurrentVarMap->at(A->allocID()))
         return Av;
-      else
-        return new (FutArena) FutureLoad(&Orig, A);
+      else {
+        auto *F = new (FutArena) FutureLoad(&Orig, A);
+        Pending.push_back(F);
+        return F;
+      }
     }
   }
+  // Note: the instruction gets removed, since we don't add it.
   return &Orig;
 }
 
@@ -161,7 +146,7 @@ SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
   // If so, grab the real value and update the cache.
   if (auto *Ph = dyn_cast<Phi>(E)) {
     if (Ph->status() == Phi::PH_SingleVal) {
-      E = Ph->values()[0];
+      E = Ph->values()[0].get();
       LvarMap->at(LvarID) = E;
     }
   }

@@ -57,10 +57,6 @@ public:
   }
   BasicBlock* reduceWeak(BasicBlock *E);
 
-  // This is a non-destructive rewrite; just return the result.
-  template <class T, class U>
-  T* handleResult(T** Eptr, U* Res) { return Res; }
-
   void handleRecordSlot(Record *E, Slot *Res) {
     E->slots().push_back(Res);
   }
@@ -225,21 +221,10 @@ public:
   { }
 
   /// Traverse PendingExpr and return the result.
-  virtual SExpr* traversePending() {
+  virtual SExpr* evaluate() override {
     Reducer->Scope = std::move(this->Scope);
-    return Reducer->traverse(PendingExpr, TRV_Tail);
-  }
-
-  /// Force the future.
-  virtual SExpr* force() override {
-    if (status() == Future::FS_done)
-      return maybeGetResult();
-    assert(status() == Future::FS_pending && "Infinite loop!");
-
-    setStatus(Future::FS_evaluating);
-    auto *Res = traversePending();
+    auto* Res = Reducer->traverse(PendingExpr, TRV_Tail);
     PendingExpr = nullptr;
-    setResult(Res);
     return Res;
   }
 
