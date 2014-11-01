@@ -14,266 +14,701 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
-#define LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
 
 #include "ThreadSafetyTIL.h"
-
-#include <ostream>
 
 namespace clang {
 namespace threadSafety {
 namespace til {
 
-// Defines an interface used to traverse SExprs.  Traversals have been made as
-// generic as possible, and are intended to handle any kind of pass over the
-// AST, e.g. visiters, copying, non-destructive rewriting, destructive
-// (in-place) rewriting, hashing, typing, etc.
-//
-// Traversals implement the functional notion of a "fold" operation on SExprs.
-// Each SExpr class provides a traverse method, which does the following:
-//   * e->traverse(v):
-//       // compute a result r_i for each subexpression e_i
-//       for (i = 1..n)  r_i = v.traverse(e_i);
-//       // combine results into a result for e,  where X is the class of e
-//       return v.reduceX(*e, r_1, .. r_n).
-//
-// A visitor can control the traversal by overriding the following methods:
-//   * v.traverse(e):
-//       return v.traverseByCase(e), which returns v.traverseX(e)
-//   * v.traverseX(e):   (X is the class of e)
-//       return e->traverse(v).
-//   * v.reduceX(*e, r_1, .. r_n):
-//       compute a result for a node of type X
-//
-// The reduceX methods control the kind of traversal (visitor, copy, etc.).
-// They are defined in derived classes.
-//
-// Class R defines the basic interface types (R_SExpr).
-template <class Self, class R>
+/// TraversalKind describes the location in which a subexpression occurs.
+/// The traversal depends on this information, e.g. it should not traverse
+/// weak subexpressions, and should not eagerly traverse lazy subexpressions.
+enum TraversalKind {
+  TRV_Weak,     ///< un-owned (weak) reference to subexpression
+  TRV_SubExpr,  ///< owned subexpression
+  TRV_Path,     ///< owned subexpression on spine of path
+  TRV_Tail,     ///< owned subexpression in tail position
+  TRV_Lazy,     ///< owned subexpression in lazy position
+  TRV_Type      ///< owned subexpression in type position
+};
+
+
+/// The Traversal class defines an interface for traversing SExprs.  Traversals
+/// have been made as generic as possible, and are intended to handle any kind
+/// of pass over the AST, e.g. visiters, copiers, non-destructive rewriting,
+/// destructive (in-place) rewriting, hashing, typing, garbage collection, etc.
+///
+/// The Traversal class is responsible for traversing the AST in some order.
+/// The default is a depth first traversal, but other orders are possible,
+/// such as BFS, lazy or parallel traversals.
+///
+/// The AST distinguishes between owned sub-expressions, which form a spanning
+/// tree, and weak subexpressions, which are internal and possibly cyclic
+/// references.  A traversal will recursively traverse owned sub-expressions.
+///
+/// Subclasses can override the following in order to insert pre and post-visit
+/// code around a traversal.  Overridden versions should call the parent.
+///
+///   * traverse<T>(...) is the entry point for a traversal of an SExpr*.
+///   * traverseX(...) is the entry point for a taversal of node X.
+///
+/// This class must be combined with other classes to implement the full
+/// traversal interface:
+///
+///   * A Reducer class, e.g. VisitReducer, CopyReducer, or InplaceReducer.
+///   * A ScopeHandler (DefaultScopeHandler) to handle lexical scope.
+///
+/// The Reducer class implements reduceX methods, which are responsible for
+/// rewriting terms.  After an SExpr has been traversed, the traversal results
+/// are passed to reduceX(...), which essentially implements an SExpr builder
+/// API.  A transform pass will use this API to build a rewritten SExpr, but
+/// other passes may build an object of some other type.  In functional
+/// programming terms, reduceX implements a fold operation over the AST.
+///
+/// ReducerMapType is a trait class for the Reducer, which defines a TypeMap
+/// function that describes what type of results the reducer will produce.
+/// A rewrite pass will rewrite SExpr -> SExpr, while a visitor pass will just
+/// return a bool.
+///
+template <class Self, class ReducerMapType>
 class Traversal {
 public:
+  /// The underlying reducer interface, which implements TypeMap (for MAPTYPE).
+  typedef ReducerMapType RMap;
+
+  /// Cast this to the correct type (curiously recursive template pattern.)
   Self *self() { return static_cast<Self *>(this); }
 
-  // Traverse an expression -- returning a result of type R_SExpr.
-  // Override this method to do something for every expression, regardless
-  // of which kind it is.
-  typename R::R_SExpr traverse(SExprRef &E, typename R::R_Ctx Ctx) {
-    return traverse(E.get(), Ctx);
+  /// Initial starting point, to be called by external routines.
+  MAPTYPE(RMap, SExpr) traverseAll(SExpr* E) {
+    return self()->traverse(E, TRV_Tail);
   }
 
-  typename R::R_SExpr traverse(SExpr *E, typename R::R_Ctx Ctx) {
-    return traverseByCase(E, Ctx);
+  /// Invoked by SExpr classes to traverse possibly weak members.
+  /// Do not override.
+  MAPTYPE(RMap, SExpr) traverseArg(SExpr* E) {
+    // Detect weak references to other instructions in the CFG.
+    if (Instruction *I = E->asCFGInstruction())
+      return self()->reduceWeak(I);
+    return self()->traverse(E, TRV_SubExpr);
   }
 
-  // Helper method to call traverseX(e) on the appropriate type.
-  typename R::R_SExpr traverseByCase(SExpr *E, typename R::R_Ctx Ctx) {
-    switch (E->opcode()) {
-#define TIL_OPCODE_DEF(X)                                                   \
-    case COP_##X:                                                           \
-      return self()->traverse##X(cast<X>(E), Ctx);
+  /// Invoked by SExpr classes to traverse weak data members.
+  /// Do not override.
+  template <class T>
+  MAPTYPE(RMap, T) traverseWeak(T* E) {
+    return self()->reduceWeak(E);
+  }
+
+  /// Starting point for a traversal.
+  /// Override this method to traverse SExprs of arbitrary type.
+  template <class T>
+  MAPTYPE(RMap, T) traverse(T* E, TraversalKind K) {
+    return traverseByType(E, K);
+  }
+
+  /// Override these methods to traverse a particular type of SExpr.
+#define TIL_OPCODE_DEF(X)                                                 \
+  MAPTYPE(RMap,X) traverse##X(X *e, TraversalKind K) {                    \
+    return e->traverse(*self());                                          \
+  }
 #include "ThreadSafetyOps.def"
 #undef TIL_OPCODE_DEF
-    default:
-      return self()->reduceNull();
-    }
-  }
 
-// Traverse e, by static dispatch on the type "X" of e.
-// Override these methods to do something for a particular kind of term.
-#define TIL_OPCODE_DEF(X)                                                   \
-  typename R::R_SExpr traverse##X(X *e, typename R::R_Ctx Ctx) {            \
-    return e->traverse(*self(), Ctx);                                       \
-  }
-#include "ThreadSafetyOps.def"
-#undef TIL_OPCODE_DEF
-};
-
-
-// Base class for simple reducers that don't much care about the context.
-class SimpleReducerBase {
-public:
-  enum TraversalKind {
-    TRV_Normal,   // ordinary subexpressions
-    TRV_Decl,     // declarations (e.g. function bodies)
-    TRV_Lazy,     // expressions that require lazy evaluation
-    TRV_Type      // type expressions
-  };
-
-  // R_Ctx defines a "context" for the traversal, which encodes information
-  // about where a term appears.  This can be used to encoding the
-  // "current continuation" for CPS transforms, or other information.
-  typedef TraversalKind R_Ctx;
-
-  // Create context for an ordinary subexpression.
-  R_Ctx subExprCtx(R_Ctx Ctx) { return TRV_Normal; }
-
-  // Create context for a subexpression that occurs in a declaration position
-  // (e.g. function body).
-  R_Ctx declCtx(R_Ctx Ctx) { return TRV_Decl; }
-
-  // Create context for a subexpression that occurs in a position that
-  // should be reduced lazily.  (e.g. code body).
-  R_Ctx lazyCtx(R_Ctx Ctx) { return TRV_Lazy; }
-
-  // Create context for a subexpression that occurs in a type position.
-  R_Ctx typeCtx(R_Ctx Ctx) { return TRV_Type; }
-};
-
-
-// Base class for traversals that rewrite an SExpr to another SExpr.
-class CopyReducerBase : public SimpleReducerBase {
-public:
-  // R_SExpr is the result type for a traversal.
-  // A copy or non-destructive rewrite returns a newly allocated term.
-  typedef SExpr *R_SExpr;
-  typedef BasicBlock *R_BasicBlock;
-
-  // Container is a minimal interface used to store results when traversing
-  // SExprs of variable arity, such as Phi, Goto, and SCFG.
-  template <class T> class Container {
-  public:
-    // Allocate a new container with a capacity for n elements.
-    Container(CopyReducerBase &S, unsigned N) : Elems(S.Arena, N) {}
-
-    // Push a new element onto the container.
-    void push_back(T E) { Elems.push_back(E); }
-
-    SimpleArray<T> Elems;
-  };
-
-  CopyReducerBase(MemRegionRef A) : Arena(A) {}
 
 protected:
-  MemRegionRef Arena;
-};
-
-
-// Base class for visit traversals.
-class VisitReducerBase : public SimpleReducerBase {
-public:
-  // A visitor returns a bool, representing success or failure.
-  typedef bool R_SExpr;
-  typedef bool R_BasicBlock;
-
-  // A visitor "container" is a single bool, which accumulates success.
-  template <class T> class Container {
-  public:
-    Container(VisitReducerBase &S, unsigned N) : Success(true) {}
-    void push_back(bool E) { Success = Success && E; }
-
-    bool Success;
-  };
-};
-
-
-// Implements a traversal that visits each subexpression, and returns either
-// true or false.
-template <class Self>
-class VisitReducer : public Traversal<Self, VisitReducerBase>,
-                     public VisitReducerBase {
-public:
-  VisitReducer() {}
-
-public:
-  R_SExpr reduceNull() { return true; }
-  R_SExpr reduceUndefined(Undefined &Orig) { return true; }
-  R_SExpr reduceWildcard(Wildcard &Orig) { return true; }
-
-  R_SExpr reduceLiteral(Literal &Orig) { return true; }
-  template<class T>
-  R_SExpr reduceLiteralT(LiteralT<T> &Orig) { return true; }
-  R_SExpr reduceLiteralPtr(Literal &Orig) { return true; }
-
-  R_SExpr reduceFunction(Function &Orig, Variable *Nvd, R_SExpr E0) {
-    return Nvd && E0;
+  /// For generic SExprs, do dynamic dispatch by type.
+  MAPTYPE(RMap, SExpr) traverseByType(SExpr* E, TraversalKind K) {
+    switch (E->opcode()) {
+#define TIL_OPCODE_DEF(X)                                                 \
+    case COP_##X:                                                         \
+      return self()->traverse##X(cast<X>(E), K);
+#include "ThreadSafetyOps.def"
+#undef TIL_OPCODE_DEF
+    }
+    return RMap::reduceNull();
   }
-  R_SExpr reduceSFunction(SFunction &Orig, Variable *Nvd, R_SExpr E0) {
-    return Nvd && E0;
+
+  /// For SExprs of known type, do static dispatch by type.
+#define TIL_OPCODE_DEF(X)                                                 \
+  MAPTYPE(RMap, X) traverseByType(X* E, TraversalKind K) {                \
+    return self()->traverse##X(E, K);                                     \
+  }
+#include "ThreadSafetyOps.def"
+#undef TIL_OPCODE_DEF
+};
+
+
+
+/// Implements default versions of the enter/exit routines for lexical scope.
+/// for the reducer interface.
+template <class RMap>
+class DefaultScopeHandler {
+public:
+  /// Enter the lexical scope of Orig, which is rewritten to Nvd.
+  void enterScope(VarDecl* Orig, MAPTYPE(RMap, VarDecl) Nvd) { }
+
+  /// Exit the lexical scope of Orig.
+  void exitScope(VarDecl* Orig) { }
+};
+
+
+
+/// Implements the reducer interface, with default versions for all methods.
+/// R is a base class that defines the TypeMap.
+template <class Self, class RMap>
+class DefaultReducer {
+public:
+  typedef MAPTYPE(RMap, SExpr)       R_SExpr;
+  typedef MAPTYPE(RMap, VarDecl)     R_VarDecl;
+  typedef MAPTYPE(RMap, Slot)        R_Slot;
+  typedef MAPTYPE(RMap, Record)      R_Record;
+  typedef MAPTYPE(RMap, Goto)        R_Goto;
+  typedef MAPTYPE(RMap, Phi)         R_Phi;
+  typedef MAPTYPE(RMap, BasicBlock)  R_BasicBlock;
+  typedef MAPTYPE(RMap, SCFG)        R_SCFG;
+
+  Self* self() { return static_cast<Self*>(this); }
+
+  void handleRecordSlot(R_Record E, R_Slot Res)            { }
+  void handlePhiArg  (Phi &Orig, R_Goto NG, R_SExpr Res)   { }
+  void handleBBArg   (Phi &Orig,         R_SExpr Res)      { }
+  void handleBBInstr (Instruction &Orig, R_SExpr Res)      { }
+  void handleCFGBlock(BasicBlock &Orig,  R_BasicBlock Res) { }
+
+  R_SExpr reduceSExpr(SExpr& Orig) { return RMap::reduceNull(); }
+
+  R_SExpr      reduceWeak(Instruction* E) { return RMap::reduceNull(); }
+  R_VarDecl    reduceWeak(VarDecl *E)     { return RMap::reduceNull(); }
+  R_BasicBlock reduceWeak(BasicBlock *E)  { return RMap::reduceNull(); }
+
+  R_VarDecl reduceVarDecl(VarDecl &Orig, R_SExpr E) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_VarDecl reduceVarDeclLetrec(R_VarDecl VD, R_SExpr E) { return VD; }
+
+  R_SExpr reduceFunction(Function &Orig, R_VarDecl Nvd, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceSFunction(SFunction &Orig, R_VarDecl Nvd, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+    return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceField(Field &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+    return self()->reduceSExpr(Orig);
   }
+  R_Slot reduceSlot(Slot &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_Record reduceRecordBegin(Record &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_Record reduceRecordEnd(R_Record R) { return R; }
+
+  R_SExpr reduceScalarType(ScalarType &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+
+  R_SExpr reduceLiteral(Literal &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  template<class T>
+  R_SExpr reduceLiteralT(LiteralT<T> &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceVariable(Variable &Orig, R_VarDecl VD) {
+    return self()->reduceSExpr(Orig);
+  }
+
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+    return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+    return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceProject(Project &Orig, R_SExpr E0) { return E0; }
-  R_SExpr reduceCall(Call &Orig, R_SExpr E0) { return E0; }
-  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) { return E0; }
-  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) { return E0; }
-  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) { return E0 && E1; }
-  R_SExpr reduceArrayIndex(Store &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+  R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceArrayAdd(Store &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+  R_SExpr reduceCall(Call &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) { return E0; }
+  R_SExpr reduceAlloc(Alloc &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceLoad(Load &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceStore(Store &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceArrayIndex(ArrayIndex &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceArrayAdd(ArrayAdd &Orig, R_SExpr E0, R_SExpr E1) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceUnaryOp(UnaryOp &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
+  }
   R_SExpr reduceBinaryOp(BinaryOp &Orig, R_SExpr E0, R_SExpr E1) {
-    return E0 && E1;
+    return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) { return E0; }
-
-  R_SExpr reduceSCFG(SCFG &Orig, Container<BasicBlock *> Bbs) {
-    return Bbs.Success;
+  R_SExpr reduceCast(Cast &Orig, R_SExpr E0) {
+    return self()->reduceSExpr(Orig);
   }
-  R_BasicBlock reduceBasicBlock(BasicBlock &Orig, Container<R_SExpr> &As,
-                                Container<R_SExpr> &Is, R_SExpr T) {
-    return (As.Success && Is.Success && T);
-  }
-  R_SExpr reducePhi(Phi &Orig, Container<R_SExpr> &As) {
-    return As.Success;
-  }
-  R_SExpr reduceGoto(Goto &Orig, BasicBlock *B) {
-    return true;
-  }
-  R_SExpr reduceBranch(Branch &O, R_SExpr C, BasicBlock *B0, BasicBlock *B1) {
-    return C;
+  R_SExpr reduceBranch(Branch &O, R_SExpr C, R_BasicBlock B0, R_BasicBlock B1) {
+    return self()->reduceSExpr(O);
   }
   R_SExpr reduceReturn(Return &O, R_SExpr E) {
-    return E;
+    return self()->reduceSExpr(O);
+  }
+  R_SExpr reduceGotoBegin(Goto &Orig, R_BasicBlock B) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceGotoEnd(R_Goto G) { return G; }
+
+  R_Phi reducePhi(Phi &Orig) {
+    return self()->reduceSExpr(Orig);
   }
 
+  R_BasicBlock reduceBasicBlockBegin(BasicBlock &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_BasicBlock reduceBasicBlockEnd(R_BasicBlock BB, R_SExpr Tm) { return BB; }
+
+  R_SCFG reduceSCFG_Begin(SCFG &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SCFG reduceSCFG_End(R_SCFG Scfg) { return Scfg; }
+
+  R_SExpr reduceUndefined(Undefined &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceWildcard(Wildcard &Orig) {
+    return self()->reduceSExpr(Orig);
+  }
   R_SExpr reduceIdentifier(Identifier &Orig) {
-    return true;
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceLet(Let &Orig, R_VarDecl Nvd, R_SExpr B) {
+    return self()->reduceSExpr(Orig);
+  }
+  R_SExpr reduceLetrec(Letrec &Orig, R_VarDecl Nvd, R_SExpr B) {
+    return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceIfThenElse(IfThenElse &Orig, R_SExpr C, R_SExpr T, R_SExpr E) {
-    return C && T && E;
+    return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceLet(Let &Orig, Variable *Nvd, R_SExpr B) {
-    return Nvd && B;
-  }
+};
 
-  Variable *enterScope(Variable &Orig, R_SExpr E0) { return &Orig; }
-  void exitScope(const Variable &Orig) {}
-  void enterCFG(SCFG &Cfg) {}
-  void exitCFG(SCFG &Cfg) {}
-  void enterBasicBlock(BasicBlock &BB) {}
-  void exitBasicBlock(BasicBlock &BB) {}
 
-  Variable   *reduceVariableRef  (Variable *Ovd)   { return Ovd; }
-  BasicBlock *reduceBasicBlockRef(BasicBlock *Obb) { return Obb; }
-
+/// Defines the TypeMap for VisitReducer
+class VisitReducerMap {
 public:
-  bool traverse(SExpr *E, TraversalKind K = TRV_Normal) {
-    Success = Success && this->traverseByCase(E);
+  /// A visitor maps all expression types to bool.
+  template <class T> struct TypeMap { typedef bool Ty; };
+  typedef bool NullType;
+
+  static bool reduceNull() { return true; }
+};
+
+
+/// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
+/// SExprs to booleans: it returns true on success, and false on failure.
+template<class Self>
+class VisitReducer : public Traversal<Self, VisitReducerMap>,
+                     public DefaultReducer<Self, VisitReducerMap>,
+                     public DefaultScopeHandler<VisitReducerMap> {
+public:
+  typedef Traversal<Self, VisitReducerMap> SuperTv;
+
+  VisitReducer() : Success(true) { }
+
+  bool reduceSExpr(SExpr &Orig) { return true; }
+
+  /// Abort traversal on failure.
+  template <class T>
+  MAPTYPE(VisitReducerMap, T) traverse(T* E, TraversalKind K) {
+    Success = Success && SuperTv::traverse(E, K);
     return Success;
   }
 
   static bool visit(SExpr *E) {
     Self Visitor;
-    return Visitor.traverse(E, TRV_Normal);
+    return Visitor.traverse(E, TRV_Tail);
   }
 
 private:
   bool Success;
 };
+
+
+// Used by SExprReducerMap.  Most terms map to SExpr*.
+template <class T> struct SExprTypeMap { typedef SExpr* Ty; };
+
+// These kinds of SExpr must map to the same kind.
+// We define these here b/c template specializations cannot be class members.
+template<> struct SExprTypeMap<VarDecl>    { typedef VarDecl* Ty; };
+template<> struct SExprTypeMap<BasicBlock> { typedef BasicBlock* Ty; };
+template<> struct SExprTypeMap<Slot>       { typedef Slot* Ty; };
+
+/// Defines the TypeMap for traversals that return SExprs.
+/// See CopyReducer and InplaceReducer for details.
+class SExprReducerMap {
+public:
+  // An SExpr reducer rewrites one SExpr to another.
+  template <class T> struct TypeMap : public SExprTypeMap<T> { };
+
+  typedef std::nullptr_t NullType;
+
+  static NullType reduceNull() { return nullptr; }
+};
+
+
+
+////////////////////////////////////////
+// traverse methods for all TIL classes.
+////////////////////////////////////////
+
+template <class V>
+MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
+  switch (kind()) {
+    case VK_Fun: {
+      auto D = Vs.traverse(Definition.get(), TRV_Type);
+      return Vs.reduceVarDecl(*this, D);
+    }
+    case VK_SFun: {
+      // Don't traverse the definition, since it cyclicly points back to self.
+      // Just create a new (dummy) definition.
+      return Vs.reduceVarDecl(*this, V::RMap::reduceNull());
+    }
+    case VK_Let: {
+      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      return Vs.reduceVarDecl(*this, D);
+    }
+    case VK_Letrec: {
+      // Create a new (empty) definition.
+      auto Nvd = Vs.reduceVarDecl(*this, V::RMap::reduceNull());
+      // Enter the scope of the empty definition.
+      Vs.enterScope(this, Nvd);
+      // Traverse the definition, and hope recursive references are lazy.
+      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      Vs.exitScope(this);
+      return Vs.reduceVarDeclLetrec(Nvd, D);
+    }
+  }
+}
+
+template <class V>
+MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
+  // This is a variable declaration, so traverse the definition.
+  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  // Tell the rewriter to enter the scope of the function.
+  Vs.enterScope(VDecl.get(), E0);
+  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
+  Vs.exitScope(VDecl.get());
+  return Vs.reduceFunction(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RMap, SFunction) SFunction::traverse(V &Vs) {
+  // Traversing an self-definition is a no-op.
+  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  Vs.enterScope(VDecl.get(), E0);
+  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
+  Vs.exitScope(VDecl.get());
+  // The SFun constructor will set E0->Definition to E1.
+  return Vs.reduceSFunction(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
+  auto Nt = Vs.traverse(ReturnType.get(), TRV_Type);
+  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  return Vs.reduceCode(*this, Nt, Nb);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
+  auto Nr = Vs.traverse(Range.get(), TRV_Type);
+  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  return Vs.reduceField(*this, Nr, Nb);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Slot) Slot::traverse(V &Vs) {
+  auto Nd = Vs.traverse(Definition.get(), TRV_SubExpr);
+  return Vs.reduceSlot(*this, Nd);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
+  auto Nr = Vs.reduceRecordBegin(*this);
+  for (auto &Slt : Slots) {
+    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_SubExpr));
+  }
+  return Vs.reduceRecordEnd(Nr);
+}
+
+template<class V>
+MAPTYPE(V::RMap, ScalarType) ScalarType::traverse(V &Vs) {
+  return Vs.reduceScalarType(*this);
+}
+
+
+template <class V>
+MAPTYPE(V::RMap, Literal) Literal::traverse(V &Vs) {
+  switch (ValType.Base) {
+  case ValueType::BT_Void:
+    break;
+  case ValueType::BT_Bool:
+    return Vs.reduceLiteralT(as<bool>());
+  case ValueType::BT_Int: {
+    switch (ValType.Size) {
+    case ValueType::ST_8:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(as<int8_t>());
+      else
+        return Vs.reduceLiteralT(as<uint8_t>());
+    case ValueType::ST_16:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(as<int16_t>());
+      else
+        return Vs.reduceLiteralT(as<uint16_t>());
+    case ValueType::ST_32:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(as<int32_t>());
+      else
+        return Vs.reduceLiteralT(as<uint32_t>());
+    case ValueType::ST_64:
+      if (ValType.Signed)
+        return Vs.reduceLiteralT(as<int64_t>());
+      else
+        return Vs.reduceLiteralT(as<uint64_t>());
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_Float: {
+    switch (ValType.Size) {
+    case ValueType::ST_32:
+      return Vs.reduceLiteralT(as<float>());
+    case ValueType::ST_64:
+      return Vs.reduceLiteralT(as<double>());
+    default:
+      break;
+    }
+    break;
+  }
+  case ValueType::BT_String:
+    return Vs.reduceLiteralT(as<StringRef>());
+  case ValueType::BT_Pointer:
+    return Vs.reduceLiteralT(as<void*>());
+  case ValueType::BT_ValueRef:
+    break;
+  }
+  return Vs.reduceLiteral(*this);
+}
+
+template<class V>
+MAPTYPE(V::RMap, Variable) Variable::traverse(V &Vs) {
+  return Vs.reduceVariable(*this, Vs.traverseWeak(VDecl.get()));
+}
+
+template <class V>
+MAPTYPE(V::RMap, Apply) Apply::traverse(V &Vs) {
+  auto Nf = Vs.traverse(Fun.get(), TRV_Path);
+  auto Na = Vs.traverseArg(Arg.get());
+  return Vs.reduceApply(*this, Nf, Na);
+}
+
+template <class V>
+MAPTYPE(V::RMap, SApply) SApply::traverse(V &Vs) {
+  auto Nf = Vs.traverse(Sfun.get(), TRV_Path);
+  auto Na = Arg.get() ? Vs.traverseArg(Arg.get()) : V::RMap::reduceNull();
+  return Vs.reduceSApply(*this, Nf, Na);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Project) Project::traverse(V &Vs) {
+  auto Nr = Vs.traverse(Rec.get(), TRV_Path);
+  return Vs.reduceProject(*this, Nr);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Call) Call::traverse(V &Vs) {
+  auto Nt = Vs.traverse(Target.get(), TRV_Path);
+  return Vs.reduceCall(*this, Nt);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Alloc) Alloc::traverse(V &Vs) {
+  auto Nd = Vs.traverseArg(InitExpr.get());
+  return Vs.reduceAlloc(*this, Nd);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Load) Load::traverse(V &Vs) {
+  auto Np = Vs.traverseArg(Ptr.get());
+  return Vs.reduceLoad(*this, Np);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Store) Store::traverse(V &Vs) {
+  auto Np = Vs.traverseArg(Dest.get());
+  auto Nv = Vs.traverseArg(Source.get());
+  return Vs.reduceStore(*this, Np, Nv);
+}
+
+template <class V>
+MAPTYPE(V::RMap, ArrayIndex) ArrayIndex::traverse(V &Vs) {
+  auto Na = Vs.traverseArg(Array.get());
+  auto Ni = Vs.traverseArg(Index.get());
+  return Vs.reduceArrayIndex(*this, Na, Ni);
+}
+
+template <class V>
+MAPTYPE(V::RMap, ArrayAdd) ArrayAdd::traverse(V &Vs) {
+  auto Na = Vs.traverseArg(Array.get());
+  auto Ni = Vs.traverseArg(Index.get());
+  return Vs.reduceArrayAdd(*this, Na, Ni);
+}
+
+template <class V>
+MAPTYPE(V::RMap, UnaryOp) UnaryOp::traverse(V &Vs) {
+  auto Ne = Vs.traverseArg(Expr0.get());
+  return Vs.reduceUnaryOp(*this, Ne);
+}
+
+template <class V>
+MAPTYPE(V::RMap, BinaryOp) BinaryOp::traverse(V &Vs) {
+  auto Ne0 = Vs.traverseArg(Expr0.get());
+  auto Ne1 = Vs.traverseArg(Expr1.get());
+  return Vs.reduceBinaryOp(*this, Ne0, Ne1);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Cast) Cast::traverse(V &Vs) {
+  auto Ne = Vs.traverseArg(Expr0.get());
+  return Vs.reduceCast(*this, Ne);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Phi) Phi::traverse(V &Vs) {
+  // Note: traversing a Phi does not traverse it's arguments.
+  // The arguments are traversed by the Goto.
+  return Vs.reducePhi(*this);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Goto) Goto::traverse(V &Vs) {
+  auto Ntb = Vs.traverseWeak(TargetBlock.get());
+  auto Ng  = Vs.reduceGotoBegin(*this, Ntb);
+  for (Phi *Ph : TargetBlock->arguments()) {
+    if (Ph && Ph->instrID() > 0) {
+      // Ignore any newly-added Phi nodes (e.g. from an in-place SSA pass.)
+      Vs.handlePhiArg(*Ph, Ng,
+        Vs.traverseArg( Ph->values()[phiIndex()].get() ));
+    }
+  }
+  return Vs.reduceGotoEnd(Ng);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Branch) Branch::traverse(V &Vs) {
+  auto Nc  = Vs.traverseArg(Condition.get());
+  auto Ntb = Vs.traverseWeak(Branches[0].get());
+  auto Nte = Vs.traverseWeak(Branches[1].get());
+  return Vs.reduceBranch(*this, Nc, Ntb, Nte);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Return) Return::traverse(V &Vs) {
+  auto Ne = Vs.traverseArg(Retval.get());
+  return Vs.reduceReturn(*this, Ne);
+}
+
+template <class V>
+MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
+  auto Nb = Vs.reduceBasicBlockBegin(*this);
+  for (Phi *A : Args) {
+    // Use TRV_SubExpr to force traversal of arguments
+    Vs.handleBBArg(*A, Vs.traverse(A, TRV_SubExpr));
+  }
+  for (Instruction *I : Instrs) {
+    // Use TRV_SubExpr to force traversal of instructions
+    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_SubExpr));
+  }
+  auto Nt = Vs.traverse(TermInstr, TRV_SubExpr);
+  return Vs.reduceBasicBlockEnd(Nb, Nt);
+}
+
+template <class V>
+MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
+  auto Ns = Vs.reduceSCFG_Begin(*this);
+  for (BasicBlock *B : Blocks) {
+    Vs.handleCFGBlock(*B, Vs.traverse(B, TRV_SubExpr));
+  }
+  return Vs.reduceSCFG_End(Ns);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Future) Future::traverse(V &Vs) {
+  assert(Result && "Cannot traverse Future that has not been forced.");
+  return Vs.traverseArg(Result);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Undefined) Undefined::traverse(V &Vs) {
+  return Vs.reduceUndefined(*this);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Wildcard) Wildcard::traverse(V &Vs) {
+  return Vs.reduceWildcard(*this);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Identifier)
+Identifier::traverse(V &Vs) {
+  return Vs.reduceIdentifier(*this);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
+  // This is a variable declaration, so traverse the definition.
+  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  // Tell the rewriter to enter the scope of the let variable.
+  Vs.enterScope(VDecl.get(), E0);
+  auto E1 = Vs.traverse(Body.get(), TRV_Tail);
+  Vs.exitScope(VDecl.get());
+  return Vs.reduceLet(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RMap, Letrec) Letrec::traverse(V &Vs) {
+  // This is a variable declaration, so traverse the definition.
+  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  // Tell the rewriter to enter the scope of the let variable.
+  Vs.enterScope(VDecl.get(), E0);
+  auto E1 = Vs.traverse(Body.get(), TRV_Tail);
+  Vs.exitScope(VDecl.get());
+  return Vs.reduceLetrec(*this, E0, E1);
+}
+
+template <class V>
+MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
+  auto Nc = Vs.traverseArg(Condition.get());
+  auto Nt = Vs.traverse(ThenExpr.get(), TRV_Tail);
+  auto Ne = Vs.traverse(ElseExpr.get(), TRV_Tail);
+  return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
+}
 
 
 // Basic class for comparison operations over expressions.
@@ -294,6 +729,286 @@ public:
     return false;
   }
 };
+
+
+///////////////////////////////////////////
+// Implement compare for all TIL classes.
+///////////////////////////////////////////
+
+template <class C>
+typename C::CType VarDecl::compare(const VarDecl* E, C& Cmp) const {
+  auto Ct = Cmp.compareIntegers(kind(), E->kind());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  // Note, we don't compare names, due to alpha-renaming.
+  return Cmp.compare(definition(), E->definition());
+}
+
+template <class C>
+typename C::CType Function::compare(const Function* E, C& Cmp) const {
+  typename C::CType Ct =
+    Cmp.compare(VDecl->definition(), E->VDecl->definition());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  Ct = Cmp.compare(body(), E->body());
+  Cmp.exitScope();
+  return Ct;
+}
+
+template <class C>
+typename C::CType SFunction::compare(const SFunction* E, C& Cmp) const {
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  typename C::CType Ct = Cmp.compare(body(), E->body());
+  Cmp.exitScope();
+  return Ct;
+}
+
+template <class C>
+typename C::CType Code::compare(const Code* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(returnType(), E->returnType());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(body(), E->body());
+}
+
+template <class C>
+typename C::CType Field::compare(const Field* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(range(), E->range());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(body(), E->body());
+}
+
+template <class C>
+typename C::CType Slot::compare(const Slot* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compareStrings(name(), E->name());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(definition(), E->definition());
+}
+
+template <class C>
+typename C::CType Record::compare(const Record* E, C& Cmp) const {
+  unsigned N = slots().size();
+  unsigned M = E->slots().size();
+  typename C::CType Ct = Cmp.compareIntegers(N, M);
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  unsigned Sz = (N < M) ? N : M;
+  for (unsigned i = 0; i < Sz; ++i) {
+    Ct = Cmp.compare(slots()[i].get(), E->slots()[i].get());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+  }
+  return Ct;
+}
+
+template <class C>
+typename C::CType ScalarType::compare(const ScalarType* E, C& Cmp) const {
+  return Cmp.compareIntegers(valueType().asInt32(), E->valueType().asInt32());
+}
+
+
+template <class C>
+typename C::CType Literal::compare(const Literal* E, C& Cmp) const {
+  // TODO: defer actual comparison to LiteralT
+  return Cmp.trueResult();
+}
+
+template <class C>
+typename C::CType Variable::compare(const Variable* E, C& Cmp) const {
+  // TODO: compare weak refs.
+  return Cmp.comparePointers(variableDecl(), E->variableDecl());
+}
+
+template <class C>
+typename C::CType Apply::compare(const Apply* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(fun(), E->fun());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(arg(), E->arg());
+}
+
+template <class C>
+typename C::CType SApply::compare(const SApply* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(sfun(), E->sfun());
+  if (Cmp.notTrue(Ct) || (!arg() && !E->arg()))
+    return Ct;
+  return Cmp.compare(arg(), E->arg());
+}
+
+template <class C>
+typename C::CType Project::compare(const Project* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(record(), E->record());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
+}
+
+template <class C>
+typename C::CType Call::compare(const Call* E, C& Cmp) const {
+  return Cmp.compare(target(), E->target());
+}
+
+
+template <class C>
+typename C::CType Alloc::compare(const Alloc* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compareIntegers(kind(), E->kind());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(initializer(), E->initializer());
+}
+
+template <class C>
+typename C::CType Load::compare(const Load* E, C& Cmp) const {
+  return Cmp.compare(pointer(), E->pointer());
+}
+
+template <class C>
+typename C::CType Store::compare(const Store* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(destination(), E->destination());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(source(), E->source());
+}
+
+template <class C>
+typename C::CType ArrayIndex::compare(const ArrayIndex* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(array(), E->array());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(index(), E->index());
+}
+
+template <class C>
+typename C::CType ArrayAdd::compare(const ArrayAdd* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(array(), E->array());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(index(), E->index());
+}
+
+template <class C>
+typename C::CType UnaryOp::compare(const UnaryOp* E, C& Cmp) const {
+  typename C::CType Ct =
+    Cmp.compareIntegers(unaryOpcode(), E->unaryOpcode());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(expr(), E->expr());
+}
+
+template <class C>
+typename C::CType BinaryOp::compare(const BinaryOp* E, C& Cmp) const {
+  typename C::CType Ct =
+    Cmp.compareIntegers(binaryOpcode(), E->binaryOpcode());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Ct = Cmp.compare(expr0(), E->expr0());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(expr1(), E->expr1());
+}
+
+template <class C>
+typename C::CType Cast::compare(const Cast* E, C& Cmp) const {
+  typename C::CType Ct =
+    Cmp.compareIntegers(castOpcode(), E->castOpcode());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(expr(), E->expr());
+}
+
+template <class C>
+typename C::CType Phi::compare(const Phi *E, C &Cmp) const {
+  // TODO: implement CFG comparisons
+  return Cmp.comparePointers(this, E);
+}
+
+template <class C>
+typename C::CType Goto::compare(const Goto *E, C &Cmp) const {
+  // TODO: implement CFG comparisons
+  return Cmp.comparePointers(this, E);
+}
+
+template <class C>
+typename C::CType Branch::compare(const Branch *E, C &Cmp) const {
+  // TODO: implement CFG comparisons
+  return Cmp.comparePointers(this, E);
+}
+
+template <class C>
+typename C::CType Return::compare(const Return *E, C &Cmp) const {
+  return Cmp.compare(returnValue(), E->returnValue());
+}
+
+template <class C>
+typename C::CType BasicBlock::compare(const BasicBlock *E, C &Cmp) const {
+  // TODO: implement CFG comparisons
+  return Cmp.comparePointers(this, E);
+}
+
+template <class C>
+typename C::CType SCFG::compare(const SCFG *E, C &Cmp) const {
+  // TODO: implement CFG comparisons
+  return Cmp.comparePointers(this, E);
+}
+
+template <class C>
+typename C::CType Future::compare(const Future* E, C& Cmp) const {
+  if (!Result || !E->Result)
+    return Cmp.comparePointers(this, E);
+  return Cmp.compare(Result, E->Result);
+}
+
+template <class C>
+typename C::CType Undefined::compare(const Undefined* E, C& Cmp) const {
+  return Cmp.trueResult();
+}
+
+template <class C>
+typename C::CType Wildcard::compare(const Wildcard* E, C& Cmp) const {
+  return Cmp.trueResult();
+}
+
+template <class C>
+typename C::CType Identifier::compare(const Identifier* E, C& Cmp) const {
+  return Cmp.compareStrings(name(), E->name());
+}
+
+template <class C>
+typename C::CType Let::compare(const Let* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  Ct = Cmp.compare(body(), E->body());
+  Cmp.exitScope();
+  return Ct;
+}
+
+template <class C>
+typename C::CType Letrec::compare(const Letrec* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Cmp.enterScope(variableDecl(), E->variableDecl());
+  Ct = Cmp.compare(body(), E->body());
+  Cmp.exitScope();
+  return Ct;
+}
+
+template <class C>
+typename C::CType IfThenElse::compare(const IfThenElse* E, C& Cmp) const {
+  typename C::CType Ct = Cmp.compare(condition(), E->condition());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  Ct = Cmp.compare(thenExpr(), E->thenExpr());
+  if (Cmp.notTrue(Ct))
+    return Ct;
+  return Cmp.compare(elseExpr(), E->elseExpr());
+}
+
 
 
 class EqualsComparator : public Comparator<EqualsComparator> {
@@ -317,10 +1032,10 @@ public:
   }
 
   // TODO -- handle alpha-renaming of variables
-  void enterScope(const Variable* V1, const Variable* V2) { }
-  void leaveScope() { }
+  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
+  void exitScope() { }
 
-  bool compareVariableRefs(const Variable* V1, const Variable* V2) {
+  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;
   }
 
@@ -357,10 +1072,10 @@ public:
   }
 
   // TODO -- handle alpha-renaming of variables
-  void enterScope(const Variable* V1, const Variable* V2) { }
-  void leaveScope() { }
+  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
+  void exitScope() { }
 
-  bool compareVariableRefs(const Variable* V1, const Variable* V2) {
+  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
     return V1 == V2;
   }
 
@@ -369,526 +1084,6 @@ public:
     return Matcher.compare(E1, E2);
   }
 };
-
-
-
-// inline std::ostream& operator<<(std::ostream& SS, StringRef R) {
-//   return SS.write(R.data(), R.size());
-// }
-
-// Pretty printer for TIL expressions
-template <typename Self, typename StreamType>
-class PrettyPrinter {
-private:
-  bool Verbose;  // Print out additional information
-  bool Cleanup;  // Omit redundant decls.
-  bool CStyle;   // Print exprs in C-like syntax.
-
-public:
-  PrettyPrinter(bool V = false, bool C = true, bool CS = true)
-     : Verbose(V), Cleanup(C), CStyle(CS)
-  {}
-
-  static void print(const SExpr *E, StreamType &SS) {
-    Self printer;
-    printer.printSExpr(E, SS, Prec_MAX);
-  }
-
-protected:
-  Self *self() { return reinterpret_cast<Self *>(this); }
-
-  void newline(StreamType &SS) {
-    SS << "\n";
-  }
-
-  // TODO: further distinguish between binary operations.
-  static const unsigned Prec_Atom = 0;
-  static const unsigned Prec_Postfix = 1;
-  static const unsigned Prec_Unary = 2;
-  static const unsigned Prec_Binary = 3;
-  static const unsigned Prec_Other = 4;
-  static const unsigned Prec_Decl = 5;
-  static const unsigned Prec_MAX = 6;
-
-  // Return the precedence of a given node, for use in pretty printing.
-  unsigned precedence(const SExpr *E) {
-    switch (E->opcode()) {
-      case COP_Future:     return Prec_Atom;
-      case COP_Undefined:  return Prec_Atom;
-      case COP_Wildcard:   return Prec_Atom;
-
-      case COP_Literal:    return Prec_Atom;
-      case COP_LiteralPtr: return Prec_Atom;
-      case COP_Variable:   return Prec_Atom;
-      case COP_Function:   return Prec_Decl;
-      case COP_SFunction:  return Prec_Decl;
-      case COP_Code:       return Prec_Decl;
-      case COP_Field:      return Prec_Decl;
-
-      case COP_Apply:      return Prec_Postfix;
-      case COP_SApply:     return Prec_Postfix;
-      case COP_Project:    return Prec_Postfix;
-
-      case COP_Call:       return Prec_Postfix;
-      case COP_Alloc:      return Prec_Other;
-      case COP_Load:       return Prec_Postfix;
-      case COP_Store:      return Prec_Other;
-      case COP_ArrayIndex: return Prec_Postfix;
-      case COP_ArrayAdd:   return Prec_Postfix;
-
-      case COP_UnaryOp:    return Prec_Unary;
-      case COP_BinaryOp:   return Prec_Binary;
-      case COP_Cast:       return Prec_Atom;
-
-      case COP_SCFG:       return Prec_Decl;
-      case COP_BasicBlock: return Prec_MAX;
-      case COP_Phi:        return Prec_Atom;
-      case COP_Goto:       return Prec_Atom;
-      case COP_Branch:     return Prec_Atom;
-      case COP_Return:     return Prec_Other;
-
-      case COP_Identifier: return Prec_Atom;
-      case COP_IfThenElse: return Prec_Other;
-      case COP_Let:        return Prec_Decl;
-    }
-    return Prec_MAX;
-  }
-
-  void printBlockLabel(StreamType & SS, const BasicBlock *BB, unsigned index) {
-    if (!BB) {
-      SS << "BB_null";
-      return;
-    }
-    SS << "BB_";
-    SS << BB->blockID();
-    SS << ":";
-    SS << index;
-  }
-
-
-  void printSExpr(const SExpr *E, StreamType &SS, unsigned P, bool Sub=true) {
-    if (!E) {
-      self()->printNull(SS);
-      return;
-    }
-    if (Sub && E->block() && E->opcode() != COP_Variable) {
-      SS << "_x" << E->id();
-      return;
-    }
-    if (self()->precedence(E) > P) {
-      // Wrap expr in () if necessary.
-      SS << "(";
-      self()->printSExpr(E, SS, Prec_MAX);
-      SS << ")";
-      return;
-    }
-
-    switch (E->opcode()) {
-#define TIL_OPCODE_DEF(X)                                                  \
-    case COP_##X:                                                          \
-      self()->print##X(cast<X>(E), SS);                                    \
-      return;
-#include "ThreadSafetyOps.def"
-#undef TIL_OPCODE_DEF
-    }
-  }
-
-  void printNull(StreamType &SS) {
-    SS << "#null";
-  }
-
-  void printFuture(const Future *E, StreamType &SS) {
-    self()->printSExpr(E->maybeGetResult(), SS, Prec_Atom);
-  }
-
-  void printUndefined(const Undefined *E, StreamType &SS) {
-    SS << "#undefined";
-  }
-
-  void printWildcard(const Wildcard *E, StreamType &SS) {
-    SS << "*";
-  }
-
-  template<class T>
-  void printLiteralT(const LiteralT<T> *E, StreamType &SS) {
-    SS << E->value();
-  }
-
-  void printLiteralT(const LiteralT<uint8_t> *E, StreamType &SS) {
-    SS << "'" << E->value() << "'";
-  }
-
-  void printLiteral(const Literal *E, StreamType &SS) {
-    if (E->clangExpr()) {
-      SS << getSourceLiteralString(E->clangExpr());
-      return;
-    }
-    else {
-      ValueType VT = E->valueType();
-      switch (VT.Base) {
-      case ValueType::BT_Void: {
-        SS << "void";
-        return;
-      }
-      case ValueType::BT_Bool: {
-        if (E->as<bool>().value())
-          SS << "true";
-        else
-          SS << "false";
-        return;
-      }
-      case ValueType::BT_Int: {
-        switch (VT.Size) {
-        case ValueType::ST_8:
-          if (VT.Signed)
-            printLiteralT(&E->as<int8_t>(), SS);
-          else
-            printLiteralT(&E->as<uint8_t>(), SS);
-          return;
-        case ValueType::ST_16:
-          if (VT.Signed)
-            printLiteralT(&E->as<int16_t>(), SS);
-          else
-            printLiteralT(&E->as<uint16_t>(), SS);
-          return;
-        case ValueType::ST_32:
-          if (VT.Signed)
-            printLiteralT(&E->as<int32_t>(), SS);
-          else
-            printLiteralT(&E->as<uint32_t>(), SS);
-          return;
-        case ValueType::ST_64:
-          if (VT.Signed)
-            printLiteralT(&E->as<int64_t>(), SS);
-          else
-            printLiteralT(&E->as<uint64_t>(), SS);
-          return;
-        default:
-          break;
-        }
-        break;
-      }
-      case ValueType::BT_Float: {
-        switch (VT.Size) {
-        case ValueType::ST_32:
-          printLiteralT(&E->as<float>(), SS);
-          return;
-        case ValueType::ST_64:
-          printLiteralT(&E->as<double>(), SS);
-          return;
-        default:
-          break;
-        }
-        break;
-      }
-      case ValueType::BT_String: {
-        SS << "\"";
-        printLiteralT(&E->as<StringRef>(), SS);
-        SS << "\"";
-        return;
-      }
-      case ValueType::BT_Pointer: {
-        SS << "#ptr";
-        return;
-      }
-      case ValueType::BT_ValueRef: {
-        SS << "#vref";
-        return;
-      }
-      }
-    }
-    SS << "#lit";
-  }
-
-  void printLiteralPtr(const LiteralPtr *E, StreamType &SS) {
-    SS << E->clangDecl()->getNameAsString();
-  }
-
-  void printVariable(const Variable *V, StreamType &SS, bool IsVarDecl=false) {
-    if (CStyle && V->kind() == Variable::VK_SFun)
-      SS << "this";
-    else
-      SS << V->name() << V->id();
-  }
-
-  void printFunction(const Function *E, StreamType &SS, unsigned sugared = 0) {
-    switch (sugared) {
-      default:
-        SS << "\\(";   // Lambda
-        break;
-      case 1:
-        SS << "(";     // Slot declarations
-        break;
-      case 2:
-        SS << ", ";    // Curried functions
-        break;
-    }
-    self()->printVariable(E->variableDecl(), SS, true);
-    SS << ": ";
-    self()->printSExpr(E->variableDecl()->definition(), SS, Prec_MAX);
-
-    const SExpr *B = E->body();
-    if (B && B->opcode() == COP_Function)
-      self()->printFunction(cast<Function>(B), SS, 2);
-    else {
-      SS << ")";
-      self()->printSExpr(B, SS, Prec_Decl);
-    }
-  }
-
-  void printSFunction(const SFunction *E, StreamType &SS) {
-    SS << "@";
-    self()->printVariable(E->variableDecl(), SS, true);
-    SS << " ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
-  }
-
-  void printCode(const Code *E, StreamType &SS) {
-    SS << ": ";
-    self()->printSExpr(E->returnType(), SS, Prec_Decl-1);
-    SS << " -> ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
-  }
-
-  void printField(const Field *E, StreamType &SS) {
-    SS << ": ";
-    self()->printSExpr(E->range(), SS, Prec_Decl-1);
-    SS << " = ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
-  }
-
-  void printApply(const Apply *E, StreamType &SS, bool sugared = false) {
-    const SExpr *F = E->fun();
-    if (F->opcode() == COP_Apply) {
-      printApply(cast<Apply>(F), SS, true);
-      SS << ", ";
-    } else {
-      self()->printSExpr(F, SS, Prec_Postfix);
-      SS << "(";
-    }
-    self()->printSExpr(E->arg(), SS, Prec_MAX);
-    if (!sugared)
-      SS << ")$";
-  }
-
-  void printSApply(const SApply *E, StreamType &SS) {
-    self()->printSExpr(E->sfun(), SS, Prec_Postfix);
-    if (E->isDelegation()) {
-      SS << "@(";
-      self()->printSExpr(E->arg(), SS, Prec_MAX);
-      SS << ")";
-    }
-  }
-
-  void printProject(const Project *E, StreamType &SS) {
-    if (CStyle) {
-      // Omit the  this->
-      if (const SApply *SAP = dyn_cast<SApply>(E->record())) {
-        if (const Variable *V = dyn_cast<Variable>(SAP->sfun())) {
-          if (!SAP->isDelegation() && V->kind() == Variable::VK_SFun) {
-            SS << E->slotName();
-            return;
-          }
-        }
-      }
-      if (isa<Wildcard>(E->record())) {
-        // handle existentials
-        SS << "&";
-        SS << E->clangDecl()->getQualifiedNameAsString();
-        return;
-      }
-    }
-    self()->printSExpr(E->record(), SS, Prec_Postfix);
-    if (CStyle && E->isArrow()) {
-      SS << "->";
-    }
-    else {
-      SS << ".";
-    }
-    SS << E->slotName();
-  }
-
-  void printCall(const Call *E, StreamType &SS) {
-    const SExpr *T = E->target();
-    if (T->opcode() == COP_Apply) {
-      self()->printApply(cast<Apply>(T), SS, true);
-      SS << ")";
-    }
-    else {
-      self()->printSExpr(T, SS, Prec_Postfix);
-      SS << "()";
-    }
-  }
-
-  void printAlloc(const Alloc *E, StreamType &SS) {
-    SS << "new ";
-    self()->printSExpr(E->dataType(), SS, Prec_Other-1);
-  }
-
-  void printLoad(const Load *E, StreamType &SS) {
-    self()->printSExpr(E->pointer(), SS, Prec_Postfix);
-    if (!CStyle)
-      SS << "^";
-  }
-
-  void printStore(const Store *E, StreamType &SS) {
-    self()->printSExpr(E->destination(), SS, Prec_Other-1);
-    SS << " := ";
-    self()->printSExpr(E->source(), SS, Prec_Other-1);
-  }
-
-  void printArrayIndex(const ArrayIndex *E, StreamType &SS) {
-    self()->printSExpr(E->array(), SS, Prec_Postfix);
-    SS << "[";
-    self()->printSExpr(E->index(), SS, Prec_MAX);
-    SS << "]";
-  }
-
-  void printArrayAdd(const ArrayAdd *E, StreamType &SS) {
-    self()->printSExpr(E->array(), SS, Prec_Postfix);
-    SS << " + ";
-    self()->printSExpr(E->index(), SS, Prec_Atom);
-  }
-
-  void printUnaryOp(const UnaryOp *E, StreamType &SS) {
-    SS << getUnaryOpcodeString(E->unaryOpcode());
-    self()->printSExpr(E->expr(), SS, Prec_Unary);
-  }
-
-  void printBinaryOp(const BinaryOp *E, StreamType &SS) {
-    self()->printSExpr(E->expr0(), SS, Prec_Binary-1);
-    SS << " " << getBinaryOpcodeString(E->binaryOpcode()) << " ";
-    self()->printSExpr(E->expr1(), SS, Prec_Binary-1);
-  }
-
-  void printCast(const Cast *E, StreamType &SS) {
-    if (!CStyle) {
-      SS << "cast[";
-      SS << E->castOpcode();
-      SS << "](";
-      self()->printSExpr(E->expr(), SS, Prec_Unary);
-      SS << ")";
-      return;
-    }
-    self()->printSExpr(E->expr(), SS, Prec_Unary);
-  }
-
-  void printSCFG(const SCFG *E, StreamType &SS) {
-    SS << "CFG {\n";
-    for (auto BBI : *E) {
-      printBasicBlock(BBI, SS);
-    }
-    SS << "}";
-    newline(SS);
-  }
-
-
-  void printBBInstr(const SExpr *E, StreamType &SS) {
-    bool Sub = false;
-    if (E->opcode() == COP_Variable) {
-      auto *V = cast<Variable>(E);
-      SS << "let " << V->name() << V->id() << " = ";
-      E = V->definition();
-      Sub = true;
-    }
-    else if (E->opcode() != COP_Store) {
-      SS << "let _x" << E->id() << " = ";
-    }
-    self()->printSExpr(E, SS, Prec_MAX, Sub);
-    SS << ";";
-    newline(SS);
-  }
-
-  void printBasicBlock(const BasicBlock *E, StreamType &SS) {
-    SS << "BB_" << E->blockID() << ":";
-    if (E->parent())
-      SS << " BB_" << E->parent()->blockID();
-    newline(SS);
-
-    for (auto *A : E->arguments())
-      printBBInstr(A, SS);
-
-    for (auto *I : E->instructions())
-      printBBInstr(I, SS);
-
-    const SExpr *T = E->terminator();
-    if (T) {
-      self()->printSExpr(T, SS, Prec_MAX, false);
-      SS << ";";
-      newline(SS);
-    }
-    newline(SS);
-  }
-
-  void printPhi(const Phi *E, StreamType &SS) {
-    SS << "phi(";
-    if (E->status() == Phi::PH_SingleVal)
-      self()->printSExpr(E->values()[0], SS, Prec_MAX);
-    else {
-      unsigned i = 0;
-      for (auto V : E->values()) {
-        if (i++ > 0)
-          SS << ", ";
-        self()->printSExpr(V, SS, Prec_MAX);
-      }
-    }
-    SS << ")";
-  }
-
-  void printGoto(const Goto *E, StreamType &SS) {
-    SS << "goto ";
-    printBlockLabel(SS, E->targetBlock(), E->index());
-  }
-
-  void printBranch(const Branch *E, StreamType &SS) {
-    SS << "branch (";
-    self()->printSExpr(E->condition(), SS, Prec_MAX);
-    SS << ") ";
-    printBlockLabel(SS, E->thenBlock(), E->thenIndex());
-    SS << " ";
-    printBlockLabel(SS, E->elseBlock(), E->elseIndex());
-  }
-
-  void printReturn(const Return *E, StreamType &SS) {
-    SS << "return ";
-    self()->printSExpr(E->returnValue(), SS, Prec_Other);
-  }
-
-  void printIdentifier(const Identifier *E, StreamType &SS) {
-    SS << E->name();
-  }
-
-  void printIfThenElse(const IfThenElse *E, StreamType &SS) {
-    if (CStyle) {
-      printSExpr(E->condition(), SS, Prec_Unary);
-      SS << " ? ";
-      printSExpr(E->thenExpr(), SS, Prec_Unary);
-      SS << " : ";
-      printSExpr(E->elseExpr(), SS, Prec_Unary);
-      return;
-    }
-    SS << "if (";
-    printSExpr(E->condition(), SS, Prec_MAX);
-    SS << ") then ";
-    printSExpr(E->thenExpr(), SS, Prec_Other);
-    SS << " else ";
-    printSExpr(E->elseExpr(), SS, Prec_Other);
-  }
-
-  void printLet(const Let *E, StreamType &SS) {
-    SS << "let ";
-    printVariable(E->variableDecl(), SS, true);
-    SS << " = ";
-    printSExpr(E->variableDecl()->definition(), SS, Prec_Decl-1);
-    SS << "; ";
-    printSExpr(E->body(), SS, Prec_Decl-1);
-  }
-};
-
-
-class StdPrinter : public PrettyPrinter<StdPrinter, std::ostream> { };
-
-
 
 } // end namespace til
 } // end namespace threadSafety

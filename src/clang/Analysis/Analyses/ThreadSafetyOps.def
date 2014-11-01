@@ -14,18 +14,26 @@
 //===----------------------------------------------------------------------===//
 
 
-TIL_OPCODE_DEF(Future)
-TIL_OPCODE_DEF(Undefined)
-TIL_OPCODE_DEF(Wildcard)
-
-TIL_OPCODE_DEF(Literal)
-TIL_OPCODE_DEF(LiteralPtr)
-TIL_OPCODE_DEF(Variable)
+// Declarations and definitions
+TIL_OPCODE_DEF(VarDecl)
 TIL_OPCODE_DEF(Function)
 TIL_OPCODE_DEF(SFunction)
 TIL_OPCODE_DEF(Code)
 TIL_OPCODE_DEF(Field)
+TIL_OPCODE_DEF(Slot)
+TIL_OPCODE_DEF(Record)
+TIL_OPCODE_DEF(ScalarType)
 
+// CFG constructs
+TIL_OPCODE_DEF(SCFG)
+TIL_OPCODE_DEF(BasicBlock)
+
+
+// Instructions
+TIL_OPCODE_DEF(Literal)
+TIL_OPCODE_DEF(Variable)
+
+// Paths
 TIL_OPCODE_DEF(Apply)
 TIL_OPCODE_DEF(SApply)
 TIL_OPCODE_DEF(Project)
@@ -36,13 +44,9 @@ TIL_OPCODE_DEF(Load)
 TIL_OPCODE_DEF(Store)
 TIL_OPCODE_DEF(ArrayIndex)
 TIL_OPCODE_DEF(ArrayAdd)
-
 TIL_OPCODE_DEF(UnaryOp)
 TIL_OPCODE_DEF(BinaryOp)
 TIL_OPCODE_DEF(Cast)
-
-TIL_OPCODE_DEF(SCFG)
-TIL_OPCODE_DEF(BasicBlock)
 TIL_OPCODE_DEF(Phi)
 
 // Terminator instructions
@@ -50,8 +54,16 @@ TIL_OPCODE_DEF(Goto)
 TIL_OPCODE_DEF(Branch)
 TIL_OPCODE_DEF(Return)
 
-// pseudo-terms
+// Future is an instruction for rewriting purposes.
+TIL_OPCODE_DEF(Future)
+
+
+// Pseudo-terms
+TIL_OPCODE_DEF(Undefined)
+TIL_OPCODE_DEF(Wildcard)
+
 TIL_OPCODE_DEF(Identifier)
-TIL_OPCODE_DEF(IfThenElse)
 TIL_OPCODE_DEF(Let)
+TIL_OPCODE_DEF(Letrec)
+TIL_OPCODE_DEF(IfThenElse)
 

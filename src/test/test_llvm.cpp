@@ -15,13 +15,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "backend/llvm/IRGen.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
 #include "til/CFGReducer.h"
-#include "jagger/interface.h"
 
 #include <iostream>
 
@@ -53,7 +53,7 @@ int main(int argc, const char** argv) {
 
   bool success = BNFParser::initParserFromFile(tilParser, file, false);
   std::cout << "\n";
-  //if (success)
+  // if (success)
   //  tilParser.printSyntax(std::cout);
 
   fclose(file);
@@ -93,10 +93,12 @@ int main(int argc, const char** argv) {
     std::cout << "\nDefinition:\n";
     printSExpr(e);
     std::cout << "\nCFG:\n";
-    SCFG* cfg = CFGLoweringPass::convertSExprToCFG(e, tilParser.arena());
-    printSExpr(cfg);
-    encode(cfg, nullptr);
+    SExpr* e2 = CFGReducer::lower(e, tilParser.arena());
+    printSExpr(e2);
+
+    //backend_llvm::generate_LLVM_IR(cfg);
   }
+
   delete v;
 
   std::cout << "\n";

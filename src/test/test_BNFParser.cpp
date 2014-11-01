@@ -20,17 +20,19 @@
 
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
+#include "parser/TILParser.h"
 
 using namespace ohmu::parsing;
 
+int bootstrapBNF() {
+  const char* fname = "src/grammar/parser.grammar";
 
-int main(int argc, const char** argv) {
   ohmu::parsing::DefaultLexer lexer;
   ohmu::parsing::BNFParser bootstrapBNFParser(&lexer);
 
-  FILE* file = fopen("src/grammar/parser.grammar", "r");
+  FILE* file = fopen(fname, "r");
   if (!file) {
-    std::cout << "File not found.\n";
+    std::cout << "File '" << fname << "' not found.\n";
     return -1;
   }
 
@@ -41,4 +43,28 @@ int main(int argc, const char** argv) {
   return 0;
 }
 
+int makeTILParser(const char* fname) {
+  ohmu::parsing::DefaultLexer lexer;
+  ohmu::parsing::TILParser myParser(&lexer);
+
+  FILE* file = fopen(fname, "r");
+  if (!file) {
+    std::cout << "File '" << fname << "' not found.\n";
+    return -1;
+  }
+
+  BNFParser::initParserFromFile(myParser, file, false);
+  myParser.printSyntax(std::cout);
+
+  fclose(file);
+  return 0;
+}
+
+
+int main(int argc, const char** argv) {
+  if (argc <= 1)
+    return bootstrapBNF();
+  else
+    return makeTILParser(argv[1]);
+}
 

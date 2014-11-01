@@ -14,11 +14,6 @@ Front-end
 Middle-end
 ==========
 
-(p1) Finish missing cases in rewriting pass:
-     + CFG -> CFG rewriting
-     + rewriting in non-CFG contexts (type expressions) and nested CFGs.
-(p1) Add variables and conversion to SSA.
-(p1) Add loops.
 (p1) Add CFG simplification & cleanup pass (unused phi, dup vars, empty BBs)
 (p1) Add records, slots, and inheritance.
 (p1) Add arithmetic up-conversions and type-checking.

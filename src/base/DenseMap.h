@@ -23,7 +23,6 @@
 #ifndef OHMU_DENSEMAP_H
 #define OHMU_DENSEMAP_H
 
-
 #include <unordered_map>
 
 
@@ -53,6 +52,8 @@ public:
   void insert(std::pair<K, V> &&KV) {
     map_.insert(KV);
   }
+
+  void shrink_and_clear() { map_.clear(); }
 
 private:
   std::unordered_map<K, V> map_;

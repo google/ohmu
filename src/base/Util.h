@@ -98,10 +98,10 @@ public:
     : str_(s.c_str()), len_(s.length())
   { }
 
-  unsigned    length() const { return len_; }
+  size_t      length() const { return len_; }
   const char* c_str()  const { return str_; }
 
-  unsigned    size()   const { return len_; }
+  size_t      size()   const { return len_; }
   const char* data()   const { return str_; }
 
   std::string str() const {
@@ -141,8 +141,9 @@ private:
   }
 
   const char* str_;
-  unsigned    len_;
+  size_t      len_;
 };
+
 
 
 template<class T>
@@ -151,7 +152,9 @@ public:
   typedef T* iterator;
   typedef const T* const_iterator;
 
+  ArrayRef() : data_(nullptr), len_(0) { }
   ArrayRef(T* dat, size_t sz) : data_(dat), len_(sz) { }
+  ArrayRef(T* begin, T* end)  : data_(begin), len_(end-begin) { }
 
   size_t size() const { return len_; }
   T& operator[](size_t i) { return data_[i]; }

@@ -72,9 +72,12 @@ public:
     TCOP_BinaryOp,
     TCOP_Cast,
 
-    TCOP_If,
-    TCOP_Let
+    TCOP_Let,
+    TCOP_Letrec,
+    TCOP_If
   };
+
+  static const unsigned short TCOP_MAX = TCOP_If;
 
   // All parse rules return SExprs.
   static const unsigned short TILP_SExpr = ParseResult::PRS_UserDefined;
@@ -82,12 +85,15 @@ public:
 
   TILParser(Lexer *lexer) : Parser(lexer) {
     initMap();
-    arena_.setRegion(&region_);
-    stringArena_.setRegion(&stringRegion_);
   }
   ~TILParser() { }
 
   MemRegionRef arena() { return arena_; }
+
+  void setArenas(MemRegionRef strArena, MemRegionRef parseArena) {
+    arena_ = parseArena;
+    stringArena_ = strArena;
+  }
 
   const char* getOpcodeName(TIL_ConstructOp op);
 
@@ -109,9 +115,7 @@ public:
   ParseResult makeExpr(unsigned op, unsigned arity, ParseResult *prs) override;
 
 private:
-   MemRegion    region_;
    MemRegionRef arena_;
-   MemRegion    stringRegion_;
    MemRegionRef stringArena_;
 
    std::unordered_map<std::string, unsigned> opcodeMap_;

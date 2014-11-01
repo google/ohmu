@@ -9,10 +9,61 @@
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
 namespace clang {
 namespace threadSafety {
 namespace til {
+
+
+const char* ValueType::getTypeName() {
+  switch (Base) {
+    case BT_Void: return "Void";
+    case BT_Bool: return "Bool";
+    case BT_Int: {
+      switch (Size) {
+      case ST_8:
+        if (Signed) return "Int8";
+        else        return "UInt8";
+      case ST_16:
+        if (Signed) return "Int16";
+        else        return "UInt16";
+      case ST_32:
+        if (Signed) return "Int32";
+        else        return "UInt32";
+      case ST_64:
+        if (Signed) return "Int64";
+        else        return "UInt64";
+      default:
+        break;
+      }
+    }
+    case BT_Float: {
+      switch (Size) {
+      case ST_32: return "Float";
+      case ST_64: return "Double";
+      default:
+        break;
+      }
+    }
+    case BT_String:   return "String";
+    case BT_Pointer:  return "PointerType";
+    case BT_ValueRef: return "ValueType";
+  }
+  return "InvalidType";
+}
+
+
+StringRef getOpcodeString(TIL_Opcode Op) {
+  switch (Op) {
+#define TIL_OPCODE_DEF(X)                                                   \
+  case COP_##X:                                                             \
+    return #X;
+#include "ThreadSafetyOps.def"
+#undef TIL_OPCODE_DEF
+  }
+  return "";
+}
 
 
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op) {
@@ -48,6 +99,72 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+SExpr* Future::addPosition(SExpr **Eptr) {
+  // If the future has already been forced, return the forced value.
+  if (Status == FS_done)
+    return Result;
+  // Otherwise connect Eptr to this future, and return this future.
+  Positions.push_back(Eptr);
+  return this;
+}
+
+
+void Future::setResult(SExpr *Res) {
+  assert(Status != FS_done && "Future has already been forced.");
+
+  Result = Res;
+  Status = FS_done;
+
+  if (IPos) {
+    // If Res has already been added to a block, then it's a weak reference
+    // to a previously added instruction; ignore it.
+    if (auto *I = dyn_cast<Instruction>(Res)) {
+      if (I->block() == nullptr && !Res->isTrivial()) {
+        I->setBlock(block());
+        *IPos = I;
+      }
+      else {
+        *IPos = nullptr;
+      }
+    }
+  }
+  for (SExpr **Eptr : Positions) {
+    assert(*Eptr == this && "Invalid position for future.");
+    *Eptr = Res;
+  }
+
+  IPos = nullptr;
+  Positions.clear();
+  Positions.shrink_to_fit();
+  assert(Positions.capacity() == 0 && "Memory Leak.");
+}
+
+
+
+SExpr* Future::force() {
+  if (Status == Future::FS_done)
+    return Result;
+  assert(status() == Future::FS_pending && "Infinite loop!");
+
+  Status = FS_evaluating;
+  auto *Res = evaluate();
+  setResult(Res);
+  return Res;
+}
+
+
+
+Slot* Record::findSlot(StringRef S) {
+  // FIXME -- look this up in a hash table, please.
+  for (auto &Slt : slots()) {
+    if (Slt->name() == S)
+      return Slt.get();
+  }
+  return nullptr;
+}
+
+
+
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
   Predecessors.reserveCheck(1, Arena);
@@ -72,144 +189,96 @@ void BasicBlock::reservePredecessors(unsigned NumPreds) {
 }
 
 
-// If E is a variable, then trace back through any aliases or redundant
-// Phi nodes to find the canonical definition.
-const SExpr *getCanonicalVal(const SExpr *E) {
-  while (true) {
-    if (auto *V = dyn_cast<Variable>(E)) {
-      if (V->kind() == Variable::VK_Let) {
-        E = V->definition();
-        continue;
-      }
-    }
-    if (const Phi *Ph = dyn_cast<Phi>(E)) {
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        continue;
-      }
-    }
-    break;
-  }
-  return E;
-}
-
-
-
-// If E is a variable, then trace back through any aliases or redundant
-// Phi nodes to find the canonical definition.
-// The non-const version will simplify incomplete Phi nodes.
-SExpr *simplifyToCanonicalVal(SExpr *E) {
-  while (auto *V = dyn_cast<Variable>(E)) {
-    SExpr *D;
-    do {
-      if (V->kind() != Variable::VK_Let)
-        return V;
-      D = V->definition();
-      auto *V2 = dyn_cast<Variable>(D);
-      if (V2)
-        V = V2;
-      else
-        break;
-    } while (true);
-
-    if (ThreadSafetyTIL::isTrivial(D))
-      return D;
-
-    if (Phi *Ph = dyn_cast<Phi>(D)) {
-      if (Ph->status() == Phi::PH_Incomplete)
-        simplifyIncompleteArg(V, Ph);
-
-      if (Ph->status() == Phi::PH_SingleVal) {
-        E = Ph->values()[0];
-        continue;
-      }
-    }
-    return V;
-  }
-  return E;
-}
-
-
-
-// Trace the arguments of an incomplete Phi node to see if they have the same
-// canonical definition.  If so, mark the Phi node as redundant.
-// getCanonicalVal() will recursively call simplifyIncompletePhi().
-void simplifyIncompleteArg(Variable *V, til::Phi *Ph) {
-  assert(Ph && Ph->status() == Phi::PH_Incomplete);
-
-  // eliminate infinite recursion -- assume that this node is not redundant.
-  Ph->setStatus(Phi::PH_MultiVal);
-
-  SExpr *E0 = simplifyToCanonicalVal(Ph->values()[0]);
-  for (unsigned i=1, n=Ph->values().size(); i<n; ++i) {
-    SExpr *Ei = simplifyToCanonicalVal(Ph->values()[i]);
-    if (Ei == V)
-      continue;  // Recursive reference to itself.  Don't count.
-    if (Ei != E0) {
-      return;    // Status is already set to MultiVal.
-    }
-  }
-  Ph->setStatus(Phi::PH_SingleVal);
-  // Eliminate Redundant Phi node.
-  V->setDefinition(Ph->values()[0]);
-}
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
-int BasicBlock::renumberVars(int ID) {
-  for (auto *Arg : Args)
-    Arg->setID(this, ID++);
-  for (auto *Instr : Instrs)
-    Instr->setID(this, ID++);
-  TermInstr->setID(this, ID++);
+unsigned BasicBlock::renumber(unsigned ID) {
+  for (auto *Arg : Args) {
+    if (!Arg)
+      continue;
+    Arg->setBlock(this);
+    Arg->setInstrID(ID++);
+  }
+  for (auto *Instr : Instrs) {
+    if (!Instr)
+      continue;
+    Instr->setBlock(this);
+    Instr->setInstrID(ID++);
+  }
+  if (TermInstr)
+    TermInstr->setInstrID(ID++);
   return ID;
 }
 
-// Serializes the CFG's blocks using a reverse post-order depth-first traversal
-// starting from the entry block.
+// Renumber instructions in all blocks
+void SCFG::renumber() {
+  unsigned InstrID = 1;    // ID of 0 means unnumbered.
+  unsigned BlockID = 0;
+  for (auto *Block : Blocks) {
+    InstrID = Block->renumber(InstrID);
+    Block->setBlockID(BlockID++);
+  }
+  NumInstructions = InstrID;
+}
+
+
+// Sorts blocks in topological order, by following successors.
+// If post-dominators have been computed, it takes that into account.
+// Each block will be written into the Blocks array in order, and its BlockID
+// will be set to the index in the array.  Sorting should start from the entry
+// block, and ID should be the total number of blocks.
 int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (Visited) return ID;
-  Visited = 1;
-  for (auto *Block : successors())
-    ID = Block->topologicalSort(Blocks, ID);
+  Visited = true;
+
+  // First sort the post-dominator, if it exists.
+  // This gives us a topological order where post-dominators always come last.
+  if (PostDominatorNode.Parent)
+    ID = PostDominatorNode.Parent->topologicalSort(Blocks, ID);
+
+  for (auto &B : successors())
+    ID = B->topologicalSort(Blocks, ID);
+
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
-  Blocks[BlockID = --ID] = this;
+  BlockID = --ID;
+  Blocks[BlockID] = this;
   return ID;
 }
 
-// Serializes the CFG's blocks using a reverse post-order depth-first traversal
-// starting from the exit block and following back-edges.  This travrsal
-// explicitly serializes the dominator before any predecessors.  If the
-// assumptions are met, this serialization will guarantee that all blocks are
-// serialized after their dominator and before their post-dominator.
-// Assumes that there are no critical edges.  This sort is assumed to occur as
-// part of a multi-phase cleanup in which a standard topoligical sort has
-// already been performed and dominators have been computed.  It also assumes
-// that the entry block is reachable from the exit block and that no blocks are
-// accessable via traversal of back-edges from the exit block that weren't
-// accessable via edges from the entry block.
-int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
-  // Visited is assumed to have been set by the topologicalSort.  This pass
-  // assumes !Visited means that we've visited this node before.
-  if (!Visited) return ID;
-  Visited = 0;
+
+// Sorts blocks in post-topological order, by following predecessors.
+// Each block will be written into the Blocks array in order, and PostBlockID
+// will be set to the index in the array.  Sorting should start from the exit
+// block, and ID should be the total number of blocks.
+int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+  if (Visited) return ID;
+  Visited = true;
+
+  // First sort the dominator, if it exists.
+  // This gives us a topological order where post-dominators always come last.
   if (DominatorNode.Parent)
-    ID = DominatorNode.Parent->topologicalFinalSort(Blocks, ID);
-  for (auto *Pred : Predecessors)
-    ID = Pred->topologicalFinalSort(Blocks, ID);
-  assert(ID < Blocks.size());
-  Blocks[BlockID = ID++] = this;
+    ID = DominatorNode.Parent->postTopologicalSort(Blocks, ID);
+
+  for (auto *B : predecessors())
+    ID = B->postTopologicalSort(Blocks, ID);
+
+  // set ID and update block array in place.
+  // We may lose pointers to unreachable blocks.
+  assert(ID > 0);
+  PostBlockID = --ID;
+  Blocks[PostBlockID] = this;
   return ID;
 }
+
 
 // Computes the immediate dominator of the current block.  Assumes that all of
 // its predecessors have already computed their dominators.  This is achieved
-// by topologically sorting the nodes and visiting them in order.
+// by visiting the nodes in topological order.
 void BasicBlock::computeDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk backwards from each predecessor to find the common dominator node.
-  for (auto *Pred : Predecessors) {
+  for (auto *Pred : predecessors()) {
     // Skip back-edges
     if (Pred->BlockID >= BlockID) continue;
     // If we don't yet have a candidate for dominator yet, take this one.
@@ -230,25 +299,25 @@ void BasicBlock::computeDominator() {
   DominatorNode.SizeOfSubTree = 1;
 }
 
+
 // Computes the immediate post-dominator of the current block.  Assumes that all
 // of its successors have already computed their post-dominators.  This is
-// achieved by topologically sorting the nodes and visiting them in reverse
-// order.
+// achieved visiting the nodes in reverse topological order.
 void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
-  // Walk back from each predecessor to find the common post-dominator node.
-  for (auto *Succ : successors()) {
+  // Walk forward from each successor to find the common post-dominator node.
+  for (auto &Succ : successors()) {
     // Skip back-edges
-    if (Succ->BlockID <= BlockID) continue;
+    if (Succ->PostBlockID >= PostBlockID) continue;
     // If we don't yet have a candidate for post-dominator yet, take this one.
     if (Candidate == nullptr) {
-      Candidate = Succ;
+      Candidate = Succ.get();
       continue;
     }
     // Walk the alternate and current candidate back to find a common ancestor.
-    auto *Alternate = Succ;
+    auto *Alternate = Succ.get();
     while (Alternate != Candidate) {
-      if (Candidate->BlockID < Alternate->BlockID)
+      if (Candidate->PostBlockID > Alternate->PostBlockID)
         Candidate = Candidate->PostDominatorNode.Parent;
       else
         Alternate = Alternate->PostDominatorNode.Parent;
@@ -258,49 +327,65 @@ void BasicBlock::computePostDominator() {
   PostDominatorNode.SizeOfSubTree = 1;
 }
 
+
+static inline void computeNodeSize(BasicBlock *B,
+                                   BasicBlock::TopologyNode BasicBlock::*TN) {
+  BasicBlock::TopologyNode *N = &(B->*TN);
+  if (N->Parent) {
+    BasicBlock::TopologyNode *P = &(N->Parent->*TN);
+    // Initially set ID relative to the (as yet uncomputed) parent ID
+    N->NodeID = P->SizeOfSubTree;
+    P->SizeOfSubTree += N->SizeOfSubTree;
+  }
+}
+
+static inline void computeNodeID(BasicBlock *B,
+                                 BasicBlock::TopologyNode BasicBlock::*TN) {
+  BasicBlock::TopologyNode *N = &(B->*TN);
+  if (N->Parent) {
+    BasicBlock::TopologyNode *P = &(N->Parent->*TN);
+    N->NodeID += P->NodeID;    // Fix NodeIDs relative to starting node.
+  }
+}
+
+
 // Normalizes a CFG.  Normalization has a few major components:
-// 1) Removing unreachabe blocks.
-// 2) Computeing dominators and post-dominators
+// 1) Removing unreachable blocks.
+// 2) Computing dominators and post-dominators
 // 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
-  // Topologically sort the blocks starting a the entry block.  The sort will
-  // place the sorted blocks in the "Blocks" array from back to front and return
-  // the last index used.
-  int NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
-  if (NumUnreachableBlocks > 0) {
-    // If there were unreachable blocks shift everything down, and delete them.
-    for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I)
-      Blocks[I - NumUnreachableBlocks] = Blocks[I];
-    Blocks.drop(NumUnreachableBlocks);
-  }
-  // Compute dominators.
-  for (auto *Block : Blocks) Block->computeDominator();
-  // Once dominators have been computed, the final sort may be performed.  The
-  // final sort places the blocks in the "Blocks" array in order and returns the
-  // number of blocks added to the array.
-  int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
-  assert(NumBlocks == Blocks.size());
-  // Renumber the instructions now that we have a final sort.
-  int InstrID = 0;
-  for (auto *Block : Blocks) InstrID = Block->renumberVars(InstrID);
-  // Compute post-dominators and assign compute the sizes of each node in the
-  // dominator tree.
-  for (auto *Block : Blocks.reverse()) {
-    Block->computePostDominator();
-    Block->DominatorNode.addSizeToDominator();
-  }
-  // Compute the sizes of each node in the post-dominator tree and assign IDs in
-  // the dominator tree.
+  // Sort the blocks in post-topological order, starting from the exit.
+  int NumUnreachableBlocks = Exit->postTopologicalSort(Blocks, Blocks.size());
+  assert(NumUnreachableBlocks == 0);
+
+  // Compute post-dominators, which improves the topological sort.
   for (auto *Block : Blocks) {
-    Block->DominatorNode.assignDominatorID();
-    Block->PostDominatorNode.addSizeToPostDominator();
+    Block->computePostDominator();
+    Block->Visited = false;
   }
-  // Assign IDs in the post-dominator tree.
-  for (auto *Block : Blocks.reverse())
-    Block->PostDominatorNode.assignPostDominatorID();
+
+  // Now re-sort the blocks in topological order, starting from the entry.
+  NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
+  assert(NumUnreachableBlocks == 0);
+
+  // Renumber blocks and instructions now that we have a final sort.
+  renumber();
+
+  // Calculate dominators.
+  // Compute sizes and IDs for the (post)dominator trees.
+  for (auto *Block : Blocks) {
+    Block->computeDominator();
+    computeNodeSize(Block, &BasicBlock::PostDominatorNode);
+  }
+  for (auto *Block : Blocks.reverse()) {
+    computeNodeSize(Block, &BasicBlock::DominatorNode);
+    computeNodeID(Block, &BasicBlock::PostDominatorNode);
+  }
+  for (auto *Block : Blocks) {
+    computeNodeID(Block, &BasicBlock::DominatorNode);
+  }
 }
 
 }  // end namespace til
 }  // end namespace threadSafety
 }  // end namespace clang
-

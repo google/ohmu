@@ -10,3 +10,16 @@ a real product.  Anything and everything is subject to change without
 notice.  May be known to the State of California to cause cancer in lab
 animals, including engineers in computer labs. Do not eat.
 
+
+Build Instructions:
+
+(1) Install the ohmu source code into a directory, e.g. ohmu.
+(2) mkdir ohmu_build   (make this directory alongside ohmu)
+(3) cd ohmu_build
+(4) ccmake ../ohmu
+(5) Go to advanced mode
+(6) [Optional] Change compiler to clang.
+(7) Change LLVM_DIR to "$LLVM_INSTALL_DIR"/share/llvm/cmake/
+
+
+
