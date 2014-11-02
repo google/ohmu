@@ -14,6 +14,8 @@
 #ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTYPE_H
 #define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTYPE_H
 
+#include <stdint.h>
+
 namespace clang {
 namespace threadSafety {
 namespace til {
