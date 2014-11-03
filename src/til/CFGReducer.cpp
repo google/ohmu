@@ -67,7 +67,7 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
 
 
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // Traversing Apply and SApply will push arguments onto pendingPathArgs_.
+  // Traversing Apply will push arguments onto pendingPathArgs_.
   // A call expression will consume the args.
   if (auto* c = dyn_cast<Code>(e)) {
     // TODO: handle more than one arg.
@@ -197,7 +197,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
         continue;
 
       // Map identifiers to slots for record self-variables.
-      auto* sfun = cast<SFunction>(vd->definition());
+      auto* sfun = cast<Function>(vd->definition());
       if (Record *r = dyn_cast<Record>(sfun->body())) {
         if (auto *slt = r->findSlot(s)) {
           if (slt->hasModifier(Slot::SLT_Final) &&
@@ -206,7 +206,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
             return slt->definition();
           }
           auto* svar = new (Arena) Variable(vd);
-          auto* sapp = new (Arena) SApply(svar);
+          auto* sapp = new (Arena) Apply(svar, nullptr, Apply::FAK_SApply);
           return new (Arena) Project(sapp, s);
         }
       }

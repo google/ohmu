@@ -193,9 +193,6 @@ public:
   R_SExpr reduceFunction(Function &Orig, R_VarDecl Nvd, R_SExpr E0) {
     return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceSFunction(SFunction &Orig, R_VarDecl Nvd, R_SExpr E0) {
-    return self()->reduceSExpr(Orig);
-  }
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
   }
@@ -226,9 +223,6 @@ public:
   }
 
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceSExpr(Orig);
-  }
-  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
@@ -416,17 +410,6 @@ MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
 }
 
 template <class V>
-MAPTYPE(V::RMap, SFunction) SFunction::traverse(V &Vs) {
-  // Traversing an self-definition is a no-op.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
-  Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
-  Vs.exitScope(VDecl.get());
-  // The SFun constructor will set E0->Definition to E1.
-  return Vs.reduceSFunction(*this, E0, E1);
-}
-
-template <class V>
 MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
   auto Nt = Vs.traverse(ReturnType.get(), TRV_Type);
   auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
@@ -524,15 +507,9 @@ MAPTYPE(V::RMap, Variable) Variable::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Apply) Apply::traverse(V &Vs) {
   auto Nf = Vs.traverse(Fun.get(), TRV_Path);
-  auto Na = Vs.traverseArg(Arg.get());
+  auto Na = Arg.get() ? Vs.traverseArg(Arg.get())
+                      : V::RMap::reduceNull();
   return Vs.reduceApply(*this, Nf, Na);
-}
-
-template <class V>
-MAPTYPE(V::RMap, SApply) SApply::traverse(V &Vs) {
-  auto Nf = Vs.traverse(Sfun.get(), TRV_Path);
-  auto Na = Arg.get() ? Vs.traverseArg(Arg.get()) : V::RMap::reduceNull();
-  return Vs.reduceSApply(*this, Nf, Na);
 }
 
 template <class V>
@@ -652,8 +629,8 @@ MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
   auto Ns = Vs.reduceSCFG_Begin(*this);
-  for (BasicBlock *B : Blocks) {
-    Vs.handleCFGBlock(*B, Vs.traverse(B, TRV_SubExpr));
+  for (auto &B : Blocks) {
+    Vs.handleCFGBlock(*B, Vs.traverse(B.get(), TRV_SubExpr));
   }
   return Vs.reduceSCFG_End(Ns);
 }
@@ -757,14 +734,6 @@ typename C::CType Function::compare(const Function* E, C& Cmp) const {
 }
 
 template <class C>
-typename C::CType SFunction::compare(const SFunction* E, C& Cmp) const {
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  typename C::CType Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
 typename C::CType Code::compare(const Code* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(returnType(), E->returnType());
   if (Cmp.notTrue(Ct))
@@ -825,14 +794,6 @@ typename C::CType Variable::compare(const Variable* E, C& Cmp) const {
 template <class C>
 typename C::CType Apply::compare(const Apply* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(fun(), E->fun());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(arg(), E->arg());
-}
-
-template <class C>
-typename C::CType SApply::compare(const SApply* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(sfun(), E->sfun());
   if (Cmp.notTrue(Ct) || (!arg() && !E->arg()))
     return Ct;
   return Cmp.compare(arg(), E->arg());

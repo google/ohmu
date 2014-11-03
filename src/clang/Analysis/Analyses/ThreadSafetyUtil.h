@@ -28,7 +28,7 @@
 
 #include "base/DenseMap.h"
 #include "base/MemRegion.h"
-#include "base/SimpleArray.h"
+#include "base/ArrayTree.h"
 #include "base/Util.h"
 #include "parser/Token.h"
 

@@ -26,15 +26,35 @@
 namespace ohmu {
 
 
-// A simple fixed size array class that does not manage its own memory,
-// suitable for use with bump pointer allocation.
-template <class T, unsigned LeafSizeExponent=3> class ArrayTree {
+/// ArrayTree stores its elements in a 2-level "tree".   Rather than storing
+/// elements in a contiguous array, it stores them in contiguous chunks of size
+/// size 2^LeafSizeExponent.  The extra level of indirection is slower than a
+/// normal array, but still offers O(1) random access operations, and has
+/// good cache locality.  ArrayTree is slower than std::vector, but makes
+/// better use of memory in 2 situations:
+///
+/// First, although it is dynamically resizeable, ArrayTree never moves its
+/// elements, so pointers to elements are stable across resizes.  til::Future
+/// depends on this capability.
+///
+/// Second, because it does not need to reallocate the entire array, ArrayTree
+/// is suitable for use with bump pointer allocators.  The root node is the
+/// only node that is reallocated.  Because memory is not reclaimed until the
+/// whole region is released, a normal resizeable array is wasteful when used
+/// with a bump allocator.
+template <class T, unsigned LeafSizeExponent=3>
+class ArrayTree {
 public:
   /// The number of elements in each leaf node.
   static const unsigned LeafSize = (1 << LeafSizeExponent);
   static const unsigned DefaultInitialCapacity = 2 * LeafSize;
 
-  ArrayTree() : Data(nullptr), Size(0), Capacity(0) { }
+  ArrayTree()
+      : Data(nullptr), Size(0), Capacity(0)
+  { }
+  ArrayTree(MemRegionRef A, unsigned Cap)
+      : Data(nullptr), Size(0), Capacity(0)
+  { reserve(A, Cap); }
 
   size_t size()     const { return Size; }
   size_t capacity() const { return Capacity; }
@@ -99,7 +119,7 @@ public:
 
   class iterator {
   public:
-    iterator(ArrayTree<T>& Atr, unsigned i) : ATree(Atr), Idx(i) { }
+    iterator(ArrayTree& Atr, unsigned i) : ATree(Atr), Idx(i) { }
 
     T& operator*() const { return ATree[Idx]; }
 
@@ -116,14 +136,15 @@ public:
 
   class const_iterator : public iterator {
   public:
-    const_iterator(ArrayTree<T>& Atr, unsigned i) : iterator(Atr, i) { }
+    const_iterator(const ArrayTree& Atr, unsigned i)
+      : iterator(const_cast<ArrayTree&>(Atr), i) { }
 
     const T& operator*() const { return iterator::operator*(); }
   };
 
   class reverse_iterator : public iterator {
   public:
-    reverse_iterator(ArrayTree<T>& Atr, unsigned i) : iterator(Atr, i) { }
+    reverse_iterator(ArrayTree& Atr, unsigned i) : iterator(Atr, i) { }
 
     const reverse_iterator& operator++() {
       iterator::operator--();
@@ -137,7 +158,8 @@ public:
 
   class cr_iterator : public const_iterator {
   public:
-    cr_iterator(ArrayTree<T>& Atr, unsigned i) : const_iterator(Atr, i) { }
+    cr_iterator(const ArrayTree& Atr, unsigned i)
+      : const_iterator(Atr, i) {}
 
     const cr_iterator& operator++() {
       const_iterator::operator--();
@@ -193,7 +215,7 @@ private:
   /// Reserve space for a new leaf.
   void reserveLeaf(MemRegionRef A);
 
-  ArrayTree(const ArrayTree<T> &A) LLVM_DELETED_FUNCTION;
+  ArrayTree(const ArrayTree &A) LLVM_DELETED_FUNCTION;
 
   T **Data;
   unsigned Size;

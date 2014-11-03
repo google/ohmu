@@ -83,10 +83,6 @@ public:
     Orig.rewrite(Nvd, E0);
     return &Orig;
   }
-  SExpr* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
-    Orig.rewrite(Nvd, E0);
-    return &Orig;
-  }
   SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
     Orig.rewrite(E0, E1);
     return &Orig;
@@ -112,12 +108,7 @@ public:
     Orig.rewrite(Vd);
     return &Orig;
   }
-
   SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return &Orig;
-  }
-  SExpr* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
     Orig.rewrite(E0, E1);
     return &Orig;
   }

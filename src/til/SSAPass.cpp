@@ -159,7 +159,7 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
   auto *Ph = new (Arena) Phi(Arena, numPreds);
   // Fill it with the original value E
   for (unsigned j = 0; j < i; ++j)
-    Ph->values().push_back(E);
+    Ph->values().emplace_back(Arena, E);
   return Ph;
 }
 
@@ -180,7 +180,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
   bool SetInBlock = LvarMap->at(LvarID);  //< Is var set within this block?
   unsigned i = 0;
 
-  for (BasicBlock* P : B->predecessors()) {
+  for (auto &P : B->predecessors()) {
     if (!Ph && !SetInBlock && P->blockID() >= B->blockID()) {
       // This is a back-edge, and we don't set the variable in this block.
       // Create a dummy Phi node to avoid infinite recursion before lookup.
@@ -190,7 +190,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
       SetInBlock = true;
     }
 
-    E2 = lookup(P, LvarID);
+    E2 = lookup(P.get(), LvarID);
     if (!SetInBlock) {
       // Lookup in P may force a lookup in the current block due to cycles.
       // If that happened, just return the previous answer.
@@ -202,7 +202,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
 
     if (Ph) {
       // We already have a phi node, so just copy E2 into it.
-      Ph->values().push_back(E2);
+      Ph->values().emplace_back(Arena, E2);
       // If E2 is different, then mark the Phi node as complete.
       if (E2 != Ph && E2 != E)
         Incomplete = false;
@@ -210,7 +210,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
     else if (E2 != E) {
       // Values don't match, so we need a phi node.
       Ph = makeNewPhiNode(i, E, B->numPredecessors());
-      Ph->values().push_back(E2);
+      Ph->values().emplace_back(Arena, E2);
       Incomplete = false;
     }
     ++i;
@@ -222,7 +222,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
       LvarMap->at(LvarID) = nullptr;
       // Ph may have been cached elsewhere, so mark it as single val.
       // It will be eliminated by lookupInCache/
-      Ph->values()[0] = E;
+      Ph->values()[0].reset(E);
       Ph->setStatus(Phi::PH_SingleVal);
     }
     else {

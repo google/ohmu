@@ -373,6 +373,7 @@ private:
   friend class Future;
 
   SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
+  void operator=(const SExprRefT<T> &P) { }
 
   T* Ptr;
 };
@@ -383,7 +384,6 @@ typedef SExprRefT<SExpr> SExprRef;
 
 // Nodes which declare variables
 class Function;
-class SFunction;
 class Let;
 class Letrec;
 
@@ -392,14 +392,14 @@ class Letrec;
 /// There are three ways to introduce a new variable:
 ///   Let-expressions:           (Let (x = t) u)
 ///   Functions:                 (Function (x : t) u)
-///   Self-applicable functions  (SFunction (x) t)
+///   Self-applicable functions  (Function (x) t)
 class VarDecl : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_VarDecl; }
 
   enum VariableKind : unsigned char {
     VK_Fun,     ///< Function parameter
-    VK_SFun,    ///< SFunction (self) parameter
+    VK_SFun,    ///< Self-applicable Function (self) parameter
     VK_Let,     ///< Let-variable
     VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
   };
@@ -434,7 +434,6 @@ public:
 
 private:
   friend class Function;
-  friend class SFunction;
   friend class Let;
   friend class Letrec;
 
@@ -453,11 +452,19 @@ public:
 
   Function(VarDecl *Vd, SExpr *Bd)
       : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
-    assert(Vd->kind() == VarDecl::VK_Fun);
+    assert(Vd->kind() == VarDecl::VK_Fun || Vd->kind() == VarDecl::VK_SFun);
+    if (Vd->kind() == VarDecl::VK_SFun) {
+      assert(Vd->definition() == nullptr);
+      Vd->Definition.reset(this);
+    }
   }
   Function(const Function &F, VarDecl *Vd, SExpr *Bd) // rewrite constructor
       : SExpr(F), VDecl(Vd), Body(Bd) {
-    assert(Vd->kind() == VarDecl::VK_Fun);
+    assert(Vd->kind() == VarDecl::VK_Fun || Vd->kind() == VarDecl::VK_SFun);
+    if (Vd->kind() == VarDecl::VK_SFun) {
+      assert(Vd->definition() == nullptr);
+      Vd->Definition.reset(this);
+    }
   }
 
   void rewrite(VarDecl *Vd, SExpr *Bd) {
@@ -478,44 +485,6 @@ private:
   SExprRef           Body;
 };
 
-
-/// A self-applicable function.
-/// A self-applicable function can be applied to itself.  It's useful for
-/// implementing objects and late binding.
-class SFunction : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_SFunction; }
-
-  SFunction(VarDecl *Vd, SExpr *B)
-      : SExpr(COP_SFunction), VDecl(Vd), Body(B) {
-    assert(Vd->kind() == VarDecl::VK_SFun);
-    assert(Vd->Definition == nullptr);
-    Vd->Definition = this;
-  }
-  SFunction(const SFunction &F, VarDecl *Vd, SExpr *B) // rewrite constructor
-      : SExpr(F), VDecl(Vd), Body(B) {
-    assert(Vd->kind() == VarDecl::VK_SFun);
-    assert(Vd->Definition == nullptr);
-    Vd->Definition = this;
-  }
-
-  void rewrite(VarDecl *Vd, SExpr *Bd) {
-    VDecl.reset(Vd);
-    Body.reset(Bd);
-  }
-
-  VarDecl *variableDecl() { return VDecl.get(); }
-  const VarDecl *variableDecl() const { return VDecl.get(); }
-
-  SExpr *body() { return Body.get(); }
-  const SExpr *body() const { return Body.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(SFunction)
-
-private:
-  SExprRefT<VarDecl> VDecl;
-  SExprRef           Body;
-};
 
 
 /// A block of code -- e.g. the body of a function.
@@ -611,7 +580,7 @@ private:
 /// A record is essentially a function from slot names to definitions.
 class Record : public SExpr {
 public:
-  typedef SimpleArray<SExprRefT<Slot>> SlotArray;
+  typedef ArrayTree<SExprRefT<Slot>> SlotArray;
   typedef DenseMap<std::string, unsigned> SlotMap;
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
@@ -721,7 +690,14 @@ class Apply : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Apply; }
 
-  Apply(SExpr *F, SExpr *A) : Instruction(COP_Apply), Fun(F), Arg(A) {}
+  enum FunctionApplyKind : unsigned char {
+    FAK_Apply = 0,   // Application of a normal function
+    FAK_SApply       // Self-application
+  };
+
+  Apply(SExpr *F, SExpr *A, FunctionApplyKind K = FAK_Apply)
+      : Instruction(COP_Apply, K), Fun(F), Arg(A)
+  {}
   Apply(const Apply &A, SExpr *F, SExpr *Ar)  // rewrite constructor
       : Instruction(A), Fun(F), Arg(Ar)
   {}
@@ -730,6 +706,9 @@ public:
     Fun.reset(F);
     Arg.reset(A);
   }
+
+  bool isSelfApplication() const { return SubOpcode == FAK_SApply; }
+  bool isDelegation() const { return isSelfApplication() && Arg != nullptr; }
 
   SExpr *fun() { return Fun.get(); }
   const SExpr *fun() const { return Fun.get(); }
@@ -741,37 +720,6 @@ public:
 
 private:
   SExprRef Fun;
-  SExprRef Arg;
-};
-
-
-/// Apply a self-argument to a self-applicable function.
-class SApply : public Instruction {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_SApply; }
-
-  SApply(SExpr *Sf, SExpr *A = nullptr)
-      : Instruction(COP_SApply), Sfun(Sf), Arg(A) {}
-  SApply(SApply &A, SExpr *Sf, SExpr *Ar = nullptr) // rewrite constructor
-      : Instruction(A), Sfun(Sf), Arg(Ar) {}
-
-  void rewrite(SExpr *Sf, SExpr *A) {
-    Sfun.reset(Sf);
-    Arg.reset(A);
-  }
-
-  SExpr *sfun() { return Sfun.get(); }
-  const SExpr *sfun() const { return Sfun.get(); }
-
-  SExpr *arg() { return Arg.get() ? Arg.get() : Sfun.get(); }
-  const SExpr *arg() const { return Arg.get() ? Arg.get() : Sfun.get(); }
-
-  bool isDelegation() const { return Arg != nullptr; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(SApply)
-
-private:
-  SExprRef Sfun;
   SExprRef Arg;
 };
 
@@ -1081,7 +1029,7 @@ class SCFG;
 /// depending on where control flow comes from.
 class Phi : public Instruction {
 public:
-  typedef SimpleArray<SExprRef> ValArray;
+  typedef ArrayTree<SExprRef, 2> ValArray;
 
   // In minimal SSA form, all Phi nodes are MultiVal.
   // During conversion to SSA, incomplete Phi nodes may be introduced, which
@@ -1184,13 +1132,13 @@ public:
 
   Branch(SExpr *C, BasicBlock *T, BasicBlock *E)
       : Terminator(COP_Branch), Condition(C) {
-    Branches[0] = T;
-    Branches[1] = E;
+    Branches[0].reset(T);
+    Branches[1].reset(E);
   }
   Branch(const Branch &Br, SExpr *C, BasicBlock *T, BasicBlock *E)
       : Terminator(Br), Condition(C) {
-    Branches[0] = T;
-    Branches[1] = E;
+    Branches[0].reset(T);
+    Branches[1].reset(E);
   }
 
   void rewrite(SExpr *C, BasicBlock *B1, BasicBlock *B2) {
@@ -1261,9 +1209,10 @@ inline Terminator::BlockArray Terminator::successors() {
 /// another basic block in the same SCFG.
 class BasicBlock : public SExpr {
 public:
-  typedef SimpleArray<Phi*>          ArgArray;
-  typedef SimpleArray<Instruction*>  InstrArray;
-  typedef SimpleArray<BasicBlock*>   BlockArray;
+  typedef ArrayTree<Phi*>                      ArgArray;
+  typedef ArrayTree<Instruction*>              InstrArray;
+  typedef ArrayTree<SExprRefT<BasicBlock>, 2>  PredArray;
+  typedef ArrayTree<SExprRefT<BasicBlock>>     BlockArray;
 
   static const unsigned InvalidBlockID = 0x0FFFFFFF;
 
@@ -1316,8 +1265,8 @@ public:
   /// Returns a list of predecessors.
   /// The order of predecessors in the list is important; each phi node has
   /// exactly one argument for each precessor, in the same order.
-  BlockArray &predecessors() { return Predecessors; }
-  const BlockArray &predecessors() const { return Predecessors; }
+  PredArray &predecessors() { return Predecessors; }
+  const PredArray &predecessors() const { return Predecessors; }
 
   Terminator::BlockArray successors() {
     return TermInstr ? TermInstr->successors() : Terminator::BlockArray();
@@ -1345,15 +1294,13 @@ public:
 
   /// Add a new argument.
   void addArgument(Phi *E) {
-    Args.reserveCheck(1, Arena);
-    Args.push_back(E);
+    Args.emplace_back(Arena, E);
     E->setBlock(this);
   }
 
   /// Add a new instruction.
   void addInstruction(Instruction *E) {
-    Instrs.reserveCheck(1, Arena);
-    Instrs.push_back(E);
+    Instrs.emplace_back(Arena, E);
     E->setBlock(this);
     if (auto *F = dyn_cast<Future>(E))
       F->addPosition(&Instrs.back());
@@ -1370,19 +1317,16 @@ public:
   unsigned addPredecessor(BasicBlock *Pred);
 
   // Reserve space for Nargs arguments.
-  void reserveArguments(unsigned Nargs)   { Args.reserve(Nargs, Arena); }
+  void reserveArguments(unsigned Nargs) { Args.reserve(Arena, Nargs); }
 
   // Reserve space for Nins instructions.
-  void reserveInstructions(unsigned Nins) { Instrs.reserve(Nins, Arena); }
+  void reserveInstructions(unsigned Nins) { Instrs.reserve(Arena, Nins); }
 
   // Reserve space for NumPreds predecessors, including space in phi nodes.
   void reservePredecessors(unsigned NumPreds);
 
   /// Return the index of BB, or Predecessors.size if BB is not a predecessor.
-  unsigned findPredecessorIndex(const BasicBlock *BB) const {
-    auto I = std::find(Predecessors.cbegin(), Predecessors.cend(), BB);
-    return std::distance(Predecessors.cbegin(), I);
-  }
+  unsigned findPredecessorIndex(const BasicBlock *BB) const;
 
   DECLARE_TRAVERSE_AND_COMPARE(BasicBlock)
 
@@ -1399,9 +1343,8 @@ private:
   friend class SCFG;
 
   unsigned renumber(unsigned id);   // assign unique ids to all instructions
-  int  topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
-  int  topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
-  int  postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID);
+  int  topologicalSort     (BlockArray& Blocks, int ID);
+  int  postTopologicalSort (BlockArray& Blocks, int ID);
   void computeDominator();
   void computePostDominator();
 
@@ -1410,7 +1353,7 @@ private:
   SCFG         *CFGPtr;      // The CFG that contains this block.
   unsigned     BlockID;      // unique id for this BB in the containing CFG.
                              // IDs are in topological order.
-  BlockArray  Predecessors;  // Predecessor blocks in the CFG.
+  PredArray   Predecessors;  // Predecessor blocks in the CFG.
   ArgArray    Args;          // Phi nodes.  One argument per predecessor.
   InstrArray  Instrs;        // Instructions.
   Terminator* TermInstr;     // Terminating instruction
@@ -1431,8 +1374,8 @@ private:
 /// entry point, and one exit point.
 class SCFG : public SExpr {
 public:
-  typedef SimpleArray<BasicBlock *> BlockArray;
-  typedef BlockArray::iterator iterator;
+  typedef BasicBlock::BlockArray     BlockArray;
+  typedef BlockArray::iterator       iterator;
   typedef BlockArray::const_iterator const_iterator;
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_SCFG; }
@@ -1461,19 +1404,13 @@ public:
   /// instruction IDs have been assigned.
   bool normal() const { return Normal; }
 
-  iterator begin() { return Blocks.begin(); }
-  iterator end() { return Blocks.end(); }
-
-  const_iterator begin() const { return cbegin(); }
-  const_iterator end() const { return cend(); }
-
-  const_iterator cbegin() const { return Blocks.cbegin(); }
-  const_iterator cend() const { return Blocks.cend(); }
+  const BlockArray& blocks() const { return Blocks; }
+  BlockArray&       blocks()       { return Blocks; }
 
   const BasicBlock *entry() const { return Entry; }
-  BasicBlock *entry() { return Entry; }
-  const BasicBlock *exit() const { return Exit; }
-  BasicBlock *exit() { return Exit; }
+  BasicBlock       *entry()       { return Entry; }
+  const BasicBlock *exit()  const { return Exit; }
+  BasicBlock       *exit()        { return Exit; }
 
   /// Return the number of blocks in the CFG.
   /// Block::blockID() will return a number less than numBlocks();
@@ -1487,8 +1424,7 @@ public:
   inline void add(BasicBlock *BB) {
     assert(BB->CFGPtr == nullptr);
     BB->CFGPtr = this;
-    Blocks.reserveCheck(1, Arena);
-    Blocks.push_back(BB);
+    Blocks.emplace_back(Arena, BB);
   }
 
   void setEntry(BasicBlock *BB) { Entry = BB; }
