@@ -62,7 +62,7 @@ public:
   // Allocate memory for a new object from the pool.
   // Small objects are bump allocated; large ones are not.
   inline void* allocate(size_t size) {
-    // std::cerr << " " << size;
+    // std::cerr << "allocate " << size << ".\n";
     size = getAlignedSize(size);
     if (size <= maxBumpAllocSize)
       return allocateSmall(size);
