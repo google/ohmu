@@ -492,6 +492,12 @@ class Code : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Code; }
 
+  enum CallingConvention : unsigned short {
+    CallingConvention_C,
+    CallingConvention_CPlusPlus,
+    CallingConvention_OhmuInternal
+  };
+
   Code(SExpr *T, SExpr *B) : SExpr(COP_Code), ReturnType(T), Body(B) {}
   Code(const Code &C, SExpr *T, SExpr *B) // rewrite constructor
       : SExpr(C), ReturnType(T), Body(B) {}
@@ -499,6 +505,13 @@ public:
   void rewrite(SExpr *T, SExpr *B) {
     ReturnType.reset(T);
     Body.reset(B);
+  }
+
+  CallingConvention callingConvention() {
+    return static_cast<CallingConvention>(Flags);
+  }
+  void setCallingConvention(CallingConvention CCV) {
+    Flags = CCV;
   }
 
   SExpr *returnType() { return ReturnType.get(); }
@@ -775,6 +788,13 @@ public:
 
   Call(SExpr *T) : Instruction(COP_Call), Target(T) { }
   Call(const Call &C, SExpr *T) : Instruction(C), Target(T) { }
+
+  Code::CallingConvention callingConvention() {
+    return static_cast<Code::CallingConvention>(Flags);
+  }
+  void setCallingConvention(Code::CallingConvention CCV) {
+    Flags = CCV;
+  }
 
   void rewrite(SExpr *T) { Target.reset(T); }
 
