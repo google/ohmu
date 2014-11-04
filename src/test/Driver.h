@@ -26,6 +26,7 @@
 
 #include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "clang/Analysis/Analyses/ThreadSafetyCompare.h"
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
