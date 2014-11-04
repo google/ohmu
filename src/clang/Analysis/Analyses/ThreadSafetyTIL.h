@@ -58,6 +58,7 @@
 #include <cassert>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 
 namespace clang {
@@ -204,6 +205,60 @@ private:
 
 
 
+inline SExpr* maybeRegisterFuture(SExpr** Eptr, SExpr* P);
+
+template<class T>
+inline T* maybeRegisterFuture(T** Eptr, T* P);
+
+
+/// Owning reference to an SExpr.
+/// All SExprs should use this class to refer to subexpressions.
+template<class T>
+class SExprRefT {
+public:
+  SExprRefT() : Ptr(nullptr) { }
+  SExprRefT(std::nullptr_t) : Ptr(nullptr) { }
+  SExprRefT(T* P) : Ptr(maybeRegisterFuture(&Ptr, P)) { }
+
+  T&       operator*()        { return *Ptr; }
+  const T& operator*() const  { return *Ptr; }
+  T*       operator->()       { return Ptr; }
+  const T* operator->() const { return Ptr; }
+
+  T*       get()       { return Ptr; }
+  const T* get() const { return Ptr; }
+
+  void reset(std::nullptr_t) {
+    assert(!Ptr || (Ptr->opcode() != COP_Future) && "Cannot reset future.");
+    Ptr = nullptr;
+  }
+
+  void reset(T* P) {
+    assert(!Ptr || (Ptr->opcode() != COP_Future) && "Cannot reset future.");
+    Ptr = maybeRegisterFuture(&Ptr, P);
+  }
+
+  bool operator==(const SExprRefT<T> &P) const { return Ptr == P.Ptr; }
+  bool operator==(const T* P)            const { return Ptr == P; }
+  bool operator==(std::nullptr_t)        const { return Ptr == nullptr; }
+
+  bool operator!=(const SExprRefT<T> &P) const { return Ptr != P.Ptr; }
+  bool operator!=(const T* P)            const { return Ptr != P; }
+  bool operator!=(std::nullptr_t)        const { return Ptr != nullptr; }
+
+private:
+  friend class Future;
+
+  SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
+  void operator=(const SExprRefT<T> &P) { }
+
+  T* Ptr;
+};
+
+typedef SExprRefT<SExpr> SExprRef;
+
+
+
 /// Instructions are expressions with computational effect that can appear
 /// inside basic blocks.
 class Instruction : public SExpr {
@@ -332,53 +387,6 @@ inline T* maybeRegisterFuture(T** Eptr, T* P) {
   assert(P->opcode() != COP_Future);
   return P;
 }
-
-
-/// Owning reference to an SExpr.
-/// All SExprs should use this class to refer to subexpressions.
-template<class T>
-class SExprRefT {
-public:
-  SExprRefT() : Ptr(nullptr) { }
-  SExprRefT(std::nullptr_t) : Ptr(nullptr) { }
-  SExprRefT(T* P) : Ptr(maybeRegisterFuture(&Ptr, P)) { }
-
-  T&       operator*()        { return *Ptr; }
-  const T& operator*() const  { return *Ptr; }
-  T*       operator->()       { return Ptr; }
-  const T* operator->() const { return Ptr; }
-
-  T*       get()       { return Ptr; }
-  const T* get() const { return Ptr; }
-
-  void reset(std::nullptr_t) {
-    assert(!Ptr || !isa<Future>(Ptr) && "Reset before future was forced.");
-    Ptr = nullptr;
-  }
-
-  void reset(T* P) {
-    assert(!Ptr || !isa<Future>(Ptr) && "Reset before future was forced.");
-    Ptr = maybeRegisterFuture(&Ptr, P);
-  }
-
-  bool operator==(const SExprRefT<T> &P) const { return Ptr == P.Ptr; }
-  bool operator==(const T* P)            const { return Ptr == P; }
-  bool operator==(std::nullptr_t)        const { return Ptr == nullptr; }
-
-  bool operator!=(const SExprRefT<T> &P) const { return Ptr != P.Ptr; }
-  bool operator!=(const T* P)            const { return Ptr != P; }
-  bool operator!=(std::nullptr_t)        const { return Ptr != nullptr; }
-
-private:
-  friend class Future;
-
-  SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
-  void operator=(const SExprRefT<T> &P) { }
-
-  T* Ptr;
-};
-
-typedef SExprRefT<SExpr> SExprRef;
 
 
 
