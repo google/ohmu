@@ -244,7 +244,7 @@ private:
 
 void generate_LLVM_IR(SExpr* E) {
   LLVMReducer Reducer;
-  Reducer.traverse(E, TRV_Tail);
+  Reducer.traverseAll(E);
   // Reducer.module()->dump();
 }
 

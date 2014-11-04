@@ -45,7 +45,7 @@ class SSAPass : public InplaceReducer,
 public:
   static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
     SSAPass Pass(A);
-    Pass.traverse(Scfg, TRV_Tail);
+    Pass.traverseAll(Scfg);
   }
 
   SCFG* reduceSCFG_Begin(SCFG &Orig);

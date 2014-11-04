@@ -25,12 +25,14 @@ namespace til {
 /// The traversal depends on this information, e.g. it should not traverse
 /// weak subexpressions, and should not eagerly traverse lazy subexpressions.
 enum TraversalKind {
-  TRV_Weak,     ///< un-owned (weak) reference to subexpression
-  TRV_SubExpr,  ///< owned subexpression
-  TRV_Path,     ///< owned subexpression on spine of path
-  TRV_Tail,     ///< owned subexpression in tail position
-  TRV_Lazy,     ///< owned subexpression in lazy position
-  TRV_Type      ///< owned subexpression in type position
+  TRV_Weak,  ///< un-owned (weak) reference to subexpression
+  TRV_Arg,   ///< owned subexpr in argument position  e.g. a in  f(a), a+b
+  TRV_Instr, ///< owned subexpr in basic block
+  TRV_Path,  ///< owned subexpr on spine of path      e.g. f in  f(a)
+  TRV_Tail,  ///< owned subexpr in tail position      e.g. u in  let x=t; u
+  TRV_Decl,  ///< owned subexpr in a declaration      e.g. function body
+  TRV_Lazy,  ///< owned subexpr in lazy position      e.g. code body
+  TRV_Type   ///< owned subexpr in type position      e.g. T in  \x:T -> u
 };
 
 
@@ -91,7 +93,7 @@ public:
     // Detect weak references to other instructions in the CFG.
     if (Instruction *I = E->asCFGInstruction())
       return self()->reduceWeak(I);
-    return self()->traverse(E, TRV_SubExpr);
+    return self()->traverse(E, TRV_Arg);
   }
 
   /// Invoked by SExpr classes to traverse weak data members.
@@ -332,7 +334,7 @@ public:
 
   static bool visit(SExpr *E) {
     Self Visitor;
-    return Visitor.traverse(E, TRV_Tail);
+    return Visitor.traverseAll(E);
   }
 
 private:
@@ -380,7 +382,7 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
       return Vs.reduceVarDecl(*this, V::RMap::reduceNull());
     }
     case VK_Let: {
-      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      auto D = Vs.traverse(Definition.get(), TRV_Decl);
       return Vs.reduceVarDecl(*this, D);
     }
     case VK_Letrec: {
@@ -389,7 +391,7 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
       // Enter the scope of the empty definition.
       Vs.enterScope(this, Nvd);
       // Traverse the definition, and hope recursive references are lazy.
-      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      auto D = Vs.traverse(Definition.get(), TRV_Decl);
       Vs.exitScope(this);
       return Vs.reduceVarDeclLetrec(Nvd, D);
     }
@@ -399,10 +401,10 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the function.
   Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
+  auto E1 = Vs.traverse(Body.get(), TRV_Decl);
   Vs.exitScope(VDecl.get());
   return Vs.reduceFunction(*this, E0, E1);
 }
@@ -410,20 +412,20 @@ MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
   auto Nt = Vs.traverse(ReturnType.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  auto Nb = Vs.traverse(Body.get(),       TRV_Lazy);
   return Vs.reduceCode(*this, Nt, Nb);
 }
 
 template <class V>
 MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
   auto Nr = Vs.traverse(Range.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  auto Nb = Vs.traverse(Body.get(),  TRV_Lazy);
   return Vs.reduceField(*this, Nr, Nb);
 }
 
 template <class V>
 MAPTYPE(V::RMap, Slot) Slot::traverse(V &Vs) {
-  auto Nd = Vs.traverse(Definition.get(), TRV_SubExpr);
+  auto Nd = Vs.traverse(Definition.get(), TRV_Decl);
   return Vs.reduceSlot(*this, Nd);
 }
 
@@ -431,7 +433,7 @@ template <class V>
 MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
   auto Nr = Vs.reduceRecordBegin(*this);
   for (auto &Slt : Slots) {
-    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_SubExpr));
+    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_Decl));
   }
   return Vs.reduceRecordEnd(Nr);
 }
@@ -614,13 +616,13 @@ MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
   auto Nb = Vs.reduceBasicBlockBegin(*this);
   for (Phi *A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
-    Vs.handleBBArg(*A, Vs.traverse(A, TRV_SubExpr));
+    Vs.handleBBArg(*A, Vs.traverse(A, TRV_Instr));
   }
   for (Instruction *I : Instrs) {
     // Use TRV_SubExpr to force traversal of instructions
-    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_SubExpr));
+    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_Instr));
   }
-  auto Nt = Vs.traverse(TermInstr, TRV_SubExpr);
+  auto Nt = Vs.traverse(TermInstr, TRV_Instr);
   return Vs.reduceBasicBlockEnd(Nb, Nt);
 }
 
@@ -628,7 +630,7 @@ template <class V>
 MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
   auto Ns = Vs.reduceSCFG_Begin(*this);
   for (auto &B : Blocks) {
-    Vs.handleCFGBlock(*B, Vs.traverse(B.get(), TRV_SubExpr));
+    Vs.handleCFGBlock(*B, Vs.traverse(B.get(), TRV_Decl));
   }
   return Vs.reduceSCFG_End(Ns);
 }
@@ -658,7 +660,7 @@ Identifier::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   Vs.enterScope(VDecl.get(), E0);
   auto E1 = Vs.traverse(Body.get(), TRV_Tail);
@@ -669,7 +671,7 @@ MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Letrec) Letrec::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   Vs.enterScope(VDecl.get(), E0);
   auto E1 = Vs.traverse(Body.get(), TRV_Tail);
