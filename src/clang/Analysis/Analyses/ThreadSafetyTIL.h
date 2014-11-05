@@ -259,6 +259,25 @@ typedef SExprRefT<SExpr> SExprRef;
 
 
 
+/// Holds the type of a term.
+struct BoundingType {
+  enum Relation {
+    BT_Type,              ///<  Term has type TypeExpr
+    BT_ExactType,         ///<  Term has exact type TypeExpr
+    BT_Equivalent         ///<  Term is equivalent to TypeExpr
+  };
+
+  BoundingType() : TypeExpr(nullptr), Rel(BT_Type) { }
+  BoundingType(SExpr* E, Relation R) : TypeExpr(E), Rel(R) { }
+
+  void set(SExpr *E, Relation R) { TypeExpr.reset(E); Rel = R; }
+
+  SExprRef TypeExpr;   ///< The type expression for the term.
+  Relation Rel;        ///< How the type is related to the term.
+};
+
+
+
 /// Instructions are expressions with computational effect that can appear
 /// inside basic blocks.
 class Instruction : public SExpr {
@@ -279,12 +298,12 @@ public:
   /// Return the type of this instruction
   ValueType valueType() const { return ValType; }
 
-  /// Returns the instruction ID for this expression.
+  /// Returns the instruction ID for this instruction.
   /// All basic block instructions have an ID that is unique within the CFG.
   unsigned instrID() const { return InstrID; }
 
-  /// Returns the depth of this instruction on the stack.
-  /// This is used when interpreting a program using a stack machine.
+  /// Returns the position of this instruction on the stack.
+  /// Can be used when interpreting a program using a stack machine.
   unsigned stackID() const { return StackID; }
 
   /// Returns the block, if this is an instruction in a basic block,
@@ -306,12 +325,22 @@ public:
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { Name = N; }
 
+  /// Return the type of this instruction.
+  const BoundingType& boundingType() const { return TypeBound; }
+  BoundingType&       boundingType()       { return TypeBound; }
+
+  /// Set the type of this instruction.
+  void setBoundingType(SExpr* E, BoundingType::Relation R) {
+    TypeBound.set(E, R);
+  }
+
 protected:
-  ValueType    ValType;
-  unsigned     InstrID;
-  unsigned     StackID;
-  BasicBlock*  Block;
-  StringRef    Name;
+  ValueType     ValType;    ///< The scalar type (simple type) of this instr.
+  unsigned      InstrID;    ///< An ID that is unique within the CFG.
+  unsigned      StackID;    ///< An ID for stack machine interpretation.
+  BoundingType  TypeBound;  ///< The full type of this instruction.
+  BasicBlock*   Block;      ///< The basic block where this instruction occurs.
+  StringRef     Name;       ///< The name of this instruction (if any).
 };
 
 
