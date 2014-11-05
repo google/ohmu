@@ -9,7 +9,8 @@ circle = \@self struct {
 
 circleArea(): Int -> circle.area();
 
+getArea(c: circle): Int -> c.area();
+
 foo(a: Int, b: Int): Int -> a + b;
 
 bar(a: Int, b: Int): Int -> foo(a,b) * foo(b, a);
-

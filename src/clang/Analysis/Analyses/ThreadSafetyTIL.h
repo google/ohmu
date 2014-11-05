@@ -161,14 +161,10 @@ public:
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
   /// Return true if this is a trivial SExpr (constant or variable name).
-  bool isTrivial() {
-    switch (Opcode) {
-      case COP_ScalarType: return true;
-      case COP_Literal:    return true;
-      case COP_Variable:   return true;
-      default:             return false;
-    }
-  }
+  bool isTrivial();
+
+  /// Return true if this SExpr is a value (e.g. function, record, constant)
+  bool isValue();
 
   /// Cast this SExpr to a CFG instruction, or return null if it is not one.
   Instruction* asCFGInstruction();
@@ -330,9 +326,10 @@ public:
   BoundingType&       boundingType()       { return TypeBound; }
 
   /// Set the type of this instruction.
-  void setBoundingType(SExpr* E, BoundingType::Relation R) {
-    TypeBound.set(E, R);
-  }
+  void setBoundingType(SExpr* E, BoundingType::Relation R);
+
+  /// Get the boudning type of this instruction as a value (e.g. record/fun)
+  SExpr* getBoundingTypeValue();
 
 protected:
   ValueType     ValType;    ///< The scalar type (simple type) of this instr.
@@ -416,6 +413,25 @@ inline T* maybeRegisterFuture(T** Eptr, T* P) {
   assert(P->opcode() != COP_Future);
   return P;
 }
+
+
+
+/// Simple scalar types, e.g. Int, Float, etc.
+class ScalarType : public SExpr {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
+
+  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
+  ScalarType(const ScalarType &S) : SExpr(S), ValType(S.ValType) { }
+
+  /// Return the type of this instruction
+  ValueType valueType() const { return ValType; }
+
+  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
+
+private:
+  ValueType ValType;
+};
 
 
 
@@ -652,25 +668,6 @@ public:
 private:
   SlotArray Slots;    //< The slots in the record.
   SlotMap*  SMap;     //< A map from slot names to indices.
-};
-
-
-
-/// Simple scalar types, e.g. Int, Float, etc.
-class ScalarType : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
-
-  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
-  ScalarType(const ScalarType &S) : SExpr(S), ValType(S.ValType) { }
-
-  /// Return the type of this instruction
-  ValueType valueType() const { return ValType; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
-
-private:
-  ValueType ValType;
 };
 
 

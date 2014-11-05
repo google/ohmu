@@ -99,6 +99,54 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
 }
 
 
+bool SExpr::isTrivial() {
+  switch (Opcode) {
+    case COP_ScalarType: return true;
+    case COP_Literal:    return true;
+    case COP_Variable:   return true;
+    default:             return false;
+  }
+}
+
+
+bool SExpr::isValue() {
+  switch (Opcode) {
+    case COP_ScalarType: return true;
+    case COP_Literal:    return true;
+    case COP_Function:   return true;
+    case COP_Record:     return true;
+    case COP_Code:       return true;
+    case COP_Field:      return true;
+    default:             return false;
+  }
+}
+
+
+
+void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
+  // As soon as somebody looks at the type, we force it.
+  if (auto *F = dyn_cast<Future>(E))
+    E = F->force();
+  if (auto *SC = dyn_cast<ScalarType>(E)) {
+    ValType = SC->valueType();
+  }
+  else {
+    ValType = ValueType::getValueType<void*>();
+    TypeBound.set(E, R);
+  }
+}
+
+
+SExpr* Instruction::getBoundingTypeValue() {
+  if (!TypeBound.TypeExpr.get())
+    return nullptr;
+  if (TypeBound.TypeExpr->isValue())
+    return TypeBound.TypeExpr.get();
+  return cast<Instruction>(TypeBound.TypeExpr.get())->getBoundingTypeValue();
+}
+
+
+
 SExpr* Future::addPosition(SExpr **Eptr) {
   // If the future has already been forced, return the forced value.
   if (Status == FS_done)
@@ -140,7 +188,6 @@ void Future::setResult(SExpr *Res) {
 }
 
 
-
 SExpr* Future::force() {
   if (Status == Future::FS_done)
     return Result;
@@ -162,6 +209,7 @@ Slot* Record::findSlot(StringRef S) {
   }
   return nullptr;
 }
+
 
 
 unsigned BasicBlock::findPredecessorIndex(const BasicBlock *BB) const {

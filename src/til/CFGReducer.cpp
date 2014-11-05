@@ -118,8 +118,10 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
 
   if (!f) {
     fi = dyn_cast<Instruction>(e);
-    if (fi)
-      f = dyn_cast<Function>(fi->boundingType().TypeExpr.get());
+    if (fi) {
+      auto* ftyp = fi->getBoundingTypeValue();
+      f = dyn_cast_or_null<Function>(ftyp);
+    }
   }
 
   if (!f) {
@@ -150,8 +152,8 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
   if (!r) {
     ri = dyn_cast<Instruction>(e);
     if (ri) {
-      auto* rtyp = ri->boundingType().TypeExpr.get();
-      r = dyn_cast<Record>(rtyp);
+      auto* rtyp = ri->getBoundingTypeValue();
+      r = dyn_cast_or_null<Record>(rtyp);
       if (!r) {
         // Automatically insert implicit self-applications.
         auto* sfuntyp = dyn_cast<Function>(rtyp);
@@ -206,8 +208,10 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
   // bool isVal = c;
   if (!c) {
     ci = dyn_cast<Instruction>(e);
-    if (ci)
-      c = dyn_cast<Code>(ci->boundingType().TypeExpr.get());
+    if (ci) {
+      auto* ctyp = ci->getBoundingTypeValue();
+      c = dyn_cast<Code>(ctyp);
+    }
   }
 
   if (!c) {
