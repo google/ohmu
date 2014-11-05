@@ -1,0 +1,15 @@
+
+pi = 3;
+
+circle = \@self struct {
+  radius = 10;
+
+  area(): Int -> 2 * pi * radius;
+};
+
+circleArea(): Int -> circle.area();
+
+foo(a: Int, b: Int): Int -> a + b;
+
+bar(a: Int, b: Int): Int -> foo(a,b) * foo(b, a);
+

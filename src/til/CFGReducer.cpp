@@ -18,6 +18,7 @@
 #include "til/CFGReducer.h"
 #include "til/SSAPass.h"
 
+
 namespace ohmu {
 
 using namespace clang::threadSafety::til;
@@ -42,77 +43,219 @@ public:
 };
 
 
+
+// Map identifiers to variable names, or to slot definitions.
+SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
+  StringRef idstr = orig.name();
+
+  // Search backward through the context until we find a match.
+  for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
+    VarDecl* vd = scope().varDecl(i);
+    if (!vd)
+      continue;
+
+    if (vd->name() == idstr) {
+      // Translate identifier to a named variable.
+      if (vd->kind() == VarDecl::VK_Let ||
+          vd->kind() == VarDecl::VK_Letrec) {
+        // Map let variables directly to their definitions.
+        return vd->definition();
+      }
+      // Construct a variable, and set it's type.
+      auto* res = new (Arena) Variable(vd);
+      res->setBoundingType(vd->definition(), BoundingType::BT_Type);
+      return res;
+    }
+    else if (vd->kind() == VarDecl::VK_SFun) {
+      // Map identifiers to slots for record self-variables.
+      if (!vd->definition())
+        continue;
+      auto* sfun = cast<Function>(vd->definition());
+      Record* rec = dyn_cast<Record>(sfun->body());
+      if (!rec)
+        continue;
+      auto* slt = rec->findSlot(idstr);
+      if (!slt)
+        continue;
+
+      if (slt->hasModifier(Slot::SLT_Final) &&
+          slt->definition()->isTrivial()) {
+        // TODO: do we want to be a bit more sophisticated here?
+        return slt->definition();
+      }
+      auto* svar = new (Arena) Variable(vd);
+      svar->setBoundingType(sfun, BoundingType::BT_Type);
+      auto* sapp = new (Arena) Apply(svar, nullptr, Apply::FAK_SApply);
+      sapp->setBoundingType(rec,  BoundingType::BT_Type);
+      auto* res  = new (Arena) Project(sapp, idstr);
+      res->setBoundingType(slt->definition(), BoundingType::BT_Type);
+      return res;
+    }
+  }
+
+  // TODO: emit warning on name-not-found.
+  diag.error("Identifier not found: ") << idstr;
+  return new (Arena) Identifier(orig);
+}
+
+
+
+SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
+  auto* res = CopyReducer::reduceVariable(orig, vd);
+  auto k  = vd->kind();
+  auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
+      BoundingType::BT_Equivalent : BoundingType::BT_Type;
+  res->setBoundingType(vd->definition(), bt);
+  return res;
+}
+
+
+
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
-  if (auto* f = dyn_cast<Function>(e)) {
-    pendingPathArgs_.push_back(a);
+  auto* f = dyn_cast<Function>(e);
+  Instruction* fi = nullptr;
+  bool isVal = f;
+
+  if (!f) {
+    fi = dyn_cast<Instruction>(e);
+    if (fi)
+      f = dyn_cast<Function>(fi->boundingType().TypeExpr.get());
+  }
+
+  if (!f) {
+    // Undefined marks a previous error, so omit the warning.
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a function: ") << e;
+    return new (Arena) Undefined();
+  }
+
+  pendingPathArgs_.push_back(a);
+  if (isVal) {
+    // Partially evaluate the apply.
     return f->body();
   }
-  assert(numPendingArgs() == 0 && "Internal error.");
-  return CopyReducer::reduceApply(orig, e, a);
+
+  // Construct a residual, and set its type.
+  auto *res = CopyReducer::reduceApply(orig, e, a);
+  res->setBoundingType(f->body(), fi->boundingType().Rel);
+  return res;
 }
+
 
 
 SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
-  if (auto *r = dyn_cast<Record>(e)) {
-    if (Slot* slt = r->findSlot(orig.slotName())) {
-      return slt->definition();
-    }
-    else {
-      std::cerr << "Slot not found: " << orig.slotName() << "\n";
-      return new (Arena) Undefined();
+  auto* r = dyn_cast<Record>(e);
+  Instruction* ri = nullptr;
+  bool isVal = r;
+  if (!r) {
+    ri = dyn_cast<Instruction>(e);
+    if (ri) {
+      auto* rtyp = ri->boundingType().TypeExpr.get();
+      r = dyn_cast<Record>(rtyp);
+      if (!r) {
+        // Automatically insert implicit self-applications.
+        auto* sfuntyp = dyn_cast<Function>(rtyp);
+        if (sfuntyp && sfuntyp->isSelfApplicable()) {
+          r = dyn_cast<Record>(sfuntyp->body());
+          if (r) {
+            ri = new (Arena) Apply(e, nullptr, Apply::FAK_SApply);
+            ri->setBoundingType(r, ri->boundingType().Rel);
+          }
+        }
+      }
     }
   }
-  return CopyReducer::reduceProject(orig, e);
+
+  if (!r) {
+    // Undefined marks a previous error, so omit the warning.
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a record: ") << e;
+    return new (Arena) Undefined();
+  }
+
+  Slot* slt = r->findSlot(orig.slotName());
+  if (!slt) {
+    diag.error("Slot not found: ") << orig.slotName();
+    return new (Arena) Undefined();
+  }
+
+  if (isVal) {
+    // Partially evaluate the project.
+    return slt->definition();
+  }
+  // Construct a residual.
+  auto* res = CopyReducer::reduceProject(orig, ri);
+  res->setBoundingType(slt->definition(), ri->boundingType().Rel);
+  return res;
 }
 
 
+
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // Traversing Apply will push arguments onto pendingPathArgs_.
-  // A call expression will consume the args.
-  if (auto* c = dyn_cast<Code>(e)) {
-    // TODO: handle more than one arg.
+  // Reducing Apply pushes arguments onto pendingPathArgs_.
+  // Reducing Call will consume those arguments.
+  auto* c = dyn_cast<Code>(e);
+  if (c) {
     auto it = codeMap_.find(c);
     if (it != codeMap_.end()) {
-      // This is a locally-defined function, which maps to a basic block.
-      PendingBlock* pb = it->second;
-
-      // All calls are tail calls.  Make a continuation if we don't have one.
-      BasicBlock* cont = currentContinuation();
-      if (!cont)
-        cont = newBlock(1);
-
-      // Set the continuation of the pending block to the current continuation.
-      // If there are multiple calls, the continuations must match.
-      if (pb->continuation) {
-        assert(pb->continuation == cont && "Cannot transform to tail call!");
-      }
-      else {
-        pb->continuation = cont;
-        // Once we have a continuation, we can add pb to the queue.
-        pendingBlockQueue_.push(pb);
-      }
-
-      // End current block with a jump to the new one.
-      newGoto(pb->block, pendingArgs());
-      clearPendingArgs();
-
-      // If this was a newly-created continuation, then continue where we
-      // left off.
-      if (!currentContinuation()) {
-        beginBlock(cont);
-        return cont->arguments()[0];
-      }
-      return nullptr;
+      // inlineLocalCall with clearPendingArgs()
+      return inlineLocalCall(it->second);
     }
   }
+  Instruction* ci = nullptr;
+  // bool isVal = c;
+  if (!c) {
+    ci = dyn_cast<Instruction>(e);
+    if (ci)
+      c = dyn_cast<Code>(ci->boundingType().TypeExpr.get());
+  }
 
-  // Create Apply exprs for all pending arguments, and return a Call expr.
-  SExpr *f = e;
-  for (auto *a : pendingArgs())
-    f = new (Arena) Apply(f, a);
+  if (!c) {
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a code block: ") << e;
+    clearPendingArgs();
+    return new (Arena) Undefined();
+  }
+
   clearPendingArgs();
 
-  return CopyReducer::reduceCall(orig, f);
+  auto* res = CopyReducer::reduceCall(orig, e);
+  res->setBoundingType(c->returnType(), BoundingType::BT_Type);
+  return res;
+}
+
+
+
+/// Convert a call expression to a goto for locally-defined functions.
+/// Locally-defined functions map to a basic blocks.
+SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb) {
+  // All calls are tail calls.  Make a continuation if we don't have one.
+  BasicBlock* cont = currentContinuation();
+  if (!cont)
+    cont = newBlock(1);
+
+  // Set the continuation of the pending block to the current continuation.
+  // If there are multiple calls, the continuations must match.
+  if (pb->continuation) {
+    assert(pb->continuation == cont && "Cannot transform to tail call!");
+  }
+  else {
+    pb->continuation = cont;
+    // Once we have a continuation, we can add pb to the queue.
+    pendingBlockQueue_.push(pb);
+  }
+
+  // End current block with a jump to the new one.
+  newGoto(pb->block, pendingArgs());
+  clearPendingArgs();
+
+  // If this was a newly-created continuation, then continue where we
+  // left off.
+  if (!currentContinuation()) {
+    beginBlock(cont);
+    return cont->arguments()[0];
+  }
+  return nullptr;
 }
 
 
@@ -171,51 +314,6 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   Code* c = CopyReducer::reduceCode(orig, e0, nullptr);
   codeMap_.insert(std::make_pair(c, pb));
   return c;
-}
-
-
-
-SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
-  StringRef s = orig.name();
-
-  // Search backward through the context until we find a match.
-  for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
-    VarDecl* vd = scope().varDecl(i);
-    if (!vd)
-      continue;
-
-    if (vd->name() == s) {
-      // Translate identifier to a named variable.
-      if (vd->kind() == VarDecl::VK_Let ||
-          vd->kind() == VarDecl::VK_Letrec)
-        // Map let variables directly to their definitions.
-        return vd->definition();
-      return new (Arena) Variable(vd);
-    }
-    else if (vd->kind() == VarDecl::VK_SFun) {
-      if (!vd->definition())
-        continue;
-
-      // Map identifiers to slots for record self-variables.
-      auto* sfun = cast<Function>(vd->definition());
-      if (Record *r = dyn_cast<Record>(sfun->body())) {
-        if (auto *slt = r->findSlot(s)) {
-          if (slt->hasModifier(Slot::SLT_Final) &&
-              slt->definition()->isTrivial()) {
-            // FIXME!!  This is a hack that should be removed ASAP.
-            return slt->definition();
-          }
-          auto* svar = new (Arena) Variable(vd);
-          auto* sapp = new (Arena) Apply(svar, nullptr, Apply::FAK_SApply);
-          return new (Arena) Project(sapp, s);
-        }
-      }
-    }
-  }
-
-  // TODO: emit warning on name-not-found.
-  std::cerr << "error: Identifier " << s << " not found.\n";
-  return new (Arena) Identifier(orig);
 }
 
 

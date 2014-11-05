@@ -341,7 +341,7 @@ protected:
         self()->printSExpr(E->arg(), SS, Prec_MAX);
         SS << ")";
       }
-      else if (/*Verbose*/ true)
+      else if (Verbose)
         SS << "@()";
       return;
     }
@@ -676,7 +676,7 @@ class StdPrinter : public PrettyPrinter<StdPrinter, std::ostream> { };
 
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
-  TILDebugPrinter() : PrettyPrinter(false, false) { }
+  TILDebugPrinter() : PrettyPrinter(true, false) { }
 };
 
 

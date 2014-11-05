@@ -515,6 +515,8 @@ public:
   SExpr *body() { return Body.get(); }
   const SExpr *body() const { return Body.get(); }
 
+  bool isSelfApplicable() { return VDecl->kind() == VarDecl::VK_SFun; }
+
   DECLARE_TRAVERSE_AND_COMPARE(Function)
 
 private:
