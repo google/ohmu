@@ -1,0 +1,18 @@
+
+foo(a: Int, b: Int, c: Float, d: Double): Int -> {
+  let x = a*a + b*b;
+  let y = c*c + d*d;
+  let z = x + y;
+  let w = -x + y + z;
+  let ans = if (x > z) then ~a else b;
+  ans+1;
+};
+
+
+bar(): Int -> {
+  var a = 0;
+  var b = 1;
+  let c = if (a^ < b^) then a^ else b^;
+  c;
+};
+
