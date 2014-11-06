@@ -445,9 +445,9 @@ protected:
 
   void printCast(const Cast *E, StreamType &SS) {
     if (!CStyle) {
-      SS << "cast[";
-      SS << E->castOpcode();
-      SS << "](";
+      SS << "cast.";
+      SS << getCastOpcodeString(E->castOpcode());
+      SS << "(";
       self()->printSExpr(E->expr(), SS, Prec_Unary);
       SS << ")";
       return;
@@ -482,7 +482,11 @@ protected:
     }
     self()->newline(SS);
     if (E->opcode() != COP_Store) {
-      SS << "let " << printableName(E->instrName()) << E->instrID() << " = ";
+      SS << "let " << printableName(E->instrName()) << E->instrID();
+      if (Verbose) {
+        SS << ": " << E->valueType().getTypeName();
+      }
+      SS << " = ";
     }
     self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";
@@ -490,11 +494,9 @@ protected:
 
   void printBasicBlock(const BasicBlock *E, StreamType &SS) {
     printBlockLabel(SS, E, -1);
-    SS << " : ";
-    printBlockLabel(SS, E->parent(), -1);
-    SS << "|";
-    printBlockLabel(SS, E->postDominator(), -1);
-    SS << " {";
+    SS << ": // ";
+
+    SS << "preds={";
     bool First = true;
     for (auto &B : E->predecessors()) {
       if (!First)
@@ -503,6 +505,12 @@ protected:
       First = false;
     }
     SS << "}";
+
+    SS << " dom=";
+    printBlockLabel(SS, E->parent(), -1);
+    SS << " post=";
+    printBlockLabel(SS, E->postDominator(), -1);
+
     self()->indent();
 
     for (auto *A : E->arguments()) {

@@ -201,7 +201,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
     auto it = codeMap_.find(c);
     if (it != codeMap_.end()) {
       // inlineLocalCall with clearPendingArgs()
-      return inlineLocalCall(it->second);
+      return inlineLocalCall(it->second, c);
     }
   }
   Instruction* ci = nullptr;
@@ -232,11 +232,14 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
 /// Convert a call expression to a goto for locally-defined functions.
 /// Locally-defined functions map to a basic blocks.
-SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb) {
+SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
   // All calls are tail calls.  Make a continuation if we don't have one.
   BasicBlock* cont = currentContinuation();
   if (!cont)
     cont = newBlock(1);
+  // TODO: should we check against an existing type?
+  cont->arguments()[0]->setBoundingType(c->returnType(),
+                                        BoundingType::BT_Type);
 
   // Set the continuation of the pending block to the current continuation.
   // If there are multiple calls, the continuations must match.
@@ -260,6 +263,139 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb) {
     return cont->arguments()[0];
   }
   return nullptr;
+}
+
+
+
+SExpr* CFGReducer::reduceLoad(Load &orig, SExpr* e) {
+  auto* res = CopyReducer::reduceLoad(orig, e);
+  // If we can map the load to a local variable, then set the type.
+  if (Alloc* a = dyn_cast<Alloc>(e)) {
+    if (auto* instr = dyn_cast_or_null<Instruction>(a->initializer()))
+      res->setValueType(instr->valueType());
+  }
+  return res;
+}
+
+
+
+SExpr* CFGReducer::reduceUnaryOp(UnaryOp &orig, SExpr* e0) {
+  Instruction* i0 = dyn_cast<Instruction>(e0);
+  if (!i0) {
+    diag.error("Invalid use of arithmetic operator: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  switch (orig.unaryOpcode()) {
+    case UOP_Minus: {
+      if (!i0->valueType().isNumeric())
+        diag.error("Operator requires a numeric type: ") << &orig;
+      break;
+    }
+    case UOP_BitNot: {
+      if (i0->valueType().Base != ValueType::BT_Int)
+        diag.error("Bitwise operations require integer type.") << &orig;
+      break;
+    }
+    case UOP_LogicNot: {
+      if (i0->valueType().Base != ValueType::BT_Bool)
+        diag.error("Logical operations require boolean type.") << &orig;
+      break;
+    }
+  }
+
+  auto* res = CopyReducer::reduceUnaryOp(orig, i0);
+  res->setValueType(i0->valueType());
+  return res;
+}
+
+
+
+bool CFGReducer::checkAndExtendTypes(Instruction*& i0, Instruction*& i1) {
+  if (i0->valueType() == i1->valueType())
+    return true;
+  TIL_CastOpcode op = typeConvertable(i0->valueType(), i1->valueType());
+  if (op != CAST_none) {
+    i0 = addInstr(new (Arena) Cast(op, i0));
+    i0->setValueType(i1->valueType());
+    return true;
+  }
+  op = typeConvertable(i1->valueType(), i0->valueType());
+  if (op != CAST_none) {
+    i1 = addInstr(new (Arena) Cast(op, i1));
+    i1->setValueType(i0->valueType());
+    return true;
+  }
+  return false;
+}
+
+
+
+SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
+  Instruction* i0 = dyn_cast<Instruction>(e0);
+  Instruction* i1 = dyn_cast<Instruction>(e1);
+  if (!i0 || !i1) {
+    diag.error("Invalid use of arithmetic operator: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  if (!checkAndExtendTypes(i0, i1)) {
+    diag.error("Arithmetic operation on incompatible types: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  ValueType vt = ValueType::getValueType<void>();
+  switch (orig.binaryOpcode()) {
+    case BOP_Add:
+    case BOP_Sub:
+    case BOP_Mul:
+    case BOP_Div:
+    case BOP_Rem: {
+      if (!i0->valueType().isNumeric())
+        diag.error("Operator requires a numeric type: ") << &orig;
+      vt = i0->valueType();
+      break;
+    }
+    case BOP_Shl:
+    case BOP_Shr:
+    case BOP_BitAnd:
+    case BOP_BitXor:
+    case BOP_BitOr: {
+      if (i0->valueType().Base != ValueType::BT_Int)
+        diag.error("Bitwise operations require integer type.") << &orig;
+      vt = i0->valueType();
+      break;
+    }
+    case BOP_Eq:
+    case BOP_Neq:
+    case BOP_Lt:
+    case BOP_Leq: {
+      vt = ValueType::getValueType<bool>();
+      break;
+    }
+    case BOP_Gt: {
+      // rewrite > to <
+      auto* res = addInstr(new (Arena) BinaryOp(BOP_Lt, i1, i0));
+      res->setValueType(ValueType::getValueType<bool>());
+      return res;
+    }
+    case BOP_Geq: {
+      // rewrite >= to <=
+      auto* res = addInstr(new (Arena) BinaryOp(BOP_Leq, i1, i0));
+      res->setValueType(ValueType::getValueType<bool>());
+      return res;
+    }
+    case BOP_LogicAnd:
+    case BOP_LogicOr: {
+      if (i0->valueType().Base != ValueType::BT_Bool)
+        diag.error("Logical operations require boolean type.") << &orig;
+      vt = ValueType::getValueType<bool>();
+      break;
+    }
+  }
+  auto* res = CopyReducer::reduceBinaryOp(orig, i0, i1);
+  res->setValueType(vt);
+  return res;
 }
 
 
@@ -303,10 +439,12 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   // let-variables that refer to Phi nodes in the new block.
   ScopeFrame* ns = scope().clone();
   for (unsigned i = 0; i < nargs; ++i) {
-    unsigned j   = nargs-1-i;
-    StringRef nm = scope().varDecl(j)->name();
-    b->arguments()[i]->setInstrName(nm);
-    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, nm, b->arguments()[i]));
+    unsigned j  = nargs-1-i;
+    VarDecl* vd = scope().varDecl(j);
+    Phi*     ph = b->arguments()[i];
+    ph->setInstrName(vd->name());
+    ph->setBoundingType(vd->definition(), BoundingType::BT_Type);
+    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, vd->name(), ph));
   }
 
   // Add pb to the array of pending blocks.
@@ -315,7 +453,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   pendingBlocks_.emplace_back(std::unique_ptr<PendingBlock>(pb));
 
   // Create a code expr, and add it to the code map.
-  Code* c = CopyReducer::reduceCode(orig, e0, nullptr);
+  Code* c = CopyReducer::reduceCode(orig, e0, e1);
   codeMap_.insert(std::make_pair(c, pb));
   return c;
 }
@@ -339,6 +477,10 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
 
   // End current block with a branch
   SExpr* nc = this->self()->traverseArg(e->condition());
+  Instruction* nci = dyn_cast<Instruction>(nc);
+  if (!nci || nci->valueType().Base != ValueType::BT_Bool)
+    diag.error("Branch condition is not a boolean: ") << nci;
+
   Branch* br = newBranch(nc);
 
   // If the current continuation is null, then make a new one.
@@ -431,7 +573,7 @@ void CFGReducer::endCFG() {
   // std::cerr << "\n===== Normalized ======\n";
   // TILDebugPrinter::print(Scfg, std::cerr);
 
-  SSAPass::ssaTransform(Scfg, Arena);
+  //SSAPass::ssaTransform(Scfg, Arena);
   //std::cerr << "\n===== SSA ======\n";
   //TILDebugPrinter::print(Scfg, std::cerr);
 

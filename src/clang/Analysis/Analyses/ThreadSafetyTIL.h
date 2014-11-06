@@ -96,6 +96,8 @@ enum TIL_BinaryOpcode : unsigned char {
   BOP_Neq,          ///<  !=
   BOP_Lt,           ///<  <
   BOP_Leq,          ///<  <=
+  BOP_Gt,           ///<  >   (surface syntax only: will be rewritten to <)
+  BOP_Geq,          ///<  >=  (surface syntax only: will be rewritten to >=)
   BOP_LogicAnd,     ///<  &&  (no short-circuit)
   BOP_LogicOr       ///<  ||  (no short-circuit)
 };
@@ -104,7 +106,7 @@ enum TIL_BinaryOpcode : unsigned char {
 enum TIL_CastOpcode : unsigned char {
   CAST_none = 0,
   // numeric casts
-  CAST_extendNum,       ///< extend precision of numeric type int->int or fp->fp
+  CAST_extendNum,       ///< extend precision of number:  int->int or fp->fp
   CAST_truncNum,        ///< truncate precision of numeric type
   CAST_intToFloat,      ///< convert integer to floating point type
   CAST_truncToInt,      ///< truncate float f to integer i;  abs(i) <= abs(f)
@@ -137,6 +139,13 @@ StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op);
 
 /// Return the name of a binary opcode.
 StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op);
+
+/// Return the name of a cast opcode.
+StringRef getCastOpcodeString(TIL_CastOpcode Op);
+
+/// If Vt1 can be converted to Vt2 without loss of precision, then return
+/// the opcode that does the cast, otherwise return CAST_none.
+TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2);
 
 
 
@@ -317,6 +326,9 @@ public:
 
   /// Set the stack ID for this instruction.
   void setStackID(unsigned D) { StackID = D; }
+
+  /// Sets the ValueType for this instruction.
+  void setValueType(ValueType Vt) { ValType = Vt; }
 
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { Name = N; }
@@ -855,8 +867,12 @@ public:
     AK_Heap    // Heap-allocated structure
   };
 
-  Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc, K), InitExpr(E) { }
-  Alloc(const Alloc &A, SExpr *E) : Instruction(A), InitExpr(E) { }
+  Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc, K), InitExpr(E) {
+    setValueType(ValueType::getValueType<void*>());
+  }
+  Alloc(const Alloc &A, SExpr *E) : Instruction(A), InitExpr(E) {
+    setValueType(ValueType::getValueType<void*>());
+  }
 
   void rewrite(SExpr *I) { InitExpr.reset(I); }
 

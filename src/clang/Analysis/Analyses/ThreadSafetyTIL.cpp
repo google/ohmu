@@ -47,11 +47,30 @@ const char* ValueType::getTypeName() {
       }
     }
     case BT_String:   return "String";
-    case BT_Pointer:  return "PointerType";
-    case BT_ValueRef: return "ValueType";
+    case BT_Pointer:  return "Pointer";
+    case BT_ValueRef: return "Unknown";
   }
   return "InvalidType";
 }
+
+
+TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2) {
+  if (Vt1.Base == ValueType::BT_Int) {
+    if (Vt2.Base == ValueType::BT_Int)
+      if (Vt1.Size <= Vt2.Size)
+        return CAST_extendNum;
+    if (Vt2.Base == ValueType::BT_Float)
+      if (static_cast<unsigned>(Vt1.Size) <= static_cast<unsigned>(Vt2.Size)-1)
+        return CAST_intToFloat;
+  }
+  else if (Vt1.Base == ValueType::BT_Float &&
+           Vt2.Base == ValueType::BT_Float) {
+    if (Vt1.Size <= Vt2.Size)
+      return CAST_extendNum;
+  }
+  return CAST_none;
+}
+
 
 
 StringRef getOpcodeString(TIL_Opcode Op) {
@@ -92,11 +111,34 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
     case BOP_Neq:      return "!=";
     case BOP_Lt:       return "<";
     case BOP_Leq:      return "<=";
+    case BOP_Gt:       return ">";
+    case BOP_Geq:      return ">=";
     case BOP_LogicAnd: return "&&";
     case BOP_LogicOr:  return "||";
   }
   return "";
 }
+
+
+StringRef getCastOpcodeString(TIL_CastOpcode Op) {
+  switch (Op) {
+    case CAST_none:            return "none";
+    case CAST_extendNum:       return "extendNum";
+    case CAST_truncNum:        return "truncNum";
+    case CAST_intToFloat:      return "intToFloat";
+    case CAST_truncToInt:      return "truncToInt";
+    case CAST_roundToInt:      return "roundToInt";
+    case CAST_toBits:          return "toBits";
+    case CAST_bitsToFloat:     return "bitsToFloat";
+    case CAST_unsafeBitsToPtr: return "unsafeBitsToPtr";
+    case CAST_downCast:        return "downCast";
+    case CAST_unsafeDownCast:  return "unsafeDownCast";
+    case CAST_unsafePtrCast:   return "unsafePtrCast";
+    case CAST_objToPtr:        return "objToPtr";
+  }
+  return "";
+}
+
 
 
 bool SExpr::isTrivial() {
@@ -129,6 +171,9 @@ void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
     E = F->force();
   if (auto *SC = dyn_cast<ScalarType>(E)) {
     ValType = SC->valueType();
+  }
+  else if (auto *L = dyn_cast<Literal>(E)) {
+    ValType = L->valueType();
   }
   else {
     ValType = ValueType::getValueType<void*>();

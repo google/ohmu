@@ -20,6 +20,8 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 
+#include "til/DiagnosticEmitter.h"
+
 #include <vector>
 
 
@@ -96,6 +98,10 @@ public:
   { }
   virtual ~CFGBuilder() { }
 
+private:
+  void setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx);
+
+
 protected:
   MemRegionRef               Arena;
   bool OverwriteArguments;     //< Set to true for passes which rewrite Phi.
@@ -105,6 +111,8 @@ protected:
   BasicBlock*                CurrentBB;
   std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
+
+  DiagnosticEmitter diag;
 };
 
 

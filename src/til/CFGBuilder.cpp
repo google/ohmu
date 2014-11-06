@@ -129,6 +129,38 @@ Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
 }
 
 
+void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
+  Instruction *I = dyn_cast<Instruction>(E);
+  if (!I) {
+    diag.error("Invalid argument to Phi node: ") << E;
+    return;
+  }
+
+  // Set the Phi argument.
+  if (!OverwriteInstructions)
+    assert(!Ph->values()[Idx].get() && "We already handled this node.");
+
+  Ph->values().resize(Arena, Idx+1, nullptr);  // Make room if we need to.
+  Ph->values()[Idx].reset(I);
+
+  // Futures don't yet have types...
+  // TODO: We could wind up with untyped phi nodes.
+  if (isa<Future>(I))
+    return;
+
+  // Update the type of the Phi node.
+  // All phi arguments must have the exact same type.
+  if (Idx == 0 && Ph->valueType().Base == ValueType::BT_Void) {
+    // Set the initial type of the Phi node.
+    Ph->setValueType(I->valueType());
+  }
+  else if (Ph->valueType() != I->valueType()) {
+    diag.error("Type mismatch in branch: ")
+      << I << " does not have type " << Ph->valueType().getTypeName();
+  }
+}
+
+
 Goto* CFGBuilder::newGoto(BasicBlock *B, SExpr* Result) {
   assert(CurrentBB && "No current block.");
 
@@ -136,7 +168,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, SExpr* Result) {
   if (Result) {
     assert(B->arguments().size() == 1);
     Phi *Ph = B->arguments()[0];
-    Ph->values()[Idx].reset(Result);
+    setPhiArgument(Ph, Result, Idx);
   }
 
   auto *Nt = new (Arena) Goto(B, Idx);
@@ -152,7 +184,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
   unsigned Idx = B->addPredecessor(CurrentBB);
   for (unsigned i = 0, n = Args.size(); i < n; ++i) {
     Phi *Ph = B->arguments()[i];
-    Ph->values()[Idx].reset(Args[i]);
+    setPhiArgument(Ph, Args[i], Idx);
   }
 
   auto *Nt = new (Arena) Goto(B, Idx);
@@ -169,12 +201,7 @@ void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
   if (Ph && Ph->block() == NG->targetBlock()) {
     // The blocks match, so we know that Ph is a rewritten Phi node.
     // (The original might have been eliminated by rewriting to something else.)
-    unsigned j = NG->phiIndex();
-    // assert(j < Ph->values().size());
-    Ph->values().resize(Arena, j+1, nullptr);  // Make room if we need to.
-    if (!OverwriteInstructions)
-      assert(!Ph->values()[j].get() && "We already handled this node.");
-    Ph->values()[j].reset(Res);                // Write the argument into Ph
+    setPhiArgument(Ph, Res, NG->phiIndex());
   }
 }
 

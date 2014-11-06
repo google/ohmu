@@ -26,9 +26,9 @@
 
 #include <ostream>
 
-
 namespace ohmu {
 
+using namespace clang::threadSafety::til;
 
 /// Wraps a std::ostream to provide custom output for various things.
 class DiagnosticStream {

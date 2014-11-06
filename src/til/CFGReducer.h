@@ -25,7 +25,6 @@
 #include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
 #include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
 #include "til/CopyReducer.h"
-#include "til/DiagnosticEmitter.h"
 
 #include <cstddef>
 #include <memory>
@@ -59,8 +58,12 @@ public:
   SExpr* reduceIdentifier(Identifier &orig);
   SExpr* reduceVariable(Variable &orig, VarDecl* vd);
   SExpr* reduceProject(Project &orig, SExpr* e);
-  SExpr* reduceApply(Apply &orig, SExpr* e, SExpr *a);
-  SExpr* reduceCall(Call &orig, SExpr *e);
+  SExpr* reduceApply(Apply &orig, SExpr* e, SExpr* a);
+  SExpr* reduceCall(Call &orig, SExpr* e);
+  SExpr* reduceLoad(Load &orig, SExpr* e);
+  SExpr* reduceUnaryOp(UnaryOp &orig, SExpr* e0);
+  SExpr* reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1);
+
   SExpr* reduceCode(Code& orig, SExpr* e0, SExpr* e1);
   SExpr* reduceLet(Let &orig, VarDecl *nvd, SExpr *b);
 
@@ -116,7 +119,10 @@ protected:
   }
 
   /// Inline a call to a function defined inside the current CFG.
-  SExpr* inlineLocalCall(PendingBlock *pb);
+  SExpr* inlineLocalCall(PendingBlock *pb, Code *c);
+
+  /// Do automatic type conversions for arithmetic operations.
+  bool checkAndExtendTypes(Instruction*& i0, Instruction*& i1);
 
   /// Implement lazy block traversal.
   void traversePendingBlocks();
@@ -135,8 +141,6 @@ private:
   std::vector<std::unique_ptr<PendingBlock>> pendingBlocks_;
   std::queue<PendingBlock*>                  pendingBlockQueue_;
   DenseMap<Code*, PendingBlock*>             codeMap_;
-
-  DiagnosticEmitter diag;
 };
 
 

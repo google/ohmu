@@ -1,5 +1,5 @@
 
-pi = 3;
+pi = 3;   // The biblical pi
 
 circle = \@self struct {
   radius = 10;
@@ -13,4 +13,4 @@ getArea(c: circle): Int -> c.area();
 
 foo(a: Int, b: Int): Int -> a + b;
 
-bar(a: Int, b: Int): Int -> foo(a,b) * foo(b, a);
+bar(a: Int, b: Int): Int -> foo(a, b) * foo(b, a);

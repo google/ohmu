@@ -215,9 +215,12 @@ public:
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
+    std::unique_ptr<ScopeFrame> oldScope = std::move(Reducer->Scope);
     Reducer->Scope = std::move(this->Scope);
-    auto* Res = Reducer->traverse(PendingExpr, TRV_Tail);
+    // TODO: store the context in which the future was created.
+    auto* Res = Reducer->traverse(PendingExpr, TRV_Decl);
     PendingExpr = nullptr;
+    Reducer->Scope = std::move(oldScope);
     return Res;
   }
 
