@@ -573,7 +573,7 @@ void CFGReducer::endCFG() {
   // std::cerr << "\n===== Normalized ======\n";
   // TILDebugPrinter::print(Scfg, std::cerr);
 
-  //SSAPass::ssaTransform(Scfg, Arena);
+  SSAPass::ssaTransform(Scfg, Arena);
   //std::cerr << "\n===== SSA ======\n";
   //TILDebugPrinter::print(Scfg, std::cerr);
 
