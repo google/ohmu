@@ -301,7 +301,7 @@ public:
       : SExpr(E), ValType(E.ValType),
         InstrID(0), StackID(0), Block(nullptr), InstrName(E.InstrName) { }
 
-  /// Return the type of this instruction
+  /// Return the simple scalar type (e.g. int/float/pointer) of this instr.
   ValueType valueType() const { return ValType; }
 
   /// Returns the instruction ID for this instruction.
@@ -334,14 +334,17 @@ public:
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { InstrName = N; }
 
-  /// Return the type of this instruction.
+  /// Return the full type expression for this instruction.  The full type
+  /// expression is only needed for instructions that return pointers.
   const BoundingType& boundingType() const { return TypeBound; }
   BoundingType&       boundingType()       { return TypeBound; }
 
   /// Set the type of this instruction.
   void setBoundingType(SExpr* E, BoundingType::Relation R);
 
-  /// Get the boudning type of this instruction as a value (e.g. record/fun)
+  /// Get the most specific supertype of this instruction that's a value,
+  /// (e.g. a function or record type.)  The immediate bounding type may be
+  /// a type expression of some kind.
   SExpr* getBoundingTypeValue();
 
 protected:
