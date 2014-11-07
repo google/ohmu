@@ -51,23 +51,6 @@ public:
   }
   BasicBlock* reduceWeak(BasicBlock *E);
 
-  void handleRecordSlot(Record *E, Slot *Res) {
-    E->slots().emplace_back(Arena, Res);
-  }
-  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(Scope->lookupInstr(&Orig), NG, Res);
-  }
-  void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (OverwriteArguments)
-      scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
-    /* BlockMap updated by reduceWeak(BasicBlock). */
-  }
-
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     return newVarDecl(Orig.kind(), Orig.varName(), E);
@@ -94,6 +77,9 @@ public:
   }
   Record* reduceRecordBegin(Record &Orig) {
     return newRecord(Orig.slots().size());
+  }
+  void handleRecordSlot(Record *R, Slot *S) {
+    R->slots().emplace_back(Arena, S);
   }
   Record* reduceRecordEnd(Record *R) { return R; }
 
@@ -158,6 +144,9 @@ public:
     unsigned Idx = B->addPredecessor(CurrentBB);
     return new (Arena) Goto(B, Idx);
   }
+  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
+    rewritePhiArg(Scope->lookupInstr(&Orig), NG, Res);
+  }
   Goto* reduceGotoEnd(Goto* G) {
     endBlock(G);      // Phi nodes are set by handlePhiNodeArg.
     return G;
@@ -170,11 +159,21 @@ public:
     return newReturn(E);
   }
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig);
-  SCFG* reduceSCFG_End(SCFG* Scfg);
-
   BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
+  void handleBBArg(Phi &Orig, SExpr* Res) {
+    if (OverwriteArguments)
+      scope().updateInstructionMap(&Orig, Res);
+  }
+  void handleBBInstr(Instruction &Orig, SExpr* Res) {
+    scope().updateInstructionMap(&Orig, Res);
+  }
   BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
+
+  SCFG* reduceSCFG_Begin(SCFG &Orig);
+  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
+    /* BlockMap updated by reduceWeak(BasicBlock). */
+  }
+  SCFG* reduceSCFG_End(SCFG* Scfg);
 
   SExpr* reduceUndefined(Undefined &Orig) {
     return newUndefined();

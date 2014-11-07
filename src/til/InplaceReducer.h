@@ -41,23 +41,6 @@ namespace til  {
 /// transformations.
 class InplaceReducer : public CFGBuilder, public ScopeHandler {
 public:
-  void handleRecordSlot(Record *E, Slot *Res) {
-    /* Slots can only be replaced with themselves. */
-  }
-  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(scope().lookupInstr(&Orig), NG, Res);
-  }
-  void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (OverwriteArguments)
-      scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
-    assert(&Orig == Res && "Blocks cannot be replaced.");
-  }
-
   SExpr*   reduceWeak(Instruction* I) { return scope().lookupInstr(I); }
   VarDecl* reduceWeak(VarDecl *E)     { return E; }
   Slot*    reduceWeak(Slot *S)        { return S; }
@@ -67,6 +50,7 @@ public:
       Scope->updateBlockMap(B, B);
     return B;
   }
+
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     Orig.rewrite(E);
@@ -91,6 +75,9 @@ public:
     return &Orig;
   }
   Record* reduceRecordBegin(Record &Orig)    { return &Orig; }
+  void handleRecordSlot(Record *E, Slot *Res) {
+    /* Slots can only be replaced with themselves. */
+  }
   Record* reduceRecordEnd(Record *R)         { return R;     }
 
   SExpr*  reduceScalarType(ScalarType &Orig) { return &Orig; }
@@ -154,6 +141,9 @@ public:
   SExpr* reducePhi(Phi& Orig) { return &Orig; }
 
   Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) { return &Orig; }
+  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
+    rewritePhiArg(scope().lookupInstr(&Orig), NG, Res);
+  }
   Goto* reduceGotoEnd(Goto* G) { return G; }
 
   SExpr* reduceBranch(Branch &Orig, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
@@ -169,13 +159,22 @@ public:
     beginBlock(&Orig);
     return &Orig;
   }
-
+  void handleBBArg(Phi &Orig, SExpr* Res) {
+    if (OverwriteArguments)
+      scope().updateInstructionMap(&Orig, Res);
+  }
+  void handleBBInstr(Instruction &Orig, SExpr* Res) {
+    scope().updateInstructionMap(&Orig, Res);
+  }
   BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
     endBlock(cast<Terminator>(Term));
     return B;
   }
 
   SCFG* reduceSCFG_Begin(SCFG &Orig);
+  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
+    assert(&Orig == Res && "Blocks cannot be replaced.");
+  }
   SCFG* reduceSCFG_End(SCFG* Scfg);
 
   SExpr* reduceUndefined (Undefined &Orig)  { return &Orig; }

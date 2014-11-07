@@ -20,8 +20,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "TIL.h"
-#include "TILTraverse.h"
+#include "TILVisitor.h"
 
 #ifndef OHMU_TIL_VISITCFG_H_
 #define OHMU_TIL_VISITCFG_H_
@@ -31,7 +30,7 @@ namespace til  {
 
 
 // Simple visitor which finds all CFGs and adds them to list.
-class VisitCFG : public VisitReducer<VisitCFG> {
+class VisitCFG : public Visitor<VisitCFG> {
 public:
   // Don't traverse inside CFGs; just add them to the list.
   bool traverseSCFG(SCFG* cfg, TraversalKind k) {

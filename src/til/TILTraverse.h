@@ -172,12 +172,6 @@ public:
 
   Self* self() { return static_cast<Self*>(this); }
 
-  void handleRecordSlot(R_Record E, R_Slot Res)            { }
-  void handlePhiArg  (Phi &Orig, R_Goto NG, R_SExpr Res)   { }
-  void handleBBArg   (Phi &Orig,         R_SExpr Res)      { }
-  void handleBBInstr (Instruction &Orig, R_SExpr Res)      { }
-  void handleCFGBlock(BasicBlock &Orig,  R_BasicBlock Res) { }
-
   R_SExpr reduceSExpr(SExpr& Orig) { return RMap::reduceNull(); }
 
   R_SExpr      reduceWeak(Instruction* E) { return RMap::reduceNull(); }
@@ -204,6 +198,7 @@ public:
   R_Record reduceRecordBegin(Record &Orig) {
     return self()->reduceSExpr(Orig);
   }
+  void handleRecordSlot(R_Record E, R_Slot Res) { }
   R_Record reduceRecordEnd(R_Record R) { return R; }
 
   R_SExpr reduceScalarType(ScalarType &Orig) {
@@ -263,6 +258,7 @@ public:
   R_SExpr reduceGotoBegin(Goto &Orig, R_BasicBlock B) {
     return self()->reduceSExpr(Orig);
   }
+  void handlePhiArg(Phi &Orig, R_Goto NG, R_SExpr Res) { }
   R_SExpr reduceGotoEnd(R_Goto G) { return G; }
 
   R_Phi reducePhi(Phi &Orig) {
@@ -272,11 +268,14 @@ public:
   R_BasicBlock reduceBasicBlockBegin(BasicBlock &Orig) {
     return self()->reduceSExpr(Orig);
   }
+  void handleBBArg  (Phi &Orig,         R_SExpr Res) { }
+  void handleBBInstr(Instruction &Orig, R_SExpr Res) { }
   R_BasicBlock reduceBasicBlockEnd(R_BasicBlock BB, R_SExpr Tm) { return BB; }
 
   R_SCFG reduceSCFG_Begin(SCFG &Orig) {
     return self()->reduceSExpr(Orig);
   }
+  void handleCFGBlock(BasicBlock &Orig,  R_BasicBlock Res) { }
   R_SCFG reduceSCFG_End(R_SCFG Scfg) { return Scfg; }
 
   R_SExpr reduceUndefined(Undefined &Orig) {
@@ -299,46 +298,6 @@ public:
   }
 };
 
-
-/// Defines the TypeMap for VisitReducer
-class VisitReducerMap {
-public:
-  /// A visitor maps all expression types to bool.
-  template <class T> struct TypeMap { typedef bool Ty; };
-  typedef bool NullType;
-
-  static bool reduceNull() { return true; }
-};
-
-
-/// Implements reduceX methods for a simple visitor.   A visitor "rewrites"
-/// SExprs to booleans: it returns true on success, and false on failure.
-template<class Self>
-class VisitReducer : public Traversal<Self, VisitReducerMap>,
-                     public DefaultReducer<Self, VisitReducerMap>,
-                     public DefaultScopeHandler<VisitReducerMap> {
-public:
-  typedef Traversal<Self, VisitReducerMap> SuperTv;
-
-  VisitReducer() : Success(true) { }
-
-  bool reduceSExpr(SExpr &Orig) { return true; }
-
-  /// Abort traversal on failure.
-  template <class T>
-  MAPTYPE(VisitReducerMap, T) traverse(T* E, TraversalKind K) {
-    Success = Success && SuperTv::traverse(E, K);
-    return Success;
-  }
-
-  static bool visit(SExpr *E) {
-    Self Visitor;
-    return Visitor.traverseAll(E);
-  }
-
-private:
-  bool Success;
-};
 
 
 // Used by SExprReducerMap.  Most terms map to SExpr*.
@@ -685,6 +644,7 @@ MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
   auto Ne = Vs.traverse(ElseExpr.get(), TRV_Tail);
   return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
 }
+
 
 } // end namespace til
 } // end namespace ohmu

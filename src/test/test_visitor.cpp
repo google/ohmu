@@ -20,14 +20,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "til/TIL.h"
-#include "til/TILTraverse.h"
+#include "til/TILVisitor.h"
 
 namespace ohmu {
 namespace til  {
 
-
-class SimpleVisitor : public VisitReducer<SimpleVisitor> { };
+class SimpleVisitor : public Visitor<SimpleVisitor> { };
 
 void test(SExpr* E) {
   SimpleVisitor::visit(E);
