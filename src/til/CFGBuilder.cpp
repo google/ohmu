@@ -16,12 +16,11 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "til/CFGBuilder.h"
+#include "CFGBuilder.h"
 
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
@@ -206,4 +205,6 @@ void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu
+

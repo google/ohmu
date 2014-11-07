@@ -18,7 +18,7 @@
 #ifndef OHMU_TIL_SCOPEHANDLER_H
 #define OHMU_TIL_SCOPEHANDLER_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "TIL.h"
 
 #include <cstddef>
 #include <memory>
@@ -26,8 +26,7 @@
 
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 /// A ScopeFrame maintains information about how the lexical scope of a term
@@ -141,6 +140,7 @@ public:
 };
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 

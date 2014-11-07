@@ -15,20 +15,21 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// Provide a simple class for emitting error and warning messages.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef OHMU_TIL_DIAGNOSTIC_H
 #define OHMU_TIL_DIAGNOSTIC_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
+#include "TIL.h"
+#include "TILPrettyPrint.h"
 
 #include <ostream>
 
 namespace ohmu {
+namespace til  {
 
-using namespace clang::threadSafety::til;
 
 /// Wraps a std::ostream to provide custom output for various things.
 class DiagnosticStream {
@@ -96,6 +97,7 @@ private:
 };
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_DIAGNOSTIC_H

@@ -21,7 +21,7 @@
 
 using namespace ohmu;
 using namespace ohmu::parsing;
-using namespace clang::threadSafety::til;
+using namespace ohmu::til;
 
 
 void printSExpr(SExpr* e) {

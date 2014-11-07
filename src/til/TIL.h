@@ -1,4 +1,4 @@
-//===- ThreadSafetyTIL.h ---------------------------------------*- C++ --*-===//
+//===- TIL.h ---------------------------------------------------*- C++ --*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,7 +11,7 @@
 // by the thread safety analysis (See ThreadSafety.cpp).  The TIL is intended
 // to be largely independent of clang, in the hope that the analysis can be
 // reused for other non-C++ languages.  All dependencies on clang/llvm should
-// go in ThreadSafetyUtil.h.
+// go in TILDependencies.h.
 //
 // Thread safety analysis works by comparing mutex expressions, e.g.
 //
@@ -44,13 +44,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTIL_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTIL_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TIL_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TIL_H
 
-// All clang include dependencies for this file must be put in
-// ThreadSafetyUtil.h.
-#include "ThreadSafetyUtil.h"
-#include "ThreadSafetyType.h"
+// Note: we use a relative path for includes, so that these files can be
+// reused outside of clang/llvm.  All clang and llvm dependencies should go
+// in TILDependencies.h.
+#include "TILDependencies.h"
+#include "TILValueType.h"
 
 
 #include <stdint.h>
@@ -61,15 +62,14 @@
 #include <vector>
 
 
-namespace clang {
-namespace threadSafety {
+namespace ohmu {
 namespace til {
 
 
 /// Enum for the different distinct classes of SExpr
 enum TIL_Opcode {
 #define TIL_OPCODE_DEF(X) COP_##X,
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
 };
 
@@ -308,7 +308,7 @@ public:
   /// All basic block instructions have an ID that is unique within the CFG.
   unsigned instrID() const { return InstrID; }
 
-  /// Returns the position of this instruction on the stack.
+  /// Returns the position of the result of this instruction on the stack.
   /// Can be used when interpreting a program using a stack machine.
   unsigned stackID() const { return StackID; }
 
@@ -1593,9 +1593,7 @@ inline bool Goto::isBackEdge() const {
 }
 
 
-
 }  // end namespace til
-}  // end namespace threadSafety
-}  // end namespace clang
+}  // end namespace ohmu
 
 #endif

@@ -22,10 +22,10 @@
 
 #include <unordered_map>
 
-#include "ASTNode.h"
-#include "DefaultLexer.h"
-#include "Parser.h"
-#include "ParserBuilder.h"
+#include "parser/ASTNode.h"
+#include "parser/DefaultLexer.h"
+#include "parser/Parser.h"
+#include "parser/ParserBuilder.h"
 
 
 #ifndef OHMU_BNF_PARSER_H

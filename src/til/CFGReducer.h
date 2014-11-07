@@ -21,10 +21,7 @@
 #ifndef OHMU_TIL_CFGREDUCER_H
 #define OHMU_TIL_CFGREDUCER_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
-#include "til/CopyReducer.h"
+#include "CopyReducer.h"
 
 #include <cstddef>
 #include <memory>
@@ -32,8 +29,7 @@
 #include <vector>
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 struct PendingBlock {
@@ -176,6 +172,7 @@ MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_CFGREDUCER_H

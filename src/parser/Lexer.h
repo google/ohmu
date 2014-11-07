@@ -29,7 +29,7 @@
 #ifndef OHMU_LEXER_H
 #define OHMU_LEXER_H
 
-#include "Token.h"
+#include "parser/Token.h"
 
 #include <stdio.h>
 

@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "TILParser.h"
+#include "parser/TILParser.h"
 
 #include <cstdlib>
 
@@ -23,7 +23,7 @@
 namespace ohmu {
 namespace parsing {
 
-using namespace clang::threadSafety::til;
+using namespace ohmu::til;
 
 
 const char* TILParser::getOpcodeName(TIL_ConstructOp op) {

@@ -1,4 +1,4 @@
-//===- ThreadSafetyType.h --------------------------------------*- C++ --*-===//
+//===- TILValueType.h --------------------------------------*- C++ --*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,13 +11,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTYPE_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTYPE_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H
+
+#include "TILDependencies.h"
 
 #include <stdint.h>
 
-namespace clang {
-namespace threadSafety {
+namespace ohmu {
 namespace til {
 
 
@@ -169,8 +170,7 @@ inline ValueType ValueType::getValueType<void*>() {
 }
 
 }  // end namespace til
-}  // end namespace threadSafety
-}  // end namespace clang
+}  // end namespace ohmu
 
 
-#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTYPE_H
+#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H

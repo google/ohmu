@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ASTNode.h"
+#include "parser/ASTNode.h"
 
 
 namespace ohmu {

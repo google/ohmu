@@ -26,17 +26,12 @@
 #ifndef OHMU_TIL_INPLACEREDUCER_H
 #define OHMU_TIL_INPLACEREDUCER_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
-
-#include "til/CFGBuilder.h"
-#include "til/Scope.h"
+#include "CFGBuilder.h"
+#include "Scope.h"
 
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 /// InplaceReducer implements the reducer interface so that each reduce simply
@@ -209,6 +204,7 @@ public:
 };
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_INPLACEREDUCER_H

@@ -36,8 +36,8 @@
 
 #include "base/MemRegion.h"
 
-#include "Token.h"
-#include "Lexer.h"
+#include "parser/Token.h"
+#include "parser/Lexer.h"
 
 
 namespace ohmu {

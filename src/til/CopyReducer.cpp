@@ -1,4 +1,4 @@
-//===- CopyReducer.h -------------------------------------------*- C++ --*-===//
+//===- CopyReducer.cpp -----------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,11 +22,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "til/CopyReducer.h"
+#include "CopyReducer.h"
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
@@ -73,4 +72,5 @@ BasicBlock* CopyReducer::reduceWeak(BasicBlock *B) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu

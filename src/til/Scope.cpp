@@ -16,11 +16,10 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "til/Scope.h"
+#include "Scope.h"
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 void ScopeFrame::enterCFG(SCFG *Orig, SCFG *S) {
@@ -81,5 +80,6 @@ void ScopeHandler::exitScope(VarDecl *Orig) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu
 

@@ -16,11 +16,11 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
+#include "DiagnosticEmitter.h"
+#include "TIL.h"
+#include "TILTraverse.h"
+#include "TILPrettyPrint.h"
 
-#include "til/DiagnosticEmitter.h"
 
 #include <vector>
 
@@ -29,8 +29,7 @@
 #define OHMU_TIL_CFGBUILDER_H_
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 /// This class provides a useful interface for building and rewriting CFGs.
@@ -228,6 +227,7 @@ inline Phi* CFGBuilder::addArg(Phi* A) {
 }
 
 
-}
+}  // end namespace til
+}  // end namespace ohmu
 
 #endif  // OHMU_TIL_CFGBUILDER_H_

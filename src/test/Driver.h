@@ -24,12 +24,13 @@
 #ifndef OHMU_TEST_DRIVER_H
 #define OHMU_TEST_DRIVER_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyCompare.h"
+
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
+#include "til/TIL.h"
+#include "til/TILTraverse.h"
+#include "til/TILCompare.h"
 #include "til/CFGReducer.h"
 #include "til/Global.h"
 
@@ -38,7 +39,7 @@
 namespace ohmu {
 
 using namespace ohmu::parsing;
-using namespace clang::threadSafety::til;
+using namespace ohmu::til;
 
 
 class Driver {

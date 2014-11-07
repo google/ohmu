@@ -23,15 +23,15 @@
 #ifndef OHMU_TIL_PARSER_H
 #define OHMU_TIL_PARSER_H
 
-#include "Parser.h"
-#include "BNFParser.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "parser/Parser.h"
+#include "parser/BNFParser.h"
+#include "til/TIL.h"
 
 
 namespace ohmu {
 namespace parsing {
 
-using namespace clang::threadSafety::til;
+using namespace ohmu::til;
 
 
 class TILParser : public Parser {

@@ -1,4 +1,4 @@
-//===- ThreadSafetyTraverse.h ----------------------------------*- C++ --*-===//
+//===- TILPrettyPrint.h ----------------------------------------*- C++ --*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,22 +7,21 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines a framework for doing generic traversals and rewriting
-// operations over the Thread Safety TIL.
+// This file defines pretty printing operations for the ohmu typed intermediate
+// language.
 //
 // UNDER CONSTRUCTION.  USE AT YOUR OWN RISK.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYPRINT_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYPRINT_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
 
-#include "ThreadSafetyTIL.h"
+#include "TIL.h"
 
 #include <ostream>
 
-namespace clang {
-namespace threadSafety {
+namespace ohmu {
 namespace til {
 
 // Pretty printer for TIL expressions
@@ -139,7 +138,7 @@ protected:
     case COP_##X:                                                          \
       self()->print##X(cast<X>(E), SS);                                    \
       return;
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
     }
   }
@@ -689,9 +688,8 @@ public:
 
 
 }  // end namespace til
-}  // end namespace threadSafety
-}  // end namespace clang
+}  // end namespace ohmu
 
 
-#endif
+#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
 

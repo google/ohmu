@@ -17,7 +17,7 @@
 
 #include <cstdlib>
 
-#include "DefaultLexer.h"
+#include "parser/DefaultLexer.h"
 
 namespace ohmu {
 

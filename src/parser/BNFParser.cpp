@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "BNFParser.h"
+#include "parser/BNFParser.h"
 
 namespace ohmu {
 namespace parsing {

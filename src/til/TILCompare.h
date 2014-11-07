@@ -1,4 +1,4 @@
-//===- ThreadSafetyCompare.h ----------------------------------*- C++ --*-===//
+//===- TILCompare.h --------------------------------------------*- C++ --*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,14 +13,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYCOMPARE_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYCOMPARE_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILCOMPARE_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILCOMPARE_H
 
-#include "ThreadSafetyTIL.h"
+#include "TIL.h"
 
-namespace clang {
-namespace threadSafety {
-namespace til {
+namespace ohmu {
+namespace til  {
 
 
 // Basic class for comparison operations.
@@ -41,7 +40,7 @@ public:
 #define TIL_OPCODE_DEF(X)                                                     \
     case COP_##X:                                                             \
       return cast<X>(E1)->compare(cast<X>(E2), *self());
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
     }
     return self()->falseResult();
@@ -381,7 +380,6 @@ public:
 
 
 } // end namespace til
-} // end namespace threadSafety
-} // end namespace clang
+} // end namespace ohmu
 
 #endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYCOMPARE_H

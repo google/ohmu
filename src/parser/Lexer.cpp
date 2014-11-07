@@ -23,7 +23,7 @@
 #include <readline/history.h>
 #endif
 
-#include "Lexer.h"
+#include "parser/Lexer.h"
 
 namespace ohmu {
 

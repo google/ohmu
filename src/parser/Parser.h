@@ -24,8 +24,8 @@
 #ifndef OHMU_PARSER_H
 #define OHMU_PARSER_H
 
-#include "ASTNode.h"
-#include "Lexer.h"
+#include "parser/ASTNode.h"
+#include "parser/Lexer.h"
 
 #include <ostream>
 #include <map>

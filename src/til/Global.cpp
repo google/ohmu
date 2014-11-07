@@ -15,14 +15,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-
-#include "til/Global.h"
-#include "til/CFGReducer.h"
-
+#include "Global.h"
+#include "CFGReducer.h"
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 template<class T>
@@ -94,4 +91,5 @@ void Global::print(std::ostream &SS) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu

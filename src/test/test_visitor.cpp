@@ -20,13 +20,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
+#include "til/TIL.h"
+#include "til/TILTraverse.h"
 
-namespace clang {
-namespace threadSafety {
-namespace til {
+namespace ohmu {
+namespace til  {
 
 
 class SimpleVisitor : public VisitReducer<SimpleVisitor> { };
@@ -37,5 +35,4 @@ void test(SExpr* E) {
 
 
 }  // end namespace til
-}  // end namespace threadSafety
-}  // end namespace clang
+}  // end namespace ohmu

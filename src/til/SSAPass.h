@@ -22,15 +22,11 @@
 #ifndef OHMU_TIL_SSAPASS_H
 #define OHMU_TIL_SSAPASS_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
-
-#include "til/InplaceReducer.h"
+#include "InplaceReducer.h"
 
 namespace ohmu {
+namespace til  {
 
-using namespace clang::threadSafety::til;
 
 // Map from local variables (allocID) to their definitions (SExpr*).
 typedef std::vector<SExpr*> LocalVarMap;
@@ -105,7 +101,7 @@ private:
 };
 
 
-
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_SSAPASS_H

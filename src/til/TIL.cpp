@@ -7,13 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
+#include "TIL.h"
 
-namespace clang {
-namespace threadSafety {
-namespace til {
+namespace ohmu {
+namespace til  {
 
 
 const char* ValueType::getTypeName() {
@@ -78,7 +75,7 @@ StringRef getOpcodeString(TIL_Opcode Op) {
 #define TIL_OPCODE_DEF(X)                                                   \
   case COP_##X:                                                             \
     return #X;
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
   }
   return "";
@@ -487,5 +484,4 @@ void SCFG::computeNormalForm() {
 }
 
 }  // end namespace til
-}  // end namespace threadSafety
-}  // end namespace clang
+}  // end namespace ohmu

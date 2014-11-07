@@ -15,11 +15,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "til/InplaceReducer.h"
+#include "InplaceReducer.h"
 
 namespace ohmu {
+namespace til  {
 
-using namespace clang::threadSafety::til;
 
 SCFG* InplaceReducer::reduceSCFG_Begin(SCFG &Orig) {
   beginCFG(&Orig);
@@ -36,4 +36,5 @@ SCFG* InplaceReducer::reduceSCFG_End(SCFG* Scfg) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu

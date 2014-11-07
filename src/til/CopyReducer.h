@@ -25,13 +25,8 @@
 #ifndef OHMU_TIL_COPYREDUCER_H
 #define OHMU_TIL_COPYREDUCER_H
 
-
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
-#include "clang/Analysis/Analyses/ThreadSafetyPrint.h"
-
-#include "til/CFGBuilder.h"
-#include "til/Scope.h"
+#include "CFGBuilder.h"
+#include "Scope.h"
 
 #include <cstddef>
 #include <memory>
@@ -40,8 +35,7 @@
 
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 /// CopyReducer implements the reducer interface to build a new SExpr.
@@ -298,6 +292,7 @@ public:
 };
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 

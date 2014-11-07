@@ -23,7 +23,7 @@
 
 #include <iostream>
 
-#include "Parser.h"
+#include "parser/Parser.h"
 
 
 namespace ohmu {

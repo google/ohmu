@@ -1,4 +1,4 @@
-//===- ThreadSafetyTraverse.h ----------------------------------*- C++ --*-===//
+//===- TILTraverse.h ------------------------------------------*- C++ --*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,14 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
+#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H
+#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H
 
-#include "ThreadSafetyTIL.h"
+#include "TIL.h"
 
-namespace clang {
-namespace threadSafety {
-namespace til {
+namespace ohmu {
+namespace til  {
 
 /// TraversalKind describes the location in which a subexpression occurs.
 /// The traversal depends on this information, e.g. it should not traverse
@@ -115,7 +114,7 @@ public:
   MAPTYPE(RMap,X) traverse##X(X *e, TraversalKind K) {                    \
     return e->traverse(*self());                                          \
   }
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
 
 
@@ -126,7 +125,7 @@ protected:
 #define TIL_OPCODE_DEF(X)                                                 \
     case COP_##X:                                                         \
       return self()->traverse##X(cast<X>(E), K);
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
     }
     return RMap::reduceNull();
@@ -137,7 +136,7 @@ protected:
   MAPTYPE(RMap, X) traverseByType(X* E, TraversalKind K) {                \
     return self()->traverse##X(E, K);                                     \
   }
-#include "ThreadSafetyOps.def"
+#include "TILOps.def"
 #undef TIL_OPCODE_DEF
 };
 
@@ -688,7 +687,6 @@ MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
 }
 
 } // end namespace til
-} // end namespace threadSafety
-} // end namespace clang
+} // end namespace ohmu
 
-#endif  // LLVM_CLANG_THREAD_SAFETY_TRAVERSE_H
+#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H

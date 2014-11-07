@@ -26,8 +26,8 @@
 
 #include <cstddef>
 
-#include "ASTNode.h"
-#include "Parser.h"
+#include "parser/ASTNode.h"
+#include "parser/Parser.h"
 
 
 namespace ohmu {

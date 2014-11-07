@@ -1,4 +1,4 @@
-//===- ThreadSafetyUtil.h --------------------------------------*- C++ --*-===//
+//===- TILDependencies.h --------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,14 +32,14 @@
 #include "base/Util.h"
 #include "parser/Token.h"
 
-// pull in all of the cast operations.
-using namespace ohmu;
 
-namespace clang {
+namespace ohmu {
+namespace til  {
 
 typedef ohmu::parsing::SourceLocation SourceLocation;
 
 } // end namespace clang
+} // end namespace ohmu
 
 #endif   // OHMU_THREAD_SAFETY_UTIL_H
 

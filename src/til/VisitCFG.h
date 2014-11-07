@@ -20,15 +20,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
-#include "clang/Analysis/Analyses/ThreadSafetyTraverse.h"
+#include "TIL.h"
+#include "TILTraverse.h"
 
 #ifndef OHMU_TIL_VISITCFG_H_
 #define OHMU_TIL_VISITCFG_H_
 
 namespace ohmu {
+namespace til  {
 
-using namespace clang::threadSafety::til;
 
 // Simple visitor which finds all CFGs and adds them to list.
 class VisitCFG : public VisitReducer<VisitCFG> {
@@ -45,6 +45,8 @@ private:
   std::vector<SCFG*> cfgList_;
 };
 
+
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_VISITCFG_H_

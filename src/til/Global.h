@@ -18,13 +18,12 @@
 #ifndef OHMU_TIL_GLOBAL_H
 #define OHMU_TIL_GLOBAL_H
 
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "TIL.h"
 
 #include <ostream>
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 class Global {
@@ -66,6 +65,7 @@ public:
 };
 
 
+}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_GLOBAL_H

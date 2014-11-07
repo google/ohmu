@@ -19,12 +19,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "SSAPass.h"
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 SCFG* SSAPass::reduceSCFG_Begin(SCFG &Orig) {
@@ -256,5 +254,6 @@ SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu
 

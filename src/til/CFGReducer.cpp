@@ -15,13 +15,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "til/CFGReducer.h"
-#include "til/SSAPass.h"
-
+#include "CFGReducer.h"
+#include "SSAPass.h"
 
 namespace ohmu {
-
-using namespace clang::threadSafety::til;
+namespace til  {
 
 
 /// A Future which creates a new CFG from the traversal.
@@ -590,4 +588,5 @@ SExpr* CFGReducer::lower(SExpr *e, MemRegionRef a) {
 }
 
 
+}  // end namespace til
 }  // end namespace ohmu
