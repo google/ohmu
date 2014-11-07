@@ -56,7 +56,7 @@ int main(int argc, const char** argv) {
 
   // Find all of the CFGs.
   VisitCFG visitCFG;
-  visitCFG.traverse(global.global(), TRV_Tail);
+  visitCFG.traverseAll(global.global());
 
   std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
   return 0;

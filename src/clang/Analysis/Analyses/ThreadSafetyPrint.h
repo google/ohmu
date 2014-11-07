@@ -54,7 +54,6 @@ protected:
     switch (E->opcode()) {
       case COP_VarDecl:    return Prec_Atom;
       case COP_Function:   return Prec_Decl;
-      case COP_SFunction:  return Prec_Decl;
       case COP_Code:       return Prec_Decl;
       case COP_Field:      return Prec_Decl;
       case COP_Slot:       return Prec_Decl;
@@ -64,7 +63,6 @@ protected:
       case COP_Literal:    return Prec_Atom;
       case COP_Variable:   return Prec_Atom;
       case COP_Apply:      return Prec_Postfix;
-      case COP_SApply:     return Prec_Postfix;
       case COP_Project:    return Prec_Postfix;
 
       case COP_Call:       return Prec_Postfix;
@@ -247,6 +245,8 @@ protected:
   }
 
   void printVarDecl(const VarDecl *E, StreamType &SS) {
+    if (E->kind() == VarDecl::VK_SFun)
+      SS << "@";
     SS << printableName(E->name());
     switch (E->kind()) {
     case VarDecl::VK_Fun:
@@ -277,19 +277,13 @@ protected:
     self()->printVarDecl(E->variableDecl(), SS);
 
     const SExpr *B = E->body();
-    if (B && B->opcode() == COP_Function)
+    if (B && B->opcode() == COP_Function) {
       self()->printFunction(cast<Function>(B), SS, 2);
+    }
     else {
-      SS << ")";
+      SS << ") ";
       self()->printSExpr(B, SS, Prec_Decl);
     }
-  }
-
-  void printSFunction(const SFunction *E, StreamType &SS) {
-    SS << "\\@";
-    self()->printVarDecl(E->variableDecl(), SS);
-    SS << " ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
   }
 
   void printCode(const Code *E, StreamType &SS) {
@@ -339,7 +333,21 @@ protected:
 
   void printApply(const Apply *E, StreamType &SS, bool sugared = false) {
     const SExpr *F = E->fun();
-    if (F->opcode() == COP_Apply) {
+
+    if (E->isSelfApplication()) {
+      self()->printSExpr(F, SS, Prec_Postfix);
+      if (E->isDelegation()) {
+        SS << "@(";
+        self()->printSExpr(E->arg(), SS, Prec_MAX);
+        SS << ")";
+      }
+      else if (Verbose)
+        SS << "@()";
+      return;
+    }
+
+    const Apply *FA = dyn_cast<Apply>(F);
+    if (FA && !FA->isSelfApplication()) {
       printApply(cast<Apply>(F), SS, true);
       SS << ", ";
     } else {
@@ -351,21 +359,13 @@ protected:
       SS << ")";
   }
 
-  void printSApply(const SApply *E, StreamType &SS) {
-    self()->printSExpr(E->sfun(), SS, Prec_Postfix);
-    if (E->isDelegation()) {
-      SS << "@(";
-      self()->printSExpr(E->arg(), SS, Prec_MAX);
-      SS << ")";
-    }
-  }
-
   void printProject(const Project *E, StreamType &SS) {
     if (CStyle) {
       // Omit the 'this->'
-      if (const SApply *SAP = dyn_cast<SApply>(E->record())) {
-        if (auto *V = dyn_cast<VarDecl>(SAP->sfun())) {
-          if (!SAP->isDelegation() && V->kind() == VarDecl::VK_SFun) {
+      if (const Apply *SAP = dyn_cast<Apply>(E->record())) {
+        if (auto *V = dyn_cast<Variable>(SAP->fun())) {
+          if (V->variableDecl()->kind() == VarDecl::VK_SFun &&
+              !SAP->isDelegation()) {
             SS << E->slotName();
             return;
           }
@@ -445,9 +445,9 @@ protected:
 
   void printCast(const Cast *E, StreamType &SS) {
     if (!CStyle) {
-      SS << "cast[";
-      SS << E->castOpcode();
-      SS << "](";
+      SS << "cast.";
+      SS << getCastOpcodeString(E->castOpcode());
+      SS << "(";
       self()->printSExpr(E->expr(), SS, Prec_Unary);
       SS << ")";
       return;
@@ -459,12 +459,12 @@ protected:
     SS << "CFG {";
     self()->indent();
     bool First = true;
-    for (auto BBI : *E) {
+    for (auto &B : E->blocks()) {
       self()->newline(SS);
       if (!First)
         self()->newline(SS);
       First = false;
-      printBasicBlock(BBI, SS);
+      printBasicBlock(B.get(), SS);
     }
     self()->unindent();
     self()->newline(SS);
@@ -482,7 +482,11 @@ protected:
     }
     self()->newline(SS);
     if (E->opcode() != COP_Store) {
-      SS << "let " << printableName(E->instrName()) << E->instrID() << " = ";
+      SS << "let " << printableName(E->instrName()) << E->instrID();
+      if (Verbose) {
+        SS << ": " << E->valueType().getTypeName();
+      }
+      SS << " = ";
     }
     self()->printSExpr(E, SS, Prec_MAX, false);
     SS << ";";
@@ -490,19 +494,23 @@ protected:
 
   void printBasicBlock(const BasicBlock *E, StreamType &SS) {
     printBlockLabel(SS, E, -1);
-    SS << " : ";
-    printBlockLabel(SS, E->parent(), -1);
-    SS << "|";
-    printBlockLabel(SS, E->postDominator(), -1);
-    SS << " {";
+    SS << ": // ";
+
+    SS << "preds={";
     bool First = true;
-    for (auto *B : E->predecessors()) {
+    for (auto &B : E->predecessors()) {
       if (!First)
         SS << ", ";
-      printBlockLabel(SS, B, -1);
+      printBlockLabel(SS, B.get(), -1);
       First = false;
     }
     SS << "}";
+
+    SS << " dom=";
+    printBlockLabel(SS, E->parent(), -1);
+    SS << " post=";
+    printBlockLabel(SS, E->postDominator(), -1);
+
     self()->indent();
 
     for (auto *A : E->arguments()) {
@@ -676,7 +684,7 @@ class StdPrinter : public PrettyPrinter<StdPrinter, std::ostream> { };
 
 class TILDebugPrinter : public PrettyPrinter<TILDebugPrinter, std::ostream> {
 public:
-  TILDebugPrinter() : PrettyPrinter(false, false) { }
+  TILDebugPrinter() : PrettyPrinter(true, false) { }
 };
 
 

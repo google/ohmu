@@ -58,7 +58,7 @@ public:
   BasicBlock* reduceWeak(BasicBlock *E);
 
   void handleRecordSlot(Record *E, Slot *Res) {
-    E->slots().push_back(Res);
+    E->slots().emplace_back(Arena, Res);
   }
   void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
     rewritePhiArg(Scope->lookupInstr(&Orig), NG, Res);
@@ -83,9 +83,6 @@ public:
   }
   Function* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
     return new (Arena) Function(Orig, Nvd, E0);
-  }
-  SFunction* reduceSFunction(SFunction &Orig, VarDecl *Nvd, SExpr* E0) {
-    return new (Arena) SFunction(Orig, Nvd, E0);
   }
   Code* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Code(Orig, E0, E1);
@@ -115,12 +112,8 @@ public:
   Variable* reduceVariable(Variable &Orig, VarDecl* VD) {
     return new (Arena) Variable(Orig, VD);
   }
-
   Apply* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
     return new (Arena) Apply(Orig, E0, E1);
-  }
-  SApply* reduceSApply(SApply &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) SApply(Orig, E0, E1);
   }
   Project* reduceProject(Project &Orig, SExpr* E0) {
     return new (Arena) Project(Orig, E0);
@@ -222,9 +215,12 @@ public:
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
+    std::unique_ptr<ScopeFrame> oldScope = std::move(Reducer->Scope);
     Reducer->Scope = std::move(this->Scope);
-    auto* Res = Reducer->traverse(PendingExpr, TRV_Tail);
+    // TODO: store the context in which the future was created.
+    auto* Res = Reducer->traverse(PendingExpr, TRV_Decl);
     PendingExpr = nullptr;
+    Reducer->Scope = std::move(oldScope);
     return Res;
   }
 

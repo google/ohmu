@@ -64,16 +64,16 @@ void Global::addDefinitions(std::vector<SExpr*>& Defs) {
   GlobalRec = new (ParseArena) Record(ParseArena, Sz);
 
   for (auto *Slt : PreludeDefs) {
-    GlobalRec->slots().push_back(Slt);
+    GlobalRec->slots().emplace_back(ParseArena, Slt);
   }
   for (auto *E : Defs) {
     auto *Slt = dyn_cast_or_null<Slot>(E);
     if (Slt)
-      GlobalRec->slots().push_back(Slt);
+      GlobalRec->slots().emplace_back(ParseArena, Slt);
   }
 
   auto *Vd = new (ParseArena) VarDecl(VarDecl::VK_SFun, "global", nullptr);
-  GlobalSFun = new (ParseArena) SFunction(Vd, GlobalRec);
+  GlobalSFun = new (ParseArena) Function(Vd, GlobalRec);
 }
 
 
@@ -81,7 +81,7 @@ void Global::lower() {
   SExpr* E = CFGReducer::lower(GlobalSFun, DefArena);
 
   // Replace the global definitions with lowered versions.
-  GlobalSFun = dyn_cast<SFunction>(E);
+  GlobalSFun = dyn_cast<Function>(E);
   if (GlobalSFun)
     GlobalRec = dyn_cast<Record>(GlobalSFun->body());
   else

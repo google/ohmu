@@ -234,7 +234,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       Token* t = tok(0);
       auto* v = new (arena_) VarDecl(VarDecl::VK_SFun,
                                      copyStr(t->string()), nullptr);
-      auto* e = new (arena_) SFunction(v, sexpr(1));
+      auto* e = new (arena_) Function(v, sexpr(1));
       delete t;
       return ParseResult(TILP_SExpr, e);
     }
@@ -255,8 +255,9 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       for (SExpr* e : *es) {
         Slot* s = dyn_cast<Slot>(e);
         if (s)
-          r->slots().push_back(s);
+          r->slots().emplace_back(arena_, s);
       }
+      delete es;
       return ParseResult(TILP_SExpr, r);
     }
     case TCOP_Slot: {
@@ -264,6 +265,7 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       Token* t = tok(0);
       SExpr* d = sexpr(1);
       auto* s = new (arena_) Slot(copyStr(t->string()), d);
+      delete t;
       return ParseResult(TILP_SExpr, s);
     }
     case TCOP_Array: {
@@ -280,9 +282,9 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       assert(arity == 1 || arity == 2);
       SExpr* e = nullptr;
       if (arity == 1)
-        e = new (arena_) SApply(sexpr(0));
+        e = new (arena_) Apply(sexpr(0), nullptr,  Apply::FAK_SApply);
       else if (arity == 2)
-        e = new (arena_) SApply(sexpr(0), sexpr(1));
+        e = new (arena_) Apply(sexpr(0), sexpr(1), Apply::FAK_SApply);
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Project: {

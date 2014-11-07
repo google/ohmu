@@ -238,7 +238,7 @@ testSSA_NestedLoopUnchanged(): Int -> {
       }
       else 0;
     };
-    if (j < m) then {
+    if (j^ < m) then {
       i := ii;
       loop_n();
       j := j^ + 1;

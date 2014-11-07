@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 
+add_executable(test_base test_base.cpp)
+target_link_libraries(test_base base)
+
 add_executable(test_BNFParser test_BNFParser.cpp)
 target_link_libraries(test_BNFParser base parser ohmu_til)
 add_dependencies(test_BNFParser parser_grammar)

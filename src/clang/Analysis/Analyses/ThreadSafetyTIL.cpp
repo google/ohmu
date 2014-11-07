@@ -47,11 +47,30 @@ const char* ValueType::getTypeName() {
       }
     }
     case BT_String:   return "String";
-    case BT_Pointer:  return "PointerType";
-    case BT_ValueRef: return "ValueType";
+    case BT_Pointer:  return "Pointer";
+    case BT_ValueRef: return "Unknown";
   }
   return "InvalidType";
 }
+
+
+TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2) {
+  if (Vt1.Base == ValueType::BT_Int) {
+    if (Vt2.Base == ValueType::BT_Int)
+      if (Vt1.Size <= Vt2.Size)
+        return CAST_extendNum;
+    if (Vt2.Base == ValueType::BT_Float)
+      if (static_cast<unsigned>(Vt1.Size) <= static_cast<unsigned>(Vt2.Size)-1)
+        return CAST_intToFloat;
+  }
+  else if (Vt1.Base == ValueType::BT_Float &&
+           Vt2.Base == ValueType::BT_Float) {
+    if (Vt1.Size <= Vt2.Size)
+      return CAST_extendNum;
+  }
+  return CAST_none;
+}
+
 
 
 StringRef getOpcodeString(TIL_Opcode Op) {
@@ -92,11 +111,85 @@ StringRef getBinaryOpcodeString(TIL_BinaryOpcode Op) {
     case BOP_Neq:      return "!=";
     case BOP_Lt:       return "<";
     case BOP_Leq:      return "<=";
+    case BOP_Gt:       return ">";
+    case BOP_Geq:      return ">=";
     case BOP_LogicAnd: return "&&";
     case BOP_LogicOr:  return "||";
   }
   return "";
 }
+
+
+StringRef getCastOpcodeString(TIL_CastOpcode Op) {
+  switch (Op) {
+    case CAST_none:            return "none";
+    case CAST_extendNum:       return "extendNum";
+    case CAST_truncNum:        return "truncNum";
+    case CAST_intToFloat:      return "intToFloat";
+    case CAST_truncToInt:      return "truncToInt";
+    case CAST_roundToInt:      return "roundToInt";
+    case CAST_toBits:          return "toBits";
+    case CAST_bitsToFloat:     return "bitsToFloat";
+    case CAST_unsafeBitsToPtr: return "unsafeBitsToPtr";
+    case CAST_downCast:        return "downCast";
+    case CAST_unsafeDownCast:  return "unsafeDownCast";
+    case CAST_unsafePtrCast:   return "unsafePtrCast";
+    case CAST_objToPtr:        return "objToPtr";
+  }
+  return "";
+}
+
+
+
+bool SExpr::isTrivial() {
+  switch (Opcode) {
+    case COP_ScalarType: return true;
+    case COP_Literal:    return true;
+    case COP_Variable:   return true;
+    default:             return false;
+  }
+}
+
+
+bool SExpr::isValue() {
+  switch (Opcode) {
+    case COP_ScalarType: return true;
+    case COP_Literal:    return true;
+    case COP_Function:   return true;
+    case COP_Record:     return true;
+    case COP_Code:       return true;
+    case COP_Field:      return true;
+    default:             return false;
+  }
+}
+
+
+
+void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
+  // As soon as somebody looks at the type, we force it.
+  if (auto *F = dyn_cast<Future>(E))
+    E = F->force();
+  if (auto *SC = dyn_cast<ScalarType>(E)) {
+    ValType = SC->valueType();
+  }
+  else if (auto *L = dyn_cast<Literal>(E)) {
+    ValType = L->valueType();
+  }
+  else {
+    ValType = ValueType::getValueType<void*>();
+    TypeBound.set(E, R);
+  }
+}
+
+
+SExpr* Instruction::getBoundingTypeValue() {
+  if (!TypeBound.TypeExpr.get())
+    return nullptr;
+  if (TypeBound.TypeExpr->isValue())
+    return TypeBound.TypeExpr.get();
+  return cast<Instruction>(TypeBound.TypeExpr.get())->getBoundingTypeValue();
+}
+
 
 
 SExpr* Future::addPosition(SExpr **Eptr) {
@@ -140,7 +233,6 @@ void Future::setResult(SExpr *Res) {
 }
 
 
-
 SExpr* Future::force() {
   if (Status == Future::FS_done)
     return Result;
@@ -165,25 +257,33 @@ Slot* Record::findSlot(StringRef S) {
 
 
 
+unsigned BasicBlock::findPredecessorIndex(const BasicBlock *BB) const {
+  unsigned i = 0;
+  for (auto &Pred : Predecessors) {
+    if (Pred.get() == BB)
+      return i;
+    ++i;
+  }
+  return Predecessors.size();
+}
+
+
 unsigned BasicBlock::addPredecessor(BasicBlock *Pred) {
   unsigned Idx = Predecessors.size();
-  Predecessors.reserveCheck(1, Arena);
-  Predecessors.push_back(Pred);
-  for (SExpr *E : Args) {
-    if (Phi* Ph = dyn_cast<Phi>(E)) {
-      Ph->values().reserveCheck(1, Arena);
-      Ph->values().push_back(nullptr);
-    }
+  Predecessors.emplace_back(Arena, Pred);
+  for (Phi *Ph : Args) {
+    assert(Ph->values().size() == Idx && "Phi nodes not sized properly.");
+    Ph->values().emplace_back(Arena, nullptr);
   }
   return Idx;
 }
 
 
 void BasicBlock::reservePredecessors(unsigned NumPreds) {
-  Predecessors.reserve(NumPreds, Arena);
+  Predecessors.reserve(Arena, NumPreds);
   for (SExpr *E : Args) {
     if (Phi* Ph = dyn_cast<Phi>(E)) {
-      Ph->values().reserve(NumPreds, Arena);
+      Ph->values().reserve(Arena, NumPreds);
     }
   }
 }
@@ -213,9 +313,9 @@ unsigned BasicBlock::renumber(unsigned ID) {
 void SCFG::renumber() {
   unsigned InstrID = 1;    // ID of 0 means unnumbered.
   unsigned BlockID = 0;
-  for (auto *Block : Blocks) {
-    InstrID = Block->renumber(InstrID);
-    Block->setBlockID(BlockID++);
+  for (auto &B : Blocks) {
+    InstrID = B->renumber(InstrID);
+    B->setBlockID(BlockID++);
   }
   NumInstructions = InstrID;
 }
@@ -226,7 +326,7 @@ void SCFG::renumber() {
 // Each block will be written into the Blocks array in order, and its BlockID
 // will be set to the index in the array.  Sorting should start from the entry
 // block, and ID should be the total number of blocks.
-int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+int BasicBlock::topologicalSort(BlockArray& Blocks, int ID) {
   if (Visited) return ID;
   Visited = true;
 
@@ -242,7 +342,7 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
   BlockID = --ID;
-  Blocks[BlockID] = this;
+  Blocks[BlockID].reset(this);
   return ID;
 }
 
@@ -251,7 +351,7 @@ int BasicBlock::topologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
 // Each block will be written into the Blocks array in order, and PostBlockID
 // will be set to the index in the array.  Sorting should start from the exit
 // block, and ID should be the total number of blocks.
-int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
+int BasicBlock::postTopologicalSort(BlockArray& Blocks, int ID) {
   if (Visited) return ID;
   Visited = true;
 
@@ -260,14 +360,14 @@ int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   if (DominatorNode.Parent)
     ID = DominatorNode.Parent->postTopologicalSort(Blocks, ID);
 
-  for (auto *B : predecessors())
+  for (auto &B : predecessors())
     ID = B->postTopologicalSort(Blocks, ID);
 
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
   PostBlockID = --ID;
-  Blocks[PostBlockID] = this;
+  Blocks[PostBlockID].reset(this);
   return ID;
 }
 
@@ -278,16 +378,16 @@ int BasicBlock::postTopologicalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
 void BasicBlock::computeDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk backwards from each predecessor to find the common dominator node.
-  for (auto *Pred : predecessors()) {
+  for (auto &Pred : predecessors()) {
     // Skip back-edges
     if (Pred->BlockID >= BlockID) continue;
     // If we don't yet have a candidate for dominator yet, take this one.
     if (Candidate == nullptr) {
-      Candidate = Pred;
+      Candidate = Pred.get();
       continue;
     }
     // Walk the alternate and current candidate back to find a common ancestor.
-    auto *Alternate = Pred;
+    auto *Alternate = Pred.get();
     while (Alternate != Candidate) {
       if (Candidate->BlockID > Alternate->BlockID)
         Candidate = Candidate->DominatorNode.Parent;
@@ -359,9 +459,9 @@ void SCFG::computeNormalForm() {
   assert(NumUnreachableBlocks == 0);
 
   // Compute post-dominators, which improves the topological sort.
-  for (auto *Block : Blocks) {
-    Block->computePostDominator();
-    Block->Visited = false;
+  for (auto &B : Blocks) {
+    B->computePostDominator();
+    B->Visited = false;
   }
 
   // Now re-sort the blocks in topological order, starting from the entry.
@@ -373,16 +473,16 @@ void SCFG::computeNormalForm() {
 
   // Calculate dominators.
   // Compute sizes and IDs for the (post)dominator trees.
-  for (auto *Block : Blocks) {
-    Block->computeDominator();
-    computeNodeSize(Block, &BasicBlock::PostDominatorNode);
+  for (auto &B : Blocks) {
+    B->computeDominator();
+    computeNodeSize(B.get(), &BasicBlock::PostDominatorNode);
   }
-  for (auto *Block : Blocks.reverse()) {
-    computeNodeSize(Block, &BasicBlock::DominatorNode);
-    computeNodeID(Block, &BasicBlock::PostDominatorNode);
+  for (auto &B : Blocks.reverse()) {
+    computeNodeSize(B.get(), &BasicBlock::DominatorNode);
+    computeNodeID(B.get(), &BasicBlock::PostDominatorNode);
   }
-  for (auto *Block : Blocks) {
-    computeNodeID(Block, &BasicBlock::DominatorNode);
+  for (auto &B : Blocks) {
+    computeNodeID(B.get(), &BasicBlock::DominatorNode);
   }
 }
 

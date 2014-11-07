@@ -86,6 +86,8 @@ public:
 
   /// Exit a function scope.
   void exitScope(VarDecl *Orig) {
+    if (Orig->varIndex() == 0)
+      return;
     assert(Orig->varIndex() == VarMap.size()-1 && "Traversal Error.");
     VarMap.pop_back();
   }

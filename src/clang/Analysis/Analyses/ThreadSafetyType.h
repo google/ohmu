@@ -53,8 +53,19 @@ struct ValueType {
   template <class T>
   inline static ValueType getValueType();
 
-  // Encode as 32-bit integer
-  inline unsigned asInt32() {
+  bool operator==(const ValueType& Vt) const {
+    return Base   == Vt.Base   && Size     == Vt.Size &&
+           Signed == Vt.Signed && VectSize == Vt.VectSize;
+  }
+  bool operator!=(const ValueType& Vt) const { return !(*this == Vt); }
+
+  /// Return true if this is a numeric (int or float) type
+  bool isNumeric() {
+    return (Base == BT_Int || Base == BT_Float);
+  }
+
+  /// Encode as 32-bit integer
+  unsigned asInt32() {
     return (VectSize << 24) | (Signed << 16) | (Size << 8) | Base;
   }
 
@@ -156,7 +167,6 @@ template<>
 inline ValueType ValueType::getValueType<void*>() {
   return ValueType(BT_Pointer, getSizeType(sizeof(void*)), false, 0);
 }
-
 
 }  // end namespace til
 }  // end namespace threadSafety

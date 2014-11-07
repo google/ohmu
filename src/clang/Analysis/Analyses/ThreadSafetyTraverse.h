@@ -10,8 +10,6 @@
 // This file defines a framework for doing generic traversals and rewriting
 // operations over the Thread Safety TIL.
 //
-// UNDER CONSTRUCTION.  USE AT YOUR OWN RISK.
-//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETYTRAVERSE_H
@@ -27,12 +25,14 @@ namespace til {
 /// The traversal depends on this information, e.g. it should not traverse
 /// weak subexpressions, and should not eagerly traverse lazy subexpressions.
 enum TraversalKind {
-  TRV_Weak,     ///< un-owned (weak) reference to subexpression
-  TRV_SubExpr,  ///< owned subexpression
-  TRV_Path,     ///< owned subexpression on spine of path
-  TRV_Tail,     ///< owned subexpression in tail position
-  TRV_Lazy,     ///< owned subexpression in lazy position
-  TRV_Type      ///< owned subexpression in type position
+  TRV_Weak,  ///< un-owned (weak) reference to subexpression
+  TRV_Arg,   ///< owned subexpr in argument position  e.g. a in  f(a), a+b
+  TRV_Instr, ///< owned subexpr in basic block
+  TRV_Path,  ///< owned subexpr on spine of path      e.g. f in  f(a)
+  TRV_Tail,  ///< owned subexpr in tail position      e.g. u in  let x=t; u
+  TRV_Decl,  ///< owned subexpr in a declaration      e.g. function body
+  TRV_Lazy,  ///< owned subexpr in lazy position      e.g. code body
+  TRV_Type   ///< owned subexpr in type position      e.g. T in  \x:T -> u
 };
 
 
@@ -93,7 +93,7 @@ public:
     // Detect weak references to other instructions in the CFG.
     if (Instruction *I = E->asCFGInstruction())
       return self()->reduceWeak(I);
-    return self()->traverse(E, TRV_SubExpr);
+    return self()->traverse(E, TRV_Arg);
   }
 
   /// Invoked by SExpr classes to traverse weak data members.
@@ -193,9 +193,6 @@ public:
   R_SExpr reduceFunction(Function &Orig, R_VarDecl Nvd, R_SExpr E0) {
     return self()->reduceSExpr(Orig);
   }
-  R_SExpr reduceSFunction(SFunction &Orig, R_VarDecl Nvd, R_SExpr E0) {
-    return self()->reduceSExpr(Orig);
-  }
   R_SExpr reduceCode(Code &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
   }
@@ -226,9 +223,6 @@ public:
   }
 
   R_SExpr reduceApply(Apply &Orig, R_SExpr E0, R_SExpr E1) {
-    return self()->reduceSExpr(Orig);
-  }
-  R_SExpr reduceSApply(SApply &Orig, R_SExpr E0, R_SExpr E1) {
     return self()->reduceSExpr(Orig);
   }
   R_SExpr reduceProject(Project &Orig, R_SExpr E0) {
@@ -340,7 +334,7 @@ public:
 
   static bool visit(SExpr *E) {
     Self Visitor;
-    return Visitor.traverse(E, TRV_Tail);
+    return Visitor.traverseAll(E);
   }
 
 private:
@@ -388,7 +382,7 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
       return Vs.reduceVarDecl(*this, V::RMap::reduceNull());
     }
     case VK_Let: {
-      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      auto D = Vs.traverse(Definition.get(), TRV_Decl);
       return Vs.reduceVarDecl(*this, D);
     }
     case VK_Letrec: {
@@ -397,7 +391,7 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
       // Enter the scope of the empty definition.
       Vs.enterScope(this, Nvd);
       // Traverse the definition, and hope recursive references are lazy.
-      auto D = Vs.traverse(Definition.get(), TRV_SubExpr);
+      auto D = Vs.traverse(Definition.get(), TRV_Decl);
       Vs.exitScope(this);
       return Vs.reduceVarDeclLetrec(Nvd, D);
     }
@@ -407,42 +401,31 @@ MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the function.
   Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
+  auto E1 = Vs.traverse(Body.get(), TRV_Decl);
   Vs.exitScope(VDecl.get());
   return Vs.reduceFunction(*this, E0, E1);
 }
 
 template <class V>
-MAPTYPE(V::RMap, SFunction) SFunction::traverse(V &Vs) {
-  // Traversing an self-definition is a no-op.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
-  Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_SubExpr);
-  Vs.exitScope(VDecl.get());
-  // The SFun constructor will set E0->Definition to E1.
-  return Vs.reduceSFunction(*this, E0, E1);
-}
-
-template <class V>
 MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
   auto Nt = Vs.traverse(ReturnType.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  auto Nb = Vs.traverse(Body.get(),       TRV_Lazy);
   return Vs.reduceCode(*this, Nt, Nb);
 }
 
 template <class V>
 MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
   auto Nr = Vs.traverse(Range.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(), TRV_Lazy);
+  auto Nb = Vs.traverse(Body.get(),  TRV_Lazy);
   return Vs.reduceField(*this, Nr, Nb);
 }
 
 template <class V>
 MAPTYPE(V::RMap, Slot) Slot::traverse(V &Vs) {
-  auto Nd = Vs.traverse(Definition.get(), TRV_SubExpr);
+  auto Nd = Vs.traverse(Definition.get(), TRV_Decl);
   return Vs.reduceSlot(*this, Nd);
 }
 
@@ -450,7 +433,7 @@ template <class V>
 MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
   auto Nr = Vs.reduceRecordBegin(*this);
   for (auto &Slt : Slots) {
-    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_SubExpr));
+    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_Decl));
   }
   return Vs.reduceRecordEnd(Nr);
 }
@@ -524,15 +507,9 @@ MAPTYPE(V::RMap, Variable) Variable::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Apply) Apply::traverse(V &Vs) {
   auto Nf = Vs.traverse(Fun.get(), TRV_Path);
-  auto Na = Vs.traverseArg(Arg.get());
+  auto Na = Arg.get() ? Vs.traverseArg(Arg.get())
+                      : V::RMap::reduceNull();
   return Vs.reduceApply(*this, Nf, Na);
-}
-
-template <class V>
-MAPTYPE(V::RMap, SApply) SApply::traverse(V &Vs) {
-  auto Nf = Vs.traverse(Sfun.get(), TRV_Path);
-  auto Na = Arg.get() ? Vs.traverseArg(Arg.get()) : V::RMap::reduceNull();
-  return Vs.reduceSApply(*this, Nf, Na);
 }
 
 template <class V>
@@ -639,21 +616,21 @@ MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
   auto Nb = Vs.reduceBasicBlockBegin(*this);
   for (Phi *A : Args) {
     // Use TRV_SubExpr to force traversal of arguments
-    Vs.handleBBArg(*A, Vs.traverse(A, TRV_SubExpr));
+    Vs.handleBBArg(*A, Vs.traverse(A, TRV_Instr));
   }
   for (Instruction *I : Instrs) {
     // Use TRV_SubExpr to force traversal of instructions
-    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_SubExpr));
+    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_Instr));
   }
-  auto Nt = Vs.traverse(TermInstr, TRV_SubExpr);
+  auto Nt = Vs.traverse(TermInstr, TRV_Instr);
   return Vs.reduceBasicBlockEnd(Nb, Nt);
 }
 
 template <class V>
 MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
   auto Ns = Vs.reduceSCFG_Begin(*this);
-  for (BasicBlock *B : Blocks) {
-    Vs.handleCFGBlock(*B, Vs.traverse(B, TRV_SubExpr));
+  for (auto &B : Blocks) {
+    Vs.handleCFGBlock(*B, Vs.traverse(B.get(), TRV_Decl));
   }
   return Vs.reduceSCFG_End(Ns);
 }
@@ -683,7 +660,7 @@ Identifier::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   Vs.enterScope(VDecl.get(), E0);
   auto E1 = Vs.traverse(Body.get(), TRV_Tail);
@@ -694,7 +671,7 @@ MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
 template <class V>
 MAPTYPE(V::RMap, Letrec) Letrec::traverse(V &Vs) {
   // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_SubExpr);
+  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   Vs.enterScope(VDecl.get(), E0);
   auto E1 = Vs.traverse(Body.get(), TRV_Tail);
@@ -709,381 +686,6 @@ MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
   auto Ne = Vs.traverse(ElseExpr.get(), TRV_Tail);
   return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
 }
-
-
-// Basic class for comparison operations over expressions.
-template <typename Self>
-class Comparator {
-protected:
-  Self *self() { return reinterpret_cast<Self *>(this); }
-
-public:
-  bool compareByCase(const SExpr *E1, const SExpr* E2) {
-    switch (E1->opcode()) {
-#define TIL_OPCODE_DEF(X)                                                     \
-    case COP_##X:                                                             \
-      return cast<X>(E1)->compare(cast<X>(E2), *self());
-#include "ThreadSafetyOps.def"
-#undef TIL_OPCODE_DEF
-    }
-    return false;
-  }
-};
-
-
-///////////////////////////////////////////
-// Implement compare for all TIL classes.
-///////////////////////////////////////////
-
-template <class C>
-typename C::CType VarDecl::compare(const VarDecl* E, C& Cmp) const {
-  auto Ct = Cmp.compareIntegers(kind(), E->kind());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  // Note, we don't compare names, due to alpha-renaming.
-  return Cmp.compare(definition(), E->definition());
-}
-
-template <class C>
-typename C::CType Function::compare(const Function* E, C& Cmp) const {
-  typename C::CType Ct =
-    Cmp.compare(VDecl->definition(), E->VDecl->definition());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
-typename C::CType SFunction::compare(const SFunction* E, C& Cmp) const {
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  typename C::CType Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
-typename C::CType Code::compare(const Code* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(returnType(), E->returnType());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(body(), E->body());
-}
-
-template <class C>
-typename C::CType Field::compare(const Field* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(range(), E->range());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(body(), E->body());
-}
-
-template <class C>
-typename C::CType Slot::compare(const Slot* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compareStrings(name(), E->name());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(definition(), E->definition());
-}
-
-template <class C>
-typename C::CType Record::compare(const Record* E, C& Cmp) const {
-  unsigned N = slots().size();
-  unsigned M = E->slots().size();
-  typename C::CType Ct = Cmp.compareIntegers(N, M);
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  unsigned Sz = (N < M) ? N : M;
-  for (unsigned i = 0; i < Sz; ++i) {
-    Ct = Cmp.compare(slots()[i].get(), E->slots()[i].get());
-    if (Cmp.notTrue(Ct))
-      return Ct;
-  }
-  return Ct;
-}
-
-template <class C>
-typename C::CType ScalarType::compare(const ScalarType* E, C& Cmp) const {
-  return Cmp.compareIntegers(valueType().asInt32(), E->valueType().asInt32());
-}
-
-
-template <class C>
-typename C::CType Literal::compare(const Literal* E, C& Cmp) const {
-  // TODO: defer actual comparison to LiteralT
-  return Cmp.trueResult();
-}
-
-template <class C>
-typename C::CType Variable::compare(const Variable* E, C& Cmp) const {
-  // TODO: compare weak refs.
-  return Cmp.comparePointers(variableDecl(), E->variableDecl());
-}
-
-template <class C>
-typename C::CType Apply::compare(const Apply* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(fun(), E->fun());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(arg(), E->arg());
-}
-
-template <class C>
-typename C::CType SApply::compare(const SApply* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(sfun(), E->sfun());
-  if (Cmp.notTrue(Ct) || (!arg() && !E->arg()))
-    return Ct;
-  return Cmp.compare(arg(), E->arg());
-}
-
-template <class C>
-typename C::CType Project::compare(const Project* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(record(), E->record());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
-}
-
-template <class C>
-typename C::CType Call::compare(const Call* E, C& Cmp) const {
-  return Cmp.compare(target(), E->target());
-}
-
-
-template <class C>
-typename C::CType Alloc::compare(const Alloc* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compareIntegers(kind(), E->kind());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(initializer(), E->initializer());
-}
-
-template <class C>
-typename C::CType Load::compare(const Load* E, C& Cmp) const {
-  return Cmp.compare(pointer(), E->pointer());
-}
-
-template <class C>
-typename C::CType Store::compare(const Store* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(destination(), E->destination());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(source(), E->source());
-}
-
-template <class C>
-typename C::CType ArrayIndex::compare(const ArrayIndex* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(array(), E->array());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(index(), E->index());
-}
-
-template <class C>
-typename C::CType ArrayAdd::compare(const ArrayAdd* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(array(), E->array());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(index(), E->index());
-}
-
-template <class C>
-typename C::CType UnaryOp::compare(const UnaryOp* E, C& Cmp) const {
-  typename C::CType Ct =
-    Cmp.compareIntegers(unaryOpcode(), E->unaryOpcode());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(expr(), E->expr());
-}
-
-template <class C>
-typename C::CType BinaryOp::compare(const BinaryOp* E, C& Cmp) const {
-  typename C::CType Ct =
-    Cmp.compareIntegers(binaryOpcode(), E->binaryOpcode());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Ct = Cmp.compare(expr0(), E->expr0());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(expr1(), E->expr1());
-}
-
-template <class C>
-typename C::CType Cast::compare(const Cast* E, C& Cmp) const {
-  typename C::CType Ct =
-    Cmp.compareIntegers(castOpcode(), E->castOpcode());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(expr(), E->expr());
-}
-
-template <class C>
-typename C::CType Phi::compare(const Phi *E, C &Cmp) const {
-  // TODO: implement CFG comparisons
-  return Cmp.comparePointers(this, E);
-}
-
-template <class C>
-typename C::CType Goto::compare(const Goto *E, C &Cmp) const {
-  // TODO: implement CFG comparisons
-  return Cmp.comparePointers(this, E);
-}
-
-template <class C>
-typename C::CType Branch::compare(const Branch *E, C &Cmp) const {
-  // TODO: implement CFG comparisons
-  return Cmp.comparePointers(this, E);
-}
-
-template <class C>
-typename C::CType Return::compare(const Return *E, C &Cmp) const {
-  return Cmp.compare(returnValue(), E->returnValue());
-}
-
-template <class C>
-typename C::CType BasicBlock::compare(const BasicBlock *E, C &Cmp) const {
-  // TODO: implement CFG comparisons
-  return Cmp.comparePointers(this, E);
-}
-
-template <class C>
-typename C::CType SCFG::compare(const SCFG *E, C &Cmp) const {
-  // TODO: implement CFG comparisons
-  return Cmp.comparePointers(this, E);
-}
-
-template <class C>
-typename C::CType Future::compare(const Future* E, C& Cmp) const {
-  if (!Result || !E->Result)
-    return Cmp.comparePointers(this, E);
-  return Cmp.compare(Result, E->Result);
-}
-
-template <class C>
-typename C::CType Undefined::compare(const Undefined* E, C& Cmp) const {
-  return Cmp.trueResult();
-}
-
-template <class C>
-typename C::CType Wildcard::compare(const Wildcard* E, C& Cmp) const {
-  return Cmp.trueResult();
-}
-
-template <class C>
-typename C::CType Identifier::compare(const Identifier* E, C& Cmp) const {
-  return Cmp.compareStrings(name(), E->name());
-}
-
-template <class C>
-typename C::CType Let::compare(const Let* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
-typename C::CType Letrec::compare(const Letrec* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
-typename C::CType IfThenElse::compare(const IfThenElse* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(condition(), E->condition());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Ct = Cmp.compare(thenExpr(), E->thenExpr());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compare(elseExpr(), E->elseExpr());
-}
-
-
-
-class EqualsComparator : public Comparator<EqualsComparator> {
-public:
-  // Result type for the comparison, e.g. bool for simple equality,
-  // or int for lexigraphic comparison (-1, 0, 1).  Must have one value which
-  // denotes "true".
-  typedef bool CType;
-
-  CType trueResult() { return true; }
-  bool notTrue(CType ct) { return !ct; }
-
-  bool compareIntegers(unsigned i, unsigned j)       { return i == j; }
-  bool compareStrings (StringRef s, StringRef r)     { return s == r; }
-  bool comparePointers(const void* P, const void* Q) { return P == Q; }
-
-  bool compare(const SExpr *E1, const SExpr* E2) {
-    if (E1->opcode() != E2->opcode())
-      return false;
-    return compareByCase(E1, E2);
-  }
-
-  // TODO -- handle alpha-renaming of variables
-  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
-  void exitScope() { }
-
-  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
-    return V1 == V2;
-  }
-
-  static bool compareExprs(const SExpr *E1, const SExpr* E2) {
-    EqualsComparator Eq;
-    return Eq.compare(E1, E2);
-  }
-};
-
-
-
-class MatchComparator : public Comparator<MatchComparator> {
-public:
-  // Result type for the comparison, e.g. bool for simple equality,
-  // or int for lexigraphic comparison (-1, 0, 1).  Must have one value which
-  // denotes "true".
-  typedef bool CType;
-
-  CType trueResult() { return true; }
-  bool notTrue(CType ct) { return !ct; }
-
-  bool compareIntegers(unsigned i, unsigned j)       { return i == j; }
-  bool compareStrings (StringRef s, StringRef r)     { return s == r; }
-  bool comparePointers(const void* P, const void* Q) { return P == Q; }
-
-  bool compare(const SExpr *E1, const SExpr* E2) {
-    // Wildcards match anything.
-    if (E1->opcode() == COP_Wildcard || E2->opcode() == COP_Wildcard)
-      return true;
-    // otherwise normal equality.
-    if (E1->opcode() != E2->opcode())
-      return false;
-    return compareByCase(E1, E2);
-  }
-
-  // TODO -- handle alpha-renaming of variables
-  void enterScope(const VarDecl* V1, const VarDecl* V2) { }
-  void exitScope() { }
-
-  bool compareVariableRefs(const VarDecl* V1, const VarDecl* V2) {
-    return V1 == V2;
-  }
-
-  static bool compareExprs(const SExpr *E1, const SExpr* E2) {
-    MatchComparator Matcher;
-    return Matcher.compare(E1, E2);
-  }
-};
 
 } // end namespace til
 } // end namespace threadSafety

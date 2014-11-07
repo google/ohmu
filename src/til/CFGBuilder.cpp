@@ -29,14 +29,11 @@ SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
 
   if (!Cfg) {
     CurrentCFG = new (Arena) SCFG(Arena, 0);
-    // CurrentCFG->blocks().reserve(NumBlocks);
+    // CurrentCFG->blocks().reserve(Arena, NumBlocks);
   }
   else {
     CurrentCFG = Cfg;
-    NumBlocks = Cfg->numBlocks();
-    NumInstrs = Cfg->numInstructions();
   }
-
   return CurrentCFG;
 }
 
@@ -72,7 +69,7 @@ void CFGBuilder::endBlock(Terminator *Term) {
 
   if (CurrentArgs.size() > 0) {
     auto Sz = CurrentBB->arguments().size();
-    CurrentBB->arguments().reserve(Sz + CurrentArgs.size(), Arena);
+    CurrentBB->arguments().reserve(Arena, Sz + CurrentArgs.size());
     for (auto *E : CurrentArgs)
       CurrentBB->addArgument(E);
   }
@@ -83,7 +80,7 @@ void CFGBuilder::endBlock(Terminator *Term) {
 
   if (CurrentInstrs.size() > 0) {
     auto Sz = CurrentBB->instructions().size();
-    CurrentBB->instructions().reserve(Sz + CurrentInstrs.size(), Arena);
+    CurrentBB->instructions().reserve(Arena, Sz + CurrentInstrs.size());
     for (auto *E : CurrentInstrs)
       CurrentBB->addInstruction(E);
   }
@@ -99,11 +96,11 @@ void CFGBuilder::endBlock(Terminator *Term) {
 BasicBlock* CFGBuilder::newBlock(unsigned Nargs, unsigned Npreds) {
   BasicBlock *B = new (Arena) BasicBlock(Arena);
   if (Nargs > 0) {
-    B->predecessors().reserve(Npreds, Arena);
-    B->arguments().reserve(Nargs, Arena);
+    B->predecessors().reserve(Arena, Npreds);
+    B->arguments().reserve(Arena, Nargs);
     for (unsigned i = 0; i < Nargs; ++i) {
       auto *Ph = new (Arena) Phi();
-      Ph->values().reserve(Npreds, Arena);
+      Ph->values().reserve(Arena, Npreds);
       B->addArgument(Ph);
     }
   }
@@ -132,6 +129,38 @@ Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
 }
 
 
+void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
+  Instruction *I = dyn_cast<Instruction>(E);
+  if (!I) {
+    diag.error("Invalid argument to Phi node: ") << E;
+    return;
+  }
+
+  // Set the Phi argument.
+  if (!OverwriteInstructions)
+    assert(!Ph->values()[Idx].get() && "We already handled this node.");
+
+  Ph->values().resize(Arena, Idx+1, nullptr);  // Make room if we need to.
+  Ph->values()[Idx].reset(I);
+
+  // Futures don't yet have types...
+  // TODO: We could wind up with untyped phi nodes.
+  if (isa<Future>(I))
+    return;
+
+  // Update the type of the Phi node.
+  // All phi arguments must have the exact same type.
+  if (Idx == 0 && Ph->valueType().Base == ValueType::BT_Void) {
+    // Set the initial type of the Phi node.
+    Ph->setValueType(I->valueType());
+  }
+  else if (Ph->valueType() != I->valueType()) {
+    diag.error("Type mismatch in branch: ")
+      << I << " does not have type " << Ph->valueType().getTypeName();
+  }
+}
+
+
 Goto* CFGBuilder::newGoto(BasicBlock *B, SExpr* Result) {
   assert(CurrentBB && "No current block.");
 
@@ -139,7 +168,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, SExpr* Result) {
   if (Result) {
     assert(B->arguments().size() == 1);
     Phi *Ph = B->arguments()[0];
-    Ph->values()[Idx] = Result;
+    setPhiArgument(Ph, Result, Idx);
   }
 
   auto *Nt = new (Arena) Goto(B, Idx);
@@ -155,7 +184,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
   unsigned Idx = B->addPredecessor(CurrentBB);
   for (unsigned i = 0, n = Args.size(); i < n; ++i) {
     Phi *Ph = B->arguments()[i];
-    Ph->values()[Idx] = Args[i];
+    setPhiArgument(Ph, Args[i], Idx);
   }
 
   auto *Nt = new (Arena) Goto(B, Idx);
@@ -172,11 +201,7 @@ void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
   if (Ph && Ph->block() == NG->targetBlock()) {
     // The blocks match, so we know that Ph is a rewritten Phi node.
     // (The original might have been eliminated by rewriting to something else.)
-    unsigned j = NG->phiIndex();
-    Ph->values().resize(j+1, Arena, nullptr);  // Make room if we need to.
-    if (!OverwriteInstructions)
-      assert(!Ph->values()[j].get() && "We already handled this node.");
-    Ph->values()[j].reset(Res);                // Write the argument into Ph
+    setPhiArgument(Ph, Res, NG->phiIndex());
   }
 }
 

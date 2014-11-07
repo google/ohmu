@@ -18,6 +18,7 @@
 #include "til/CFGReducer.h"
 #include "til/SSAPass.h"
 
+
 namespace ohmu {
 
 using namespace clang::threadSafety::til;
@@ -42,77 +43,359 @@ public:
 };
 
 
+
+// Map identifiers to variable names, or to slot definitions.
+SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
+  StringRef idstr = orig.name();
+
+  // Search backward through the context until we find a match.
+  for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
+    VarDecl* vd = scope().varDecl(i);
+    if (!vd)
+      continue;
+
+    if (vd->name() == idstr) {
+      // Translate identifier to a named variable.
+      if (vd->kind() == VarDecl::VK_Let ||
+          vd->kind() == VarDecl::VK_Letrec) {
+        // Map let variables directly to their definitions.
+        return vd->definition();
+      }
+      // Construct a variable, and set it's type.
+      auto* res = new (Arena) Variable(vd);
+      res->setBoundingType(vd->definition(), BoundingType::BT_Type);
+      return res;
+    }
+    else if (vd->kind() == VarDecl::VK_SFun) {
+      // Map identifiers to slots for record self-variables.
+      if (!vd->definition())
+        continue;
+      auto* sfun = cast<Function>(vd->definition());
+      Record* rec = dyn_cast<Record>(sfun->body());
+      if (!rec)
+        continue;
+      auto* slt = rec->findSlot(idstr);
+      if (!slt)
+        continue;
+
+      if (slt->hasModifier(Slot::SLT_Final) &&
+          slt->definition()->isTrivial()) {
+        // TODO: do we want to be a bit more sophisticated here?
+        return slt->definition();
+      }
+      auto* svar = new (Arena) Variable(vd);
+      svar->setBoundingType(sfun, BoundingType::BT_Type);
+      auto* sapp = new (Arena) Apply(svar, nullptr, Apply::FAK_SApply);
+      sapp->setBoundingType(rec,  BoundingType::BT_Type);
+      auto* res  = new (Arena) Project(sapp, idstr);
+      res->setBoundingType(slt->definition(), BoundingType::BT_Type);
+      return res;
+    }
+  }
+
+  // TODO: emit warning on name-not-found.
+  diag.error("Identifier not found: ") << idstr;
+  return new (Arena) Identifier(orig);
+}
+
+
+
+SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
+  auto* res = CopyReducer::reduceVariable(orig, vd);
+  auto k  = vd->kind();
+  auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
+      BoundingType::BT_Equivalent : BoundingType::BT_Type;
+  res->setBoundingType(vd->definition(), bt);
+  return res;
+}
+
+
+
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
-  if (auto* f = dyn_cast<Function>(e)) {
-    pendingPathArgs_.push_back(a);
+  auto* f = dyn_cast<Function>(e);
+  Instruction* fi = nullptr;
+  bool isVal = f;
+
+  if (!f) {
+    fi = dyn_cast<Instruction>(e);
+    if (fi) {
+      auto* ftyp = fi->getBoundingTypeValue();
+      f = dyn_cast_or_null<Function>(ftyp);
+    }
+  }
+
+  if (!f) {
+    // Undefined marks a previous error, so omit the warning.
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a function: ") << e;
+    return new (Arena) Undefined();
+  }
+
+  pendingPathArgs_.push_back(a);
+  if (isVal) {
+    // Partially evaluate the apply.
     return f->body();
   }
-  assert(numPendingArgs() == 0 && "Internal error.");
-  return CopyReducer::reduceApply(orig, e, a);
+
+  // Construct a residual, and set its type.
+  auto *res = CopyReducer::reduceApply(orig, e, a);
+  res->setBoundingType(f->body(), fi->boundingType().Rel);
+  return res;
 }
+
 
 
 SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
-  if (auto *r = dyn_cast<Record>(e)) {
-    if (Slot* slt = r->findSlot(orig.slotName())) {
-      return slt->definition();
-    }
-    else {
-      std::cerr << "Slot not found: " << orig.slotName() << "\n";
-      return new (Arena) Undefined();
+  auto* r = dyn_cast<Record>(e);
+  Instruction* ri = nullptr;
+  bool isVal = r;
+  if (!r) {
+    ri = dyn_cast<Instruction>(e);
+    if (ri) {
+      auto* rtyp = ri->getBoundingTypeValue();
+      r = dyn_cast_or_null<Record>(rtyp);
+      if (!r) {
+        // Automatically insert implicit self-applications.
+        auto* sfuntyp = dyn_cast<Function>(rtyp);
+        if (sfuntyp && sfuntyp->isSelfApplicable()) {
+          r = dyn_cast<Record>(sfuntyp->body());
+          if (r) {
+            ri = new (Arena) Apply(e, nullptr, Apply::FAK_SApply);
+            ri->setBoundingType(r, ri->boundingType().Rel);
+          }
+        }
+      }
     }
   }
-  return CopyReducer::reduceProject(orig, e);
+
+  if (!r) {
+    // Undefined marks a previous error, so omit the warning.
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a record: ") << e;
+    return new (Arena) Undefined();
+  }
+
+  Slot* slt = r->findSlot(orig.slotName());
+  if (!slt) {
+    diag.error("Slot not found: ") << orig.slotName();
+    return new (Arena) Undefined();
+  }
+
+  if (isVal) {
+    // Partially evaluate the project.
+    return slt->definition();
+  }
+  // Construct a residual.
+  auto* res = CopyReducer::reduceProject(orig, ri);
+  res->setBoundingType(slt->definition(), ri->boundingType().Rel);
+  return res;
 }
 
 
+
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // Traversing Apply and SApply will push arguments onto pendingPathArgs_.
-  // A call expression will consume the args.
-  if (auto* c = dyn_cast<Code>(e)) {
-    // TODO: handle more than one arg.
+  // Reducing Apply pushes arguments onto pendingPathArgs_.
+  // Reducing Call will consume those arguments.
+  auto* c = dyn_cast<Code>(e);
+  if (c) {
     auto it = codeMap_.find(c);
     if (it != codeMap_.end()) {
-      // This is a locally-defined function, which maps to a basic block.
-      PendingBlock* pb = it->second;
-
-      // All calls are tail calls.  Make a continuation if we don't have one.
-      BasicBlock* cont = currentContinuation();
-      if (!cont)
-        cont = newBlock(1);
-
-      // Set the continuation of the pending block to the current continuation.
-      // If there are multiple calls, the continuations must match.
-      if (pb->continuation) {
-        assert(pb->continuation == cont && "Cannot transform to tail call!");
-      }
-      else {
-        pb->continuation = cont;
-        // Once we have a continuation, we can add pb to the queue.
-        pendingBlockQueue_.push(pb);
-      }
-
-      // End current block with a jump to the new one.
-      newGoto(pb->block, pendingArgs());
-      clearPendingArgs();
-
-      // If this was a newly-created continuation, then continue where we
-      // left off.
-      if (!currentContinuation()) {
-        beginBlock(cont);
-        return cont->arguments()[0];
-      }
-      return nullptr;
+      // inlineLocalCall with clearPendingArgs()
+      return inlineLocalCall(it->second, c);
+    }
+  }
+  Instruction* ci = nullptr;
+  // bool isVal = c;
+  if (!c) {
+    ci = dyn_cast<Instruction>(e);
+    if (ci) {
+      auto* ctyp = ci->getBoundingTypeValue();
+      c = dyn_cast<Code>(ctyp);
     }
   }
 
-  // Create Apply exprs for all pending arguments, and return a Call expr.
-  SExpr *f = e;
-  for (auto *a : pendingArgs())
-    f = new (Arena) Apply(f, a);
+  if (!c) {
+    if (!isa<Undefined>(e))
+      diag.error("Expression is not a code block: ") << e;
+    clearPendingArgs();
+    return new (Arena) Undefined();
+  }
+
   clearPendingArgs();
 
-  return CopyReducer::reduceCall(orig, f);
+  auto* res = CopyReducer::reduceCall(orig, e);
+  res->setBoundingType(c->returnType(), BoundingType::BT_Type);
+  return res;
+}
+
+
+
+/// Convert a call expression to a goto for locally-defined functions.
+/// Locally-defined functions map to a basic blocks.
+SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
+  // All calls are tail calls.  Make a continuation if we don't have one.
+  BasicBlock* cont = currentContinuation();
+  if (!cont)
+    cont = newBlock(1);
+  // TODO: should we check against an existing type?
+  cont->arguments()[0]->setBoundingType(c->returnType(),
+                                        BoundingType::BT_Type);
+
+  // Set the continuation of the pending block to the current continuation.
+  // If there are multiple calls, the continuations must match.
+  if (pb->continuation) {
+    assert(pb->continuation == cont && "Cannot transform to tail call!");
+  }
+  else {
+    pb->continuation = cont;
+    // Once we have a continuation, we can add pb to the queue.
+    pendingBlockQueue_.push(pb);
+  }
+
+  // End current block with a jump to the new one.
+  newGoto(pb->block, pendingArgs());
+  clearPendingArgs();
+
+  // If this was a newly-created continuation, then continue where we
+  // left off.
+  if (!currentContinuation()) {
+    beginBlock(cont);
+    return cont->arguments()[0];
+  }
+  return nullptr;
+}
+
+
+
+SExpr* CFGReducer::reduceLoad(Load &orig, SExpr* e) {
+  auto* res = CopyReducer::reduceLoad(orig, e);
+  // If we can map the load to a local variable, then set the type.
+  if (Alloc* a = dyn_cast<Alloc>(e)) {
+    if (auto* instr = dyn_cast_or_null<Instruction>(a->initializer()))
+      res->setValueType(instr->valueType());
+  }
+  return res;
+}
+
+
+
+SExpr* CFGReducer::reduceUnaryOp(UnaryOp &orig, SExpr* e0) {
+  Instruction* i0 = dyn_cast<Instruction>(e0);
+  if (!i0) {
+    diag.error("Invalid use of arithmetic operator: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  switch (orig.unaryOpcode()) {
+    case UOP_Minus: {
+      if (!i0->valueType().isNumeric())
+        diag.error("Operator requires a numeric type: ") << &orig;
+      break;
+    }
+    case UOP_BitNot: {
+      if (i0->valueType().Base != ValueType::BT_Int)
+        diag.error("Bitwise operations require integer type.") << &orig;
+      break;
+    }
+    case UOP_LogicNot: {
+      if (i0->valueType().Base != ValueType::BT_Bool)
+        diag.error("Logical operations require boolean type.") << &orig;
+      break;
+    }
+  }
+
+  auto* res = CopyReducer::reduceUnaryOp(orig, i0);
+  res->setValueType(i0->valueType());
+  return res;
+}
+
+
+
+bool CFGReducer::checkAndExtendTypes(Instruction*& i0, Instruction*& i1) {
+  if (i0->valueType() == i1->valueType())
+    return true;
+  TIL_CastOpcode op = typeConvertable(i0->valueType(), i1->valueType());
+  if (op != CAST_none) {
+    i0 = addInstr(new (Arena) Cast(op, i0));
+    i0->setValueType(i1->valueType());
+    return true;
+  }
+  op = typeConvertable(i1->valueType(), i0->valueType());
+  if (op != CAST_none) {
+    i1 = addInstr(new (Arena) Cast(op, i1));
+    i1->setValueType(i0->valueType());
+    return true;
+  }
+  return false;
+}
+
+
+
+SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
+  Instruction* i0 = dyn_cast<Instruction>(e0);
+  Instruction* i1 = dyn_cast<Instruction>(e1);
+  if (!i0 || !i1) {
+    diag.error("Invalid use of arithmetic operator: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  if (!checkAndExtendTypes(i0, i1)) {
+    diag.error("Arithmetic operation on incompatible types: ") << &orig;
+    return new (Arena) Undefined();
+  }
+
+  ValueType vt = ValueType::getValueType<void>();
+  switch (orig.binaryOpcode()) {
+    case BOP_Add:
+    case BOP_Sub:
+    case BOP_Mul:
+    case BOP_Div:
+    case BOP_Rem: {
+      if (!i0->valueType().isNumeric())
+        diag.error("Operator requires a numeric type: ") << &orig;
+      vt = i0->valueType();
+      break;
+    }
+    case BOP_Shl:
+    case BOP_Shr:
+    case BOP_BitAnd:
+    case BOP_BitXor:
+    case BOP_BitOr: {
+      if (i0->valueType().Base != ValueType::BT_Int)
+        diag.error("Bitwise operations require integer type.") << &orig;
+      vt = i0->valueType();
+      break;
+    }
+    case BOP_Eq:
+    case BOP_Neq:
+    case BOP_Lt:
+    case BOP_Leq: {
+      vt = ValueType::getValueType<bool>();
+      break;
+    }
+    case BOP_Gt: {
+      // rewrite > to <
+      auto* res = addInstr(new (Arena) BinaryOp(BOP_Lt, i1, i0));
+      res->setValueType(ValueType::getValueType<bool>());
+      return res;
+    }
+    case BOP_Geq: {
+      // rewrite >= to <=
+      auto* res = addInstr(new (Arena) BinaryOp(BOP_Leq, i1, i0));
+      res->setValueType(ValueType::getValueType<bool>());
+      return res;
+    }
+    case BOP_LogicAnd:
+    case BOP_LogicOr: {
+      if (i0->valueType().Base != ValueType::BT_Bool)
+        diag.error("Logical operations require boolean type.") << &orig;
+      vt = ValueType::getValueType<bool>();
+      break;
+    }
+  }
+  auto* res = CopyReducer::reduceBinaryOp(orig, i0, i1);
+  res->setValueType(vt);
+  return res;
 }
 
 
@@ -156,10 +439,12 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   // let-variables that refer to Phi nodes in the new block.
   ScopeFrame* ns = scope().clone();
   for (unsigned i = 0; i < nargs; ++i) {
-    unsigned j   = nargs-1-i;
-    StringRef nm = scope().varDecl(j)->name();
-    b->arguments()[i]->setInstrName(nm);
-    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, nm, b->arguments()[i]));
+    unsigned j  = nargs-1-i;
+    VarDecl* vd = scope().varDecl(j);
+    Phi*     ph = b->arguments()[i];
+    ph->setInstrName(vd->name());
+    ph->setBoundingType(vd->definition(), BoundingType::BT_Type);
+    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, vd->name(), ph));
   }
 
   // Add pb to the array of pending blocks.
@@ -168,54 +453,9 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   pendingBlocks_.emplace_back(std::unique_ptr<PendingBlock>(pb));
 
   // Create a code expr, and add it to the code map.
-  Code* c = CopyReducer::reduceCode(orig, e0, nullptr);
+  Code* c = CopyReducer::reduceCode(orig, e0, e1);
   codeMap_.insert(std::make_pair(c, pb));
   return c;
-}
-
-
-
-SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
-  StringRef s = orig.name();
-
-  // Search backward through the context until we find a match.
-  for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
-    VarDecl* vd = scope().varDecl(i);
-    if (!vd)
-      continue;
-
-    if (vd->name() == s) {
-      // Translate identifier to a named variable.
-      if (vd->kind() == VarDecl::VK_Let ||
-          vd->kind() == VarDecl::VK_Letrec)
-        // Map let variables directly to their definitions.
-        return vd->definition();
-      return new (Arena) Variable(vd);
-    }
-    else if (vd->kind() == VarDecl::VK_SFun) {
-      if (!vd->definition())
-        continue;
-
-      // Map identifiers to slots for record self-variables.
-      auto* sfun = cast<SFunction>(vd->definition());
-      if (Record *r = dyn_cast<Record>(sfun->body())) {
-        if (auto *slt = r->findSlot(s)) {
-          if (slt->hasModifier(Slot::SLT_Final) &&
-              slt->definition()->isTrivial()) {
-            // FIXME!!  This is a hack that should be removed ASAP.
-            return slt->definition();
-          }
-          auto* svar = new (Arena) Variable(vd);
-          auto* sapp = new (Arena) SApply(svar);
-          return new (Arena) Project(sapp, s);
-        }
-      }
-    }
-  }
-
-  // TODO: emit warning on name-not-found.
-  std::cerr << "error: Identifier " << s << " not found.\n";
-  return new (Arena) Identifier(orig);
 }
 
 
@@ -237,6 +477,10 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
 
   // End current block with a branch
   SExpr* nc = this->self()->traverseArg(e->condition());
+  Instruction* nci = dyn_cast<Instruction>(nc);
+  if (!nci || nci->valueType().Base != ValueType::BT_Bool)
+    diag.error("Branch condition is not a boolean: ") << nci;
+
   Branch* br = newBranch(nc);
 
   // If the current continuation is null, then make a new one.

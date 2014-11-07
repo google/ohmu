@@ -77,8 +77,6 @@ void ScopeHandler::enterScope(VarDecl *Orig, VarDecl *Nv) {
 
 
 void ScopeHandler::exitScope(VarDecl *Orig) {
-  if (Orig->varIndex() == 0)
-    return;
   Scope->exitScope(Orig);
 }
 

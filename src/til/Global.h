@@ -54,8 +54,8 @@ private:
   MemRegion ParseRegion;   // Region for the initial AST produced by the parser.
   MemRegion DefRegion;     // Region for rewritten definitions.
 
-  Record    *GlobalRec;
-  SFunction *GlobalSFun;
+  Record   *GlobalRec;
+  Function *GlobalSFun;
   std::vector<Slot*> PreludeDefs;
 
 public:
