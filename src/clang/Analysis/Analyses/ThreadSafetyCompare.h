@@ -92,7 +92,7 @@ typename C::CType Field::compare(const Field* E, C& Cmp) const {
 
 template <class C>
 typename C::CType Slot::compare(const Slot* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compareStrings(name(), E->name());
+  typename C::CType Ct = Cmp.compareStrings(slotName(), E->slotName());
   if (Cmp.notTrue(Ct))
     return Ct;
   return Cmp.compare(definition(), E->definition());
@@ -145,7 +145,7 @@ typename C::CType Project::compare(const Project* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(record(), E->record());
   if (Cmp.notTrue(Ct))
     return Ct;
-  return Cmp.comparePointers(Cvdecl, E->Cvdecl);
+  return Cmp.compareStrings(slotName(), E->slotName());
 }
 
 template <class C>
@@ -156,7 +156,7 @@ typename C::CType Call::compare(const Call* E, C& Cmp) const {
 
 template <class C>
 typename C::CType Alloc::compare(const Alloc* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compareIntegers(kind(), E->kind());
+  typename C::CType Ct = Cmp.compareIntegers(allocKind(), E->allocKind());
   if (Cmp.notTrue(Ct))
     return Ct;
   return Cmp.compare(initializer(), E->initializer());
@@ -275,7 +275,7 @@ typename C::CType Wildcard::compare(const Wildcard* E, C& Cmp) const {
 
 template <class C>
 typename C::CType Identifier::compare(const Identifier* E, C& Cmp) const {
-  return Cmp.compareStrings(name(), E->name());
+  return Cmp.compareStrings(idString(), E->idString());
 }
 
 template <class C>

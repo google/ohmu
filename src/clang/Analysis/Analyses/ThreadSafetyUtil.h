@@ -32,40 +32,13 @@
 #include "base/Util.h"
 #include "parser/Token.h"
 
-
 // pull in all of the cast operations.
 using namespace ohmu;
-
 
 namespace clang {
 
 typedef ohmu::parsing::SourceLocation SourceLocation;
 
-// Define the basic clang data types that the TIL depends on.
-class ValueDecl {
-public:
-  StringRef getName() const { return name_; }
-  std::string getNameAsString() const { return name_.str(); }
-  std::string getQualifiedNameAsString() const { return name_.str(); }
-
-private:
-  StringRef name_;
-};
-
-
-class Stmt { };
-class Expr : public Stmt { };
-class CallExpr : public Expr { };
-
-namespace threadSafety {
-namespace til {
-
-inline std::string getSourceLiteralString(const clang::Expr *E) {
-  return "#lit";
-}
-
-} // end namespace til
-} // end namespace threadSafety
 } // end namespace clang
 
 #endif   // OHMU_THREAD_SAFETY_UTIL_H

@@ -46,7 +46,7 @@ public:
 
 // Map identifiers to variable names, or to slot definitions.
 SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
-  StringRef idstr = orig.name();
+  StringRef idstr = orig.idString();
 
   // Search backward through the context until we find a match.
   for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
@@ -54,7 +54,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
     if (!vd)
       continue;
 
-    if (vd->name() == idstr) {
+    if (vd->varName() == idstr) {
       // Translate identifier to a named variable.
       if (vd->kind() == VarDecl::VK_Let ||
           vd->kind() == VarDecl::VK_Letrec) {
@@ -62,7 +62,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
         return vd->definition();
       }
       // Construct a variable, and set it's type.
-      auto* res = new (Arena) Variable(vd);
+      auto* res = newVariable(vd);
       res->setBoundingType(vd->definition(), BoundingType::BT_Type);
       return res;
     }
@@ -83,11 +83,11 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
         // TODO: do we want to be a bit more sophisticated here?
         return slt->definition();
       }
-      auto* svar = new (Arena) Variable(vd);
+      auto* svar = newVariable(vd);
       svar->setBoundingType(sfun, BoundingType::BT_Type);
-      auto* sapp = new (Arena) Apply(svar, nullptr, Apply::FAK_SApply);
+      auto* sapp = newApply(svar, nullptr, Apply::FAK_SApply);
       sapp->setBoundingType(rec,  BoundingType::BT_Type);
-      auto* res  = new (Arena) Project(sapp, idstr);
+      auto* res  = newProject(sapp, idstr);
       res->setBoundingType(slt->definition(), BoundingType::BT_Type);
       return res;
     }
@@ -128,7 +128,7 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
     // Undefined marks a previous error, so omit the warning.
     if (!isa<Undefined>(e))
       diag.error("Expression is not a function: ") << e;
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   pendingPathArgs_.push_back(a);
@@ -160,7 +160,7 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
         if (sfuntyp && sfuntyp->isSelfApplicable()) {
           r = dyn_cast<Record>(sfuntyp->body());
           if (r) {
-            ri = new (Arena) Apply(e, nullptr, Apply::FAK_SApply);
+            ri = newApply(e, nullptr, Apply::FAK_SApply);
             ri->setBoundingType(r, ri->boundingType().Rel);
           }
         }
@@ -172,13 +172,13 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
     // Undefined marks a previous error, so omit the warning.
     if (!isa<Undefined>(e))
       diag.error("Expression is not a record: ") << e;
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   Slot* slt = r->findSlot(orig.slotName());
   if (!slt) {
     diag.error("Slot not found: ") << orig.slotName();
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   if (isVal) {
@@ -218,7 +218,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
     if (!isa<Undefined>(e))
       diag.error("Expression is not a code block: ") << e;
     clearPendingArgs();
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   clearPendingArgs();
@@ -283,7 +283,7 @@ SExpr* CFGReducer::reduceUnaryOp(UnaryOp &orig, SExpr* e0) {
   Instruction* i0 = dyn_cast<Instruction>(e0);
   if (!i0) {
     diag.error("Invalid use of arithmetic operator: ") << &orig;
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   switch (orig.unaryOpcode()) {
@@ -316,13 +316,13 @@ bool CFGReducer::checkAndExtendTypes(Instruction*& i0, Instruction*& i1) {
     return true;
   TIL_CastOpcode op = typeConvertable(i0->valueType(), i1->valueType());
   if (op != CAST_none) {
-    i0 = addInstr(new (Arena) Cast(op, i0));
+    i0 = newCast(op, i0);
     i0->setValueType(i1->valueType());
     return true;
   }
   op = typeConvertable(i1->valueType(), i0->valueType());
   if (op != CAST_none) {
-    i1 = addInstr(new (Arena) Cast(op, i1));
+    i1 = newCast(op, i1);
     i1->setValueType(i0->valueType());
     return true;
   }
@@ -336,12 +336,12 @@ SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
   Instruction* i1 = dyn_cast<Instruction>(e1);
   if (!i0 || !i1) {
     diag.error("Invalid use of arithmetic operator: ") << &orig;
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   if (!checkAndExtendTypes(i0, i1)) {
     diag.error("Arithmetic operation on incompatible types: ") << &orig;
-    return new (Arena) Undefined();
+    return newUndefined();
   }
 
   ValueType vt = ValueType::getValueType<void>();
@@ -375,13 +375,13 @@ SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
     }
     case BOP_Gt: {
       // rewrite > to <
-      auto* res = addInstr(new (Arena) BinaryOp(BOP_Lt, i1, i0));
+      auto* res = newBinaryOp(BOP_Lt, i1, i0);
       res->setValueType(ValueType::getValueType<bool>());
       return res;
     }
     case BOP_Geq: {
       // rewrite >= to <=
-      auto* res = addInstr(new (Arena) BinaryOp(BOP_Leq, i1, i0));
+      auto* res = newBinaryOp(BOP_Leq, i1, i0);
       res->setValueType(ValueType::getValueType<bool>());
       return res;
     }
@@ -442,9 +442,9 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
     unsigned j  = nargs-1-i;
     VarDecl* vd = scope().varDecl(j);
     Phi*     ph = b->arguments()[i];
-    ph->setInstrName(vd->name());
+    ph->setInstrName(vd->varName());
     ph->setBoundingType(vd->definition(), BoundingType::BT_Type);
-    ns->setVar(j, new (Arena) VarDecl(VarDecl::VK_Let, vd->name(), ph));
+    ns->setVar(j, newVarDecl(VarDecl::VK_Let, vd->varName(), ph));
   }
 
   // Add pb to the array of pending blocks.

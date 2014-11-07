@@ -74,27 +74,32 @@ public:
     /* BlockMap updated by reduceWeak(BasicBlock). */
   }
 
+
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    return new (Arena) VarDecl(Orig, E);
+    return newVarDecl(Orig.kind(), Orig.varName(), E);
   }
   VarDecl* reduceVarDeclLetrec(VarDecl* VD, SExpr* E) {
     VD->setDefinition(E);
     return VD;
   }
   Function* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
-    return new (Arena) Function(Orig, Nvd, E0);
+    return newFunction(Nvd, E0);
   }
   Code* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Code(Orig, E0, E1);
+    auto* Res = newCode(E0, E1);
+    Res->setCallingConvention(Orig.callingConvention());
+    return Res;
   }
   Field* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Field(Orig, E0, E1);
+    return newField(E0, E1);
   }
   Slot* reduceSlot(Slot &Orig, SExpr *E0) {
-    return new (Arena) Slot(Orig, E0);
+    auto* Res = newSlot(Orig.slotName(), E0);
+    Res->setModifiers(Orig.modifiers());
+    return Res;
   }
   Record* reduceRecordBegin(Record &Orig) {
-    return new (Arena) Record(Orig, Arena);
+    return newRecord(Orig.slots().size());
   }
   Record* reduceRecordEnd(Record *R) { return R; }
 
@@ -107,68 +112,68 @@ public:
   }
   template<class T>
   LiteralT<T>* reduceLiteralT(LiteralT<T> &Orig) {
-    return new (Arena) LiteralT<T>(Orig);
+    return newLiteralT<T>(Orig.value());
   }
   Variable* reduceVariable(Variable &Orig, VarDecl* VD) {
-    return new (Arena) Variable(Orig, VD);
+    return newVariable(VD);
   }
   Apply* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    return new (Arena) Apply(Orig, E0, E1);
+    return newApply(E0, E1, Orig.applyKind());
   }
   Project* reduceProject(Project &Orig, SExpr* E0) {
-    return new (Arena) Project(Orig, E0);
+    auto *Res = newProject(E0, Orig.slotName());
+    Res->setArrow(Orig.isArrow());
+    return Res;
   }
 
   Call* reduceCall(Call &Orig, SExpr* E0) {
-    return addInstr(new (Arena) Call(Orig, E0));
+    auto *Res = newCall(E0);
+    Res->setCallingConvention(Res->callingConvention());
+    return Res;
   }
   Alloc* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return addInstr(new (Arena) Alloc(Orig, E0));
+    return newAlloc(E0, Orig.allocKind());
   }
   Load* reduceLoad(Load &Orig, SExpr* E0) {
-    return addInstr(new (Arena) Load(Orig, E0));
+    return newLoad(E0);
   }
   Store* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return addInstr(new (Arena) Store(Orig, E0, E1));
+    return newStore(E0, E1);
   }
   ArrayIndex* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return addInstr(new (Arena) ArrayIndex(Orig, E0, E1));
+    return newArrayIndex(E0, E1);
   }
   ArrayAdd* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return addInstr(new (Arena) ArrayAdd(Orig, E0, E1));
+    return newArrayAdd(E0, E1);
   }
   UnaryOp* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return addInstr(new (Arena) UnaryOp(Orig, E0));
+    return newUnaryOp(Orig.unaryOpcode(), E0);
   }
   BinaryOp* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return addInstr(new (Arena) BinaryOp(Orig, E0, E1));
+    return newBinaryOp(Orig.binaryOpcode(), E0, E1);
   }
   Cast* reduceCast(Cast &Orig, SExpr* E0) {
-    return addInstr(new (Arena) Cast(Orig, E0));
+    return newCast(Orig.castOpcode(), E0);
   }
 
-  /// Phi nodes are created and added to InstructionMap by reduceWeak(BB).
-  /// Passes which reduce Phi nodes must also set OverwriteArguments to true.
+  // Phi nodes are created and added to InstructionMap by reduceWeak(BB).
+  // Passes which reduce Phi nodes must also set OverwriteArguments to true.
   SExpr* reducePhi(Phi& Orig) { return nullptr; }
 
   Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) {
     unsigned Idx = B->addPredecessor(CurrentBB);
-    return new (Arena) Goto(Orig, B, Idx);
+    return new (Arena) Goto(B, Idx);
   }
   Goto* reduceGotoEnd(Goto* G) {
-    // Phi nodes are set by handlePhiNodeArg.
-    endBlock(G);
+    endBlock(G);      // Phi nodes are set by handlePhiNodeArg.
     return G;
   }
 
   Branch* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
     return newBranch(C, B0, B1);
   }
-
   Return* reduceReturn(Return &O, SExpr* E) {
-    auto *Rt = new (Arena) Return(O, E);
-    endBlock(Rt);
-    return Rt;
+    return newReturn(E);
   }
 
   SCFG* reduceSCFG_Begin(SCFG &Orig);
@@ -178,23 +183,23 @@ public:
   BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
 
   SExpr* reduceUndefined(Undefined &Orig) {
-    return new (Arena) Undefined(Orig);
+    return newUndefined();
   }
   SExpr* reduceWildcard(Wildcard &Orig) {
-    return new (Arena) Wildcard(Orig);
+    return newWildcard();
   }
 
   SExpr* reduceIdentifier(Identifier &Orig) {
-    return new (Arena) Identifier(Orig);
+    return new (Arena) Identifier(Orig.idString());
   }
   SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    return new (Arena) Let(Orig, Nvd, B);
+    return newLet(Nvd, B);
   }
   SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
-    return new (Arena) Letrec(Orig, Nvd, B);
+    return newLetrec(Nvd, B);
   }
   SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
-    return new (Arena) IfThenElse(Orig, C, T, E);
+    return newIfThenElse(C, T, E);
   }
 
 public:

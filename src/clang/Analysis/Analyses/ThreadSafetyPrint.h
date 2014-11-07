@@ -237,8 +237,8 @@ protected:
   }
 
   void printVariable(const Variable *E, StreamType &SS) {
-    if (E->variableDecl()->name().length() > 0) {
-      SS << E->variableDecl()->name();
+    if (E->variableDecl()->varName().length() > 0) {
+      SS << E->variableDecl()->varName();
       return;
     }
     SS << "_x";
@@ -247,7 +247,7 @@ protected:
   void printVarDecl(const VarDecl *E, StreamType &SS) {
     if (E->kind() == VarDecl::VK_SFun)
       SS << "@";
-    SS << printableName(E->name());
+    SS << printableName(E->varName());
     switch (E->kind()) {
     case VarDecl::VK_Fun:
       SS << ": ";
@@ -301,7 +301,7 @@ protected:
   }
 
   void printSlot(const Slot *E, StreamType &SS) {
-    SS << E->name();
+    SS << E->slotName();
     if (auto *F = dyn_cast<Function>(E->definition())) {
       printFunction(F, SS, 1);
     }
@@ -374,7 +374,7 @@ protected:
       if (isa<Wildcard>(E->record())) {
         // handle existentials
         SS << "&";
-        SS << E->clangDecl()->getQualifiedNameAsString();
+        SS << E->slotName();  // E->clangDecl()->getQualifiedNameAsString();
         return;
       }
     }
@@ -564,7 +564,7 @@ protected:
 
   void printIdentifier(const Identifier *E, StreamType &SS) {
     SS << "$";
-    SS << E->name();
+    SS << E->idString();
   }
 
   void printLet(const Let *E, StreamType &SS, bool Nested=false) {

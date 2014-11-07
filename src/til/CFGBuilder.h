@@ -58,18 +58,70 @@ public:
   /// Finish working on the current basic block.
   virtual void endBlock(Terminator *Term);
 
-  /// Add I to the current basic basic block.
-  template<class T> inline T* addInstr(T* I);
 
-  // Add A to the current basic block.
-  // Note that arguments (Phi nodes) are usually created by newBlock(),
-  // rather than being added manually.
-  inline Phi* addArg(Phi* A);
+  VarDecl* newVarDecl(VarDecl::VariableKind K, StringRef S, SExpr* E) {
+    return new (Arena) VarDecl(K, S, E);
+  }
+  Function* newFunction(VarDecl *Nvd, SExpr* E0) {
+    return new (Arena) Function(Nvd, E0);
+  }
+  Code* newCode(SExpr* E0, SExpr* E1) {
+    return new (Arena) Code(E0, E1);
+  }
+  Field* newField(SExpr* E0, SExpr* E1) {
+    return new (Arena) Field(E0, E1);
+  }
+  Slot* newSlot(StringRef S, SExpr *E0) {
+    return new (Arena) Slot(S, E0);
+  }
+  Record* newRecord(unsigned NSlots = 0) {
+    return new (Arena) Record(Arena, NSlots);
+  }
 
-  /// Create a new basic block.
-  /// If Nargs > 0, will create new Phi nodes for arguments.
-  /// If NPreds > 0, will reserve space for predecessors.
-  BasicBlock* newBlock(unsigned Nargs = 0, unsigned NPreds = 0);
+  Literal* newLiteralVoid() {
+    return new (Arena) Literal(ValueType::getValueType<void>());
+  }
+  template<class T>
+  LiteralT<T>* newLiteralT(T Val) {
+    return new (Arena) LiteralT<T>(Val);
+  }
+  Variable* newVariable(VarDecl* VD) {
+    return new (Arena) Variable(VD);
+  }
+  Apply* newApply(SExpr* E0, SExpr* E1, Apply::ApplyKind K=Apply::FAK_Apply) {
+    return new (Arena) Apply(E0, E1, K);
+  }
+  Project* newProject(SExpr* E0, StringRef S) {
+    return new (Arena) Project(E0, S);
+  }
+
+  Call* newCall(SExpr* E0) {
+    return addInstr(new (Arena) Call(E0));
+  }
+  Alloc* newAlloc(SExpr* E0, Alloc::AllocKind K) {
+    return addInstr(new (Arena) Alloc(E0, K));
+  }
+  Load* newLoad(SExpr* E0) {
+    return addInstr(new (Arena) Load(E0));
+  }
+  Store* newStore(SExpr* E0, SExpr* E1) {
+    return addInstr(new (Arena) Store(E0, E1));
+  }
+  ArrayIndex* newArrayIndex(SExpr* E0, SExpr* E1) {
+    return addInstr(new (Arena) ArrayIndex(E0, E1));
+  }
+  ArrayAdd* newArrayAdd(SExpr* E0, SExpr* E1) {
+    return addInstr(new (Arena) ArrayAdd(E0, E1));
+  }
+  UnaryOp* newUnaryOp(TIL_UnaryOpcode Op, SExpr* E0) {
+    return addInstr(new (Arena) UnaryOp(Op, E0));
+  }
+  BinaryOp* newBinaryOp(TIL_BinaryOpcode Op, SExpr* E0, SExpr* E1) {
+    return addInstr(new (Arena) BinaryOp(Op, E0, E1));
+  }
+  Cast* newCast(TIL_CastOpcode Op, SExpr* E0) {
+    return addInstr(new (Arena) Cast(Op, E0));
+  }
 
   /// Terminate the current block with a branch instruction.
   /// If B0 and B1 are not specified, then this will create new blocks.
@@ -83,6 +135,43 @@ public:
   /// Terminate the current block with a Goto instruction.
   /// Passes args as arguments.
   Goto* newGoto(BasicBlock *B, ArrayRef<SExpr*> Args);
+
+  /// Terminate the current block with a Return instruction.
+  Return* newReturn(SExpr* E) {
+    auto* Res = new (Arena) Return(E);
+    endBlock(Res);
+    return Res;
+  }
+
+  SExpr* newUndefined() {
+    return new (Arena) Undefined();
+  }
+  SExpr* newWildcard() {
+    return new (Arena) Wildcard();
+  }
+  SExpr* newLet(VarDecl *Nvd, SExpr* B) {
+    return new (Arena) Let(Nvd, B);
+  }
+  SExpr* newLetrec(VarDecl *Nvd, SExpr* B) {
+    return new (Arena) Letrec(Nvd, B);
+  }
+  SExpr* newIfThenElse(SExpr* C, SExpr* T, SExpr* E) {
+    return new (Arena) IfThenElse(C, T, E);
+  }
+
+  /// Create a new basic block.
+  /// If Nargs > 0, will create new Phi nodes for arguments.
+  /// If NPreds > 0, will reserve space for predecessors.
+  BasicBlock* newBlock(unsigned Nargs = 0, unsigned NPreds = 0);
+
+
+  /// Add I to the current basic basic block.
+  template<class T> inline T* addInstr(T* I);
+
+  // Add A to the current basic block.
+  // Note that arguments (Phi nodes) are usually created by newBlock(),
+  // rather than being added manually.
+  inline Phi* addArg(Phi* A);
 
   /// Utility function for rewriting phi nodes.
   /// Implementation of handlePhiArg used by CopyReducer and InplaceReducer.
@@ -100,7 +189,6 @@ public:
 
 private:
   void setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx);
-
 
 protected:
   MemRegionRef               Arena;

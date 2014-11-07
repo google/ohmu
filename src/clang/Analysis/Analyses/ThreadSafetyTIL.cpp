@@ -249,7 +249,7 @@ SExpr* Future::force() {
 Slot* Record::findSlot(StringRef S) {
   // FIXME -- look this up in a hash table, please.
   for (auto &Slt : slots()) {
-    if (Slt->name() == S)
+    if (Slt->slotName() == S)
       return Slt.get();
   }
   return nullptr;

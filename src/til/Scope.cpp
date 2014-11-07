@@ -62,7 +62,7 @@ void ScopeFrame::updateBlockMap(BasicBlock *Orig, BasicBlock *B) {
 void ScopeHandler::enterScope(VarDecl *Orig, VarDecl *Nv) {
   // Skip unnamed, unnumbered let variables.
   if (Orig->varIndex() == 0 && Orig->kind() == VarDecl::VK_Let &&
-      Orig->name().length() == 0)
+      Orig->varName().length() == 0)
     return;
 
   Scope->enterScope(Orig, Nv);
@@ -71,7 +71,7 @@ void ScopeHandler::enterScope(VarDecl *Orig, VarDecl *Nv) {
   if (Nv->kind() == VarDecl::VK_Let && Nv->definition()) {
     if (Instruction *I = dyn_cast<Instruction>(Nv->definition()))
       if (I->instrName().length() == 0)
-        I->setInstrName(Nv->name());
+        I->setInstrName(Nv->varName());
   }
 }
 
