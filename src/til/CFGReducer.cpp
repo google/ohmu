@@ -41,6 +41,31 @@ public:
 };
 
 
+// Set bounding type of residual.
+static void setResidualBoundingType(Instruction* res, SExpr* typ,
+                                    BoundingType::Relation rel) {
+  if (Future* fut = dyn_cast<Future>(typ))
+    typ = fut->force();
+
+  if (typ->isValue()) {
+    // Variable definition is a value, so use that as the type.
+    res->setBoundingType(typ, rel);
+    return;
+  }
+  auto* ityp = dyn_cast<Instruction>(typ);
+  if (ityp) {
+    auto* vtyp = ityp->boundingTypeExpr();
+    if (vtyp) {
+      assert(vtyp->isValue() && "Bounding type must be a value.");
+      // Grab the upper bound of the type expr.
+      auto vtrel = ityp->boundingType().Rel;
+      res->setBoundingType(vtyp, BoundingType::minRelation(rel, vtrel));
+    }
+  }
+  assert(true && "Type does not have a value upper bound.");
+}
+
+
 
 // Map identifiers to variable names, or to slot definitions.
 SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
@@ -61,7 +86,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       }
       // Construct a variable, and set it's type.
       auto* res = newVariable(vd);
-      res->setBoundingType(vd->definition(), BoundingType::BT_Type);
+      setResidualBoundingType(res, vd->definition(), BoundingType::BT_Type);
       return res;
     }
     else if (vd->kind() == VarDecl::VK_SFun) {
@@ -86,7 +111,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       auto* sapp = newApply(svar, nullptr, Apply::FAK_SApply);
       sapp->setBoundingType(rec,  BoundingType::BT_Type);
       auto* res  = newProject(sapp, idstr);
-      res->setBoundingType(slt->definition(), BoundingType::BT_Type);
+      setResidualBoundingType(res, slt->definition(), BoundingType::BT_Type);
       return res;
     }
   }
@@ -103,7 +128,8 @@ SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
   auto k  = vd->kind();
   auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
       BoundingType::BT_Equivalent : BoundingType::BT_Type;
-  res->setBoundingType(vd->definition(), bt);
+
+  setResidualBoundingType(res, vd->definition(), bt);
   return res;
 }
 
@@ -117,7 +143,7 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
   if (!f) {
     fi = dyn_cast<Instruction>(e);
     if (fi) {
-      auto* ftyp = fi->getBoundingTypeValue();
+      auto* ftyp = fi->boundingTypeExpr();
       f = dyn_cast_or_null<Function>(ftyp);
     }
   }
@@ -131,13 +157,13 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
 
   pendingPathArgs_.push_back(a);
   if (isVal) {
-    // Partially evaluate the apply.
+    // Partially evaluate the Apply.
     return f->body();
   }
 
   // Construct a residual, and set its type.
   auto *res = CopyReducer::reduceApply(orig, e, a);
-  res->setBoundingType(f->body(), fi->boundingType().Rel);
+  setResidualBoundingType(res, f->body(), fi->boundingType().Rel);
   return res;
 }
 
@@ -150,16 +176,17 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
   if (!r) {
     ri = dyn_cast<Instruction>(e);
     if (ri) {
-      auto* rtyp = ri->getBoundingTypeValue();
+      auto* rtyp = ri->boundingTypeExpr();
       r = dyn_cast_or_null<Record>(rtyp);
       if (!r) {
         // Automatically insert implicit self-applications.
-        auto* sfuntyp = dyn_cast<Function>(rtyp);
+        auto* sfuntyp = dyn_cast_or_null<Function>(rtyp);
         if (sfuntyp && sfuntyp->isSelfApplicable()) {
           r = dyn_cast<Record>(sfuntyp->body());
           if (r) {
-            ri = newApply(e, nullptr, Apply::FAK_SApply);
-            ri->setBoundingType(r, ri->boundingType().Rel);
+            auto *sapp = newApply(e, nullptr, Apply::FAK_SApply);
+            sapp->setBoundingType(r, ri->boundingType().Rel);
+            ri = sapp;
           }
         }
       }
@@ -180,12 +207,12 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
   }
 
   if (isVal) {
-    // Partially evaluate the project.
+    // Partially evaluate the Project.
     return slt->definition();
   }
   // Construct a residual.
   auto* res = CopyReducer::reduceProject(orig, ri);
-  res->setBoundingType(slt->definition(), ri->boundingType().Rel);
+  setResidualBoundingType(res, slt->definition(), ri->boundingType().Rel);
   return res;
 }
 
@@ -207,7 +234,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
   if (!c) {
     ci = dyn_cast<Instruction>(e);
     if (ci) {
-      auto* ctyp = ci->getBoundingTypeValue();
+      auto* ctyp = ci->boundingTypeExpr();
       c = dyn_cast<Code>(ctyp);
     }
   }
@@ -222,7 +249,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
   clearPendingArgs();
 
   auto* res = CopyReducer::reduceCall(orig, e);
-  res->setBoundingType(c->returnType(), BoundingType::BT_Type);
+  setResidualBoundingType(res, c->returnType(), BoundingType::BT_Type);
   return res;
 }
 
@@ -236,8 +263,8 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
   if (!cont)
     cont = newBlock(1);
   // TODO: should we check against an existing type?
-  cont->arguments()[0]->setBoundingType(c->returnType(),
-                                        BoundingType::BT_Type);
+  setResidualBoundingType(cont->arguments()[0],
+                          c->returnType(), BoundingType::BT_Type);
 
   // Set the continuation of the pending block to the current continuation.
   // If there are multiple calls, the continuations must match.
@@ -441,7 +468,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
     VarDecl* vd = scope().varDecl(j);
     Phi*     ph = b->arguments()[i];
     ph->setInstrName(vd->varName());
-    ph->setBoundingType(vd->definition(), BoundingType::BT_Type);
+    setResidualBoundingType(ph, vd->definition(), BoundingType::BT_Type);
     ns->setVar(j, newVarDecl(VarDecl::VK_Let, vd->varName(), ph));
   }
 

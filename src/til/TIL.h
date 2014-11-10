@@ -273,6 +273,10 @@ struct BoundingType {
     BT_Equivalent         ///<  Term is equivalent to TypeExpr
   };
 
+  static Relation minRelation(Relation r1, Relation r2) {
+    return (r1 < r2) ? r1 : r2;
+  }
+
   BoundingType() : TypeExpr(nullptr), Rel(BT_Type) { }
   BoundingType(SExpr* E, Relation R) : TypeExpr(E), Rel(R) { }
 
@@ -339,13 +343,11 @@ public:
   const BoundingType& boundingType() const { return TypeBound; }
   BoundingType&       boundingType()       { return TypeBound; }
 
+  const SExpr* boundingTypeExpr() const { return TypeBound.TypeExpr.get(); }
+  SExpr*       boundingTypeExpr()       { return TypeBound.TypeExpr.get(); }
+
   /// Set the type of this instruction.
   void setBoundingType(SExpr* E, BoundingType::Relation R);
-
-  /// Get the most specific supertype of this instruction that's a value,
-  /// (e.g. a function or record type.)  The immediate bounding type may be
-  /// a type expression of some kind.
-  SExpr* getBoundingTypeValue();
 
 protected:
   ValueType     ValType;    ///< The scalar type (simple type) of this instr.

@@ -153,6 +153,7 @@ bool SExpr::isValue() {
     case COP_ScalarType: return true;
     case COP_Literal:    return true;
     case COP_Function:   return true;
+    case COP_Slot:       return true;
     case COP_Record:     return true;
     case COP_Code:       return true;
     case COP_Field:      return true;
@@ -163,9 +164,7 @@ bool SExpr::isValue() {
 
 
 void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
-  // As soon as somebody looks at the type, we force it.
-  if (auto *F = dyn_cast<Future>(E))
-    E = F->force();
+  assert(!isa<Future>(E) && "Cannot set the bounding type to a future.");
   if (auto *SC = dyn_cast<ScalarType>(E)) {
     ValType = SC->valueType();
   }
@@ -173,18 +172,10 @@ void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
     ValType = L->valueType();
   }
   else {
+    // Not a scalar type, so store the full type info.
     ValType = ValueType::getValueType<void*>();
     TypeBound.set(E, R);
   }
-}
-
-
-SExpr* Instruction::getBoundingTypeValue() {
-  if (!TypeBound.TypeExpr.get())
-    return nullptr;
-  if (TypeBound.TypeExpr->isValue())
-    return TypeBound.TypeExpr.get();
-  return cast<Instruction>(TypeBound.TypeExpr.get())->getBoundingTypeValue();
 }
 
 
