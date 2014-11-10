@@ -26,9 +26,10 @@
 #ifndef OHMU_THREAD_SAFETY_UTIL_H
 #define OHMU_THREAD_SAFETY_UTIL_H
 
+#include "base/ArrayTree.h"
 #include "base/DenseMap.h"
 #include "base/MemRegion.h"
-#include "base/ArrayTree.h"
+#include "base/NestedStack.h"
 #include "base/Util.h"
 #include "parser/Token.h"
 

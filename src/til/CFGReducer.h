@@ -81,39 +81,6 @@ public:
 
 
 protected:
-  /// Return the number of pending function arguments.
-  /// Function call arguments are saved in a pending list until a Call expr.
-  unsigned numPendingArgs() {
-    return pendingPathArgs_.size() - pendingPathArgLen_;
-  }
-
-  /// Return the pending arguments.
-  ArrayRef<SExpr*> pendingArgs() {
-    unsigned nargs = numPendingArgs();
-    SExpr** pbegin = &pendingPathArgs_[pendingPathArgs_.size()-nargs];
-    return ArrayRef<SExpr*>(pbegin, nargs);
-  }
-
-  /// Clear all pending arguments.
-  void clearPendingArgs() {
-    unsigned nargs = numPendingArgs();
-    for (unsigned i = 0; i < nargs; ++i)
-      pendingPathArgs_.pop_back();
-  }
-
-  /// Save pending arguments on a stack.
-  /// Return a value that can be passed to restorePendingArgs later.
-  unsigned savePendingArgs() {
-    unsigned plen = pendingPathArgLen_;
-    pendingPathArgLen_ = pendingPathArgs_.size();
-    return plen;
-  }
-
-  /// Restore a list of previously saved arguments.
-  void restorePendingArgs(unsigned plen) {
-    pendingPathArgLen_ = plen;
-  }
-
   /// Inline a call to a function defined inside the current CFG.
   SExpr* inlineLocalCall(PendingBlock *pb, Code *c);
 
@@ -124,15 +91,12 @@ protected:
   void traversePendingBlocks();
 
 public:
-  CFGReducer(MemRegionRef a)
-      : CopyReducer(a), currentContinuation_(nullptr), pendingPathArgLen_(0)
-  { }
+  CFGReducer(MemRegionRef a) : CopyReducer(a), currentContinuation_(nullptr) {}
   ~CFGReducer() { }
 
 private:
-  BasicBlock*  currentContinuation_;      //< continuation for current block.
-  unsigned     pendingPathArgLen_;
-  std::vector<SExpr*> pendingPathArgs_;
+  BasicBlock*  currentContinuation_;    //< continuation for current block.
+  NestedStack<SExpr*> pendingArgs_;     //< unapplied arguments on curr path.
 
   std::vector<std::unique_ptr<PendingBlock>> pendingBlocks_;
   std::queue<PendingBlock*>                  pendingBlockQueue_;
@@ -143,8 +107,12 @@ private:
 
 template <class T>
 MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
-  unsigned plen = savePendingArgs();
-  // This is a CPS transform, so we track the current continuation.
+  // Save pending arguments, if we're not on the spine of a path.
+  unsigned argsave = 0;
+  if (k != TRV_Path)
+    argsave = pendingArgs_.save();
+
+  // Save the currentcontinuation.  (This is a CPS transform.)
   BasicBlock* cont = currentContinuation();
   if (k != TRV_Tail)
     setContinuation(nullptr);
@@ -152,13 +120,11 @@ MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
   // Do the traversal
   auto* result = SuperTv::traverse(e, k);
 
-  // Restore continuation.
+  // Restore the continuation.
   setContinuation(cont);
   // Restore pending arguments, and ensure the traversal didn't add any.
-  if (k != TRV_Path) {
-    assert(numPendingArgs() == 0 && "Unhandled arguments.");
-    restorePendingArgs(plen);
-  }
+  if (k != TRV_Path)
+    pendingArgs_.restore(argsave);
 
   if (!currentBB())
     return result;

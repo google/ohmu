@@ -155,7 +155,7 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
     return newUndefined();
   }
 
-  pendingPathArgs_.push_back(a);
+  pendingArgs_.push_back(a);
   if (isVal) {
     // Partially evaluate the Apply.
     return f->body();
@@ -219,7 +219,7 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
 
 
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // Reducing Apply pushes arguments onto pendingPathArgs_.
+  // Reducing Apply pushes arguments onto pendingArgs_.
   // Reducing Call will consume those arguments.
   auto* c = dyn_cast<Code>(e);
   if (c) {
@@ -242,11 +242,11 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
   if (!c) {
     if (!isa<Undefined>(e))
       diag.error("Expression is not a code block: ") << e;
-    clearPendingArgs();
+    pendingArgs_.clear();
     return newUndefined();
   }
 
-  clearPendingArgs();
+  pendingArgs_.clear();
 
   auto* res = CopyReducer::reduceCall(orig, e);
   setResidualBoundingType(res, c->returnType(), BoundingType::BT_Type);
@@ -278,8 +278,8 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
   }
 
   // End current block with a jump to the new one.
-  newGoto(pb->block, pendingArgs());
-  clearPendingArgs();
+  newGoto(pb->block, pendingArgs_.elements());
+  pendingArgs_.clear();
 
   // If this was a newly-created continuation, then continue where we
   // left off.

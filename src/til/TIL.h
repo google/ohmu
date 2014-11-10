@@ -481,7 +481,7 @@ public:
   /// Return the kind of variable (let, function param, or self)
   VariableKind kind() const { return static_cast<VariableKind>(SubOpcode); }
 
-  /// Return the de-bruin index of the variable.
+  /// Return the de-bruin index of the variable.  Counting starts at 1.
   unsigned varIndex() const { return VarIndex; }
 
   /// Return the name of the variable, if any.
