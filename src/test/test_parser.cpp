@@ -31,7 +31,7 @@ void printSExpr(SExpr* e) {
 
 
 int main(int argc, const char** argv) {
-  if (argc == 0) {
+  if (argc == 1) {
     std::cerr << "No file to parse.\n";
     return 0;
   }

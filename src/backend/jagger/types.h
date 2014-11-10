@@ -17,282 +17,152 @@
 
 #pragma once
 
-#include "x64builder\x64builder.h"
-namespace Jagger {
+enum {
+  NOP = 0, USE, MUTED_USE, GOTO_HEADER, WALK_HEADER,
+  INT32, LOAD, STORE, ULOAD, USTORE, GATHER, SCATTER,
+  SEXT, ZEXT, FCVT, /* ZEXT/FCVT used for truncation */
+  AND, OR, ANDN, ORN, XOR, XNOR, NAND, NOR, NOT,
+  SLL, SLR, SAR, ROL, ROR,
+  MIN, MAX,
+  ADD, SUB, SUBR, ADDN, ADC, SBB, NEG, ABS,
+  MUL, MULHI, DIV, MOD, RCP,
+  AOS, AOSOA,
+  MADD, MSUB, MSUBR, MADDN,
+  FMADD, FMSUB, FMSUBR, FMADDN,
+  EQ, NEQ, LT, LE, ORD, EQU, NEQU, LTU, LEU, UNORD,
+  JUMP, BRANCH, CALL, RET,
+  BT, BTS, BTR, BTC,
+  CTZ, CLZ, POPCNT, /* other bit ops bmi1/bmi2 */
+  SQRT, RSQRT,
+  SHUFFLE, BROADCAST, EXTRACT, INSERT,
+  MEMSET, MEMCPY,
+};
 
-struct Block;
-struct Instruction;
-struct Use;
+typedef unsigned int uint;
 
-struct Opcode {
+struct Event {
+  enum AliasSet { GPR = 1, FLAGS, MMX, SSE };
   enum {
-    NOP, PHI, HEADER, TIE, COPY,
-    VALUE, LOAD, STORE, GATHER, SCATTER,
-    SEXT, ZEXT, FCVT, /* ZEXT/FCVT used for truncation */
-    AND, OR, ANDN, ORN, XOR, XNOR, NOT,
-    SLL, SLR, SAR, ROL, ROR,
-    MIN, MAX,
-    ADD, SUB, SUBR, ADDN, ADC, SBB, NEG, ABS,
-    MUL, MULHI, DIV, MOD, RCP,
-    LEA,
-    MADD, MSUB, MSUBR, MADDN,
-    FMADD, FMSUB, FMSUBR, FMADDN,
-    EQ, LT, LE, UNORD, NEQ, NLT, NLE, ORD,
-    JUMP, BRANCH, CALL, RET,
-    BT, BTS, BTR, BTC,
-    CTZ, CLZ, POPCNT, /* other bit ops bmi1/bmi2 */
-    SQRT, RSQRT,
-    SHUFFLE, BROADCAST, EXTRACT, INSERT,
+    VALUE = 0x80,
+    FIXED = VALUE | 0x40,
+    COPY = VALUE | 0x20,
+    PHI = VALUE | 0x10,
+    PHI_COPY = PHI | COPY,
+    EAX = GPR,
+    EDX = GPR | 0x8,
   };
-  //   
-  // CRC, AES,
-  // MOVEMASK,
-  // RDTSC
-  // MEMCPY, MEMSET
-  // ATOMICS, EXCHAGE WITH MEMORY, CMPEXCH WITH MEMORY
 
+  Event(unsigned char code, unsigned data) : code(code), data(data) {}
 
-  unsigned code : 8;
+  static inline size_t initNop(Event* events, size_t i, uint payload = 0);
+  static inline size_t initGotoHeader(Event* events, size_t i, uint target);
+  static inline size_t initWalkHeader(Event* events, size_t i, uint target);
+  static inline size_t initPhi(Event* events, size_t i);
+  static inline size_t initPhiCopy(Event* events, size_t i, uint arg0, uint phi);
+  static inline size_t initJump(Event* events, size_t i, uint target);
+  static inline size_t initBranch(Event* events, size_t i, uint arg0, uint thenTarget, uint elseTarget);
+  static inline size_t initRet(Event* events, size_t i, uint arg0);
+  static inline size_t initIntLiteral(Event* events, size_t i, int value);
+  static inline size_t initAdd(Event* events, size_t i, uint arg0, uint arg1);
+  static inline size_t initSub(Event* events, size_t i, uint arg0, uint arg1);
+  static inline size_t initMul(Event* events, size_t i, uint arg0, uint arg1);
+  static inline size_t initEq(Event* events, size_t i, uint arg0, uint arg1);
+  static inline size_t initLt(Event* events, size_t i, uint arg0, uint arg1);
+  static inline size_t initLe(Event* events, size_t i, uint arg0, uint arg1);
 
-  unsigned hasResult : 1;
-  unsigned isDestructive : 1; // always destroys argument 0
-  unsigned isCommutative : 1;
-  unsigned flags : 3; // header kind, rounding mode, ordering
-
-  unsigned aliasSet : 2;
-  unsigned type : 2;
-  unsigned hasFixedReg : 1;
-  unsigned fixedReg : 3;
-
-  unsigned isArg0NotLastUse : 1;
-  unsigned isArg1NotLastUse : 1;
-  unsigned isUnused : 1;
-  unsigned _ : 5;
-
-  bool operator==(const Opcode& a) const { return *(int*)this == *(int*)this; }
-  bool operator!=(const Opcode& a) const { return *(int*)this != *(int*)this; }
+  union {
+    unsigned bits;
+    unsigned char code;
+    struct {
+      unsigned char aliasSet : 3;
+      unsigned char : 1;
+      unsigned char isPhiKind : 1;
+      unsigned char isCopy : 1;
+      unsigned char isFixed : 1;
+      unsigned char isValue : 1;
+    };
+    struct {
+      unsigned char /*aliasSet*/ : 3;
+      unsigned char fixedReg : 3;
+      unsigned char /*isFixed = 1*/ : 1;
+      unsigned char /*isValue = 1*/ : 1;
+    };
+    struct {
+      unsigned : 8;
+      unsigned data : 24;
+    };
+  };
 };
 
-struct OpcodeEx : Opcode {
-  unsigned hasFixedRegArg0 : 1;
-  unsigned hasFixedRegArg1 : 1;
-  unsigned registerFileArg0 : 3;
-  unsigned registerFileArg1 : 3;
-  unsigned fixedRegArg0 : 8;
-  unsigned fixedRegArg1 : 8;
-  const char name[16];
-};
-
-struct Instruction {
-  void init(Opcode opcode) { init(opcode, this); }
-  void init(Opcode opcode, Instruction* arg0) { init(opcode, arg0, this); }
-  void init(Opcode opcode, Instruction* arg0, Instruction* arg1) {
-    init(opcode, arg0, arg1, this);
-  }
-  void init(Opcode opcode, Instruction* arg0, Instruction* arg1,
-            Instruction* key) {
-    this->opcode = opcode;
-    this->key = key - this;
-    this->arg0 = arg0 - this;
-    this->arg1 = arg1 - this;
-    order = 0;
-  }
-
-  Instruction* getKey() { return this + key; }
-  Instruction* getArg0() { return this + arg0; }
-  Instruction* getArg1() { return this + arg1; }
-  const Instruction* getKey() const { return this + key; }
-  const Instruction* getArg0() const { return this + arg0; }
-  const Instruction* getArg1() const { return this + arg1; }
-  const Instruction* updateKey() {
-    if (key) key = this[key].updateKey() - this;
-    return getKey();
-  }
-  const Instruction* updateKey(const Instruction* newKey) {
-    key = (key ? this[key].updateKey(newKey) : newKey) - this;
-    return getKey();
-  }
-
-  void print(const Instruction* base);
-
-  Opcode opcode;
-  int key;
-  int arg0; // also literal
-  int arg1; // jump target
-  int order;
-};
-
-extern Instruction countedMarker;
-
-struct Block {
-  //bool dominates(const Block& block) const {
-  //  return dominatorID <= block.dominatorID && block.dominatorID < dominatorID + dominatorSize;
-  //}
-  //bool postDominates(const Block& block) const {
-  //  return postDominatorID <= block.postDominatorID && block.postDominatorID < postDominatorID + postDominatorSize;
-  //}
-
-  Block* dominator;
-  Block* head;
-  //int dominatorID;
-  //int dominatorSize;
-  //Block* postDominator;
-  //int postDominatorID;
-  //int postDominatorSize;
-  //size_t local_size;
-  //size_t total_size;
-
-
-
-  //Block* parent;
-  //Instruction* instrs;
-  size_t firstInstr;;
-  size_t numInstrs;
-  //size_t numPhis;
-  //size_t numEchos;
-  //Block** Preds;
-  //Block** Succs;
-  //size_t numPreds;
-  //size_t numSuccs;
-};
-
-//struct Procedure {
-//  Block* getFirstBlock() const {
-//    return (Block*)((char*)this + firstBlockOffset);
-//  }
-//  Block* getLastBlock() const {
-//    return (Block*)((char*)this + lastBlockOffset);
-//  }
-//  Procedure& setFirstBlock(Block* instr) {
-//    firstBlockOffset = (int)((char*)instr - (char*)this);
-//    return *this;
-//  }
-//  Procedure& setLastBlock(Block* instr) {
-//    lastBlockOffset = (int)((char*)instr - (char*)this);
-//    return *this;
-//  }
-//
-//  int firstBlockOffset;
-//  int lastBlockOffset;
-//};
-
-namespace Opcodes {
-  extern OpcodeEx header;
-  extern OpcodeEx headerDominates;
-  extern OpcodeEx nop;
-  extern OpcodeEx jump;
-  extern OpcodeEx branch;
-  extern OpcodeEx intValue;
-  extern OpcodeEx ret;
-  extern OpcodeEx copy;
-  extern OpcodeEx phi;
-  extern OpcodeEx add;
-  extern OpcodeEx mul;
-  extern OpcodeEx cmpeq;
-  extern OpcodeEx cmplt;
-  extern OpcodeEx cmple;
-};
-
-void print(Instruction* instrs, size_t numInstrs);
+static const size_t MAX_EVENTS = 1 << 24;
 
 #if 0
-union Event;
-struct Object {
-  enum Kind {
-    HOLE,
-    WALK_BACK,
-    SKIP_BACK,
-    USE,
-    JUMP,
-    BRANCH,
-    INT_LITERAL,
-    PHI,
-    NOP,
-    ADD,
-    MUL,
-    CMP_EQ,
-    CMP_LT,
-    CMP_LE,
-  };
-
-  bool isValue() const { return kind >= INT_LITERAL && kind <= CMP_LE; }
-  Object& initObject(Kind kind) { this->kind = kind; return *this; }
-  Object& initHole() { return initObject(HOLE); }
-  const Event& asEvent() const { return *(const Event*)this; }
-  Event& asEvent() { return *(Event*)this; }
-  void print(int index);
-  void emit(Instr* buffer);
-  Kind kind;
-};
-
-struct Link : Object {
-  Link& initWalkBack(int offsetToTarget) { initObject(WALK_BACK); this->offsetToTarget = offsetToTarget; return *this; }
-  Link& initSkipBack(int offsetToTarget) { initObject(SKIP_BACK); this->offsetToTarget = offsetToTarget; return *this; }
-  void print(int index);
-  int offsetToTarget;
-};
-
-struct Use : Object {
-  Use& init(int offsetToValue) { initObject(USE); this->offsetToValue = offsetToValue; return *this; }
-  void print(int index);
-  int offsetToValue; // value
-};
-
-struct Jump : Object {
-  Jump& initJump(int jumpTarget) { initObject(JUMP); this->jumpTarget = jumpTarget; return *this; }
-  Jump& initJumpcc(int jumpTarget) { initObject(BRANCH); this->jumpTarget = jumpTarget; return *this; }
-  void print(int index);
-  void emit(X64Builder& builder);
-  int jumpTarget;
-};
-
-struct Value : Object {
-  Value& initValue(Kind kind) { initObject(kind); invalidRegs = 0; pressure = 0; reg = 0; offsetToRep = 0; return *this; }
-  void updateRep(int index, int rep);
-  void print(int index);
-  int pressure; // reuse me?
-  unsigned invalidRegs;
-  unsigned reg;
-  int offsetToRep;
-};
-
-struct IntLiteral : Value {
-  IntLiteral& init(int value) { initValue(INT_LITERAL); this->value = value; return *this; }
-  void print(int index);
-  void emit(X64Builder& builder);
-  int value;
-};
-
-struct Instruction : Value {
-  Instruction& initPhi() { initValue(PHI); return *this; }
-  Instruction& initAdd() { initValue(ADD); return *this; }
-  Instruction& initMul() { initValue(MUL); return *this; }
-  Instruction& initEq() { initValue(CMP_EQ); return *this; }
-  Instruction& initLt() { initValue(CMP_LT); return *this; }
-  Instruction& initLe() { initValue(CMP_LE); return *this; }
-  void print(int index);
-  void emit(X64Builder& builder);
-};
-
-union Event {
-  Event(Object object) { this->object = object; }
-  Event(Value value) { this->value = value; }
-  Event(Link link) { this->link = link; }
-  Event(Use use) { this->use = use; }
-  Event(Jump jump) { this->jump = jump; }
-  Event(IntLiteral intLiteral) { this->intLiteral = intLiteral; }
-  Event(Instruction instruction) { this->instruction = instruction; }
-  void print(int index);
-  Object::Kind kind;
-  Object object;
-  Link link;
-  Use use;
-  Jump jump;
-  Value value;
-  IntLiteral intLiteral;
-  Instruction instruction;
-};
-
-void print(Event* events, size_t numEvents);
+void print_stream(EventStream events, size_t numInstrs);
+void print_asm(EventStream events, size_t numInstrs);
+void make_asm(EventStream events, size_t numEvents);
 #endif
-} // namespace Jagger
+
+#if 0
+// EQ_OQ(EQ) 0H Equal(ordered, non - signaling) False False True False No
+// UNORD_Q(UNORD) 3H Unordered(non - signaling) False False False True No
+// NEQ_UQ(NEQ) 4H Not - equal(unordered, nonsignaling) True True False True No
+// ORD_Q(ORD) 7H Ordered(non - signaling) True True True False No
+// EQ_UQ 8H Equal(unordered, non - signaling) False False True True No
+// FALSE_OQ(FALSE) BH False(ordered, non - signaling) False False False False No
+// NEQ_OQ CH Not - equal(ordered, non - signaling) True True False False No
+// TRUE_UQ(TRUE) FH True(unordered, non - signaling) True True True True No
+// LT_OQ 11H Less - than(ordered, nonsignaling) False True False False No
+// LE_OQ 12H Less - than - or - equal(ordered, nonsignaling) False True True False No
+// NLT_UQ 15H Not - less - than(unordered, nonsignaling) True False True True No
+// NLE_UQ 16H Not - less - than - or - equal(unordered, nonsignaling) True False False True No
+// NGE_UQ 19H Not - greater - than - or - equal(unordered, nonsignaling) False True False True No
+// NGT_UQ 1AH Not - greater - than(unordered, nonsignaling) False True True True No
+// GE_OQ 1DH Greater - than - or - equal(ordered, nonsignaling) True False True False No
+// GT_OQ 1EH Greater - than(ordered, nonsignaling) True False False False No
+
+// Instruction families
+
+struct LOGICFamily {
+  bool val00;
+  bool val01;
+  bool val10;
+  bool val11;
+};
+
+struct ADDFamily {
+  bool neg_result;
+  bool neg_arg1;
+  // round mode
+};
+
+struct MADFamily {
+  bool neg_result;
+  bool neg_arg1;
+  bool fused;
+  // round mode
+};
+
+struct COPYFamily {
+  bool src_in_mem;
+  bool dst_in_mem;
+  bool unaligned;
+};
+
+struct CVTFamily { // sext, zext, fcvt
+  bool signaling;
+  // round mode
+};
+
+struct ShiftFamily {
+  bool left;
+  bool rotate;
+  bool arithmetic;
+};
+
+struct CMPFamily {
+  bool lt;
+  bool eq;
+  bool gt;
+  bool unord;
+};
+#endif

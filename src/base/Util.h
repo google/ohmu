@@ -50,6 +50,12 @@ inline T* cast(U* p) {
 }
 
 template <class T, class U>
+inline T& cast(U& p) {
+  assert(T::classof(&p));
+  return *static_cast<T*>(&p);
+}
+
+template <class T, class U>
 inline const T* cast(const U* p) {
   assert(T::classof(p));
   return static_cast<const T*>(p);
