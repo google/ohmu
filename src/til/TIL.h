@@ -272,10 +272,10 @@ public:
   bool operator!=(const T* P)            const { return Ptr != P; }
   bool operator!=(std::nullptr_t)        const { return Ptr != nullptr; }
 
+  SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
 private:
   friend class Future;
 
-  SExprRefT(const SExprRefT<T> &P) : Ptr(P.Ptr) { }
   void operator=(const SExprRefT<T> &P) { }
 
   T* Ptr;

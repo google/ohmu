@@ -15,11 +15,82 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "til/TIL.h"
+#include "til/Global.h"
+#include "til/VisitCFG.h"
 #include "types.h"
 #include <stdio.h>
 
+bool validateTIL(ohmu::til::BasicBlock* block) {
+  if (!block) {
+    printf("block is null.\n");
+    return false;
+  }
+  if (block->parent()->blockID() >= block->blockID()) {
+    printf("parent block has id greater than current block.\n");
+    return false;
+  }
+  if (block->arguments().size() != 0) {
+    if (block->predecessors().size() == 0) {
+      printf("block has arguments but no predecessors.\n");
+      return false;
+    }
+    for (auto& pred : block->predecessors()) {
+      // todo: validate that pred has been validated
+      if (pred->terminator()->opcode() != ohmu::til::COP_Goto) {
+        printf("block with arguments has predecessor"
+               " that doesn't terminate with a goto.\n");
+        return false;
+      }
+    }
+    if (!block->terminator()) {
+      printf("block doesn't have a terminator.\n");
+      return false;
+    }
+  }
+  return true;
+}
+
+bool validateTIL(ohmu::til::SCFG* cfg) {
+  if (!cfg) {
+    printf("cfg is null.\n");
+    return false;
+  }
+  if (cfg->blocks().size() == 0) {
+    printf("cfg contains no blocks.\n");
+    return false;
+  }
+  for (auto& block : cfg->blocks()) {
+    if (!validateTIL(block.get()))
+      return false;
+    if (block->cfg() != cfg) {
+      printf("block doesn't point back to cfg.\n");
+      return false;
+    }
+  }
+  return true;
+}
+
+bool validateTIL(ohmu::til::Global* global) {
+  if (!global) {
+    printf("module is null.\n");
+    return false;
+  }
+  ohmu::til::VisitCFG visitCFG;
+  visitCFG.traverseAll(global->global());
+  auto& cfgs = visitCFG.cfgs();
+  if (cfgs.empty()) {
+    printf("module has no cfgs.");
+    return false;
+  }
+  for (auto cfg : cfgs)
+    if (!validateTIL(cfg))
+      return false;
+  return true;
+}
+
 namespace {
-const char opcodeNames[][20] = {
+const char* opcodeNames[] = {
     "NOP",    "USE",     "MUTED_USE", "HEADER",    "HEADER_DOMINATES",
     "INT32",  "LOAD",    "STORE",     "ULOAD",     "USTORE",
     "GATHER", "SCATTER", "SEXT",      "ZEXT",      "FCVT",
@@ -39,8 +110,8 @@ const char opcodeNames[][20] = {
     "INSERT", "MEMSET",  "MEMCPY",
 };
 
-const char aliasSetNames[] = {"???", "GPR", "FLAGS", "MMX",
-                              "SSE", "???", "???",   "???"};
+const char* aliasSetNames[] = {"???", "GPR", "FLAGS", "MMX",
+                               "SSE", "???", "???",   "???"};
 
 void printDebug(Event event) {
   if (!event.isValue)
@@ -52,12 +123,12 @@ void printDebug(Event event) {
                                    : event.isPhiKind ? "phi" : "value",
            aliasSetNames[event.aliasSet]);
 }
+}  // namespace {
 
 void printDebug(Event* events, size_t numEvents) {
   for (size_t i = 0; i < numEvents; ++i) {
-    printf("%3d > ", i);
+    printf("%3d : %5d > ", i, events[i].data);
     printDebug(events[i]);
-    printf(" %d\n", events[i].data);
+    printf("\n");
   }
 }
-}  // namespace {

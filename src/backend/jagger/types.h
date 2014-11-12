@@ -52,6 +52,7 @@ struct Event {
     EDX = GPR | 0x8,
   };
 
+  Event() {}
   Event(unsigned char code, unsigned data) : code(code), data(data) {}
 
   static inline size_t initNop(Event* events, size_t i, uint payload = 0);

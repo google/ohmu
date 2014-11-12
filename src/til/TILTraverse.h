@@ -353,6 +353,7 @@ Traversal<S, R>::traverseVarDecl(VarDecl *E, TraversalKind K) {
       return self()->reduceVarDeclLetrec(Nvd, D);
     }
   }
+  return nullptr;
 }
 
 template <class S, class R>

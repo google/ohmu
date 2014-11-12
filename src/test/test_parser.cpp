@@ -17,11 +17,14 @@
 
 #include "test/Driver.h"
 #include "til/VisitCFG.h"
+#include "backend/jagger/types.h"
 
 
 using namespace ohmu;
 using namespace ohmu::parsing;
 using namespace ohmu::til;
+
+extern void emitEvents(Event* events, Global& global);
 
 
 void printSExpr(SExpr* e) {
@@ -52,13 +55,18 @@ int main(int argc, const char** argv) {
   // Convert high-level AST to low-level IR.
   global.lower();
   std::cout << "\n------ Ohmu IR ------\n";
-  global.print(std::cout);
+  //global.print(std::cout);
 
   // Find all of the CFGs.
   VisitCFG visitCFG;
-  visitCFG.traverseAll(global.global());
+  //visitCFG.traverseAll(global.global());
 
-  std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
+  //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
+
+  auto events = new Event[10000];
+  emitEvents(events, global);
+  delete[] events;
+
   return 0;
 }
 
