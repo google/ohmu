@@ -58,7 +58,7 @@ TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2) {
         return CAST_extendNum;
     if (Vt2.Base == ValueType::BT_Float)
       if (static_cast<unsigned>(Vt1.Size) <= static_cast<unsigned>(Vt2.Size)-1)
-        return CAST_intToFloat;
+        return CAST_extendToFloat;
   }
   else if (Vt1.Base == ValueType::BT_Float &&
            Vt2.Base == ValueType::BT_Float) {
@@ -122,7 +122,8 @@ StringRef getCastOpcodeString(TIL_CastOpcode Op) {
     case CAST_none:            return "none";
     case CAST_extendNum:       return "extendNum";
     case CAST_truncNum:        return "truncNum";
-    case CAST_intToFloat:      return "intToFloat";
+    case CAST_extendToFloat:   return "extendToFloat";
+    case CAST_truncToFloat:    return "truncToFloat";
     case CAST_truncToInt:      return "truncToInt";
     case CAST_roundToInt:      return "roundToInt";
     case CAST_toBits:          return "toBits";

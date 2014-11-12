@@ -42,8 +42,8 @@ public:
 
 
 // Set bounding type of residual.
-static void setResidualBoundingType(Instruction* res, SExpr* typ,
-                                    BoundingType::Relation rel) {
+void CFGReducer::setResidualBoundingType(Instruction* res, SExpr* typ,
+                                         BoundingType::Relation rel) {
   if (Future* fut = dyn_cast<Future>(typ))
     typ = fut->force();
 
@@ -60,9 +60,10 @@ static void setResidualBoundingType(Instruction* res, SExpr* typ,
       // Grab the upper bound of the type expr.
       auto vtrel = ityp->boundingType().Rel;
       res->setBoundingType(vtyp, BoundingType::minRelation(rel, vtrel));
+      return;
     }
   }
-  assert(true && "Type does not have a value upper bound.");
+  diag.error("Type does not have a value upper bound: ") << typ;
 }
 
 
@@ -73,27 +74,39 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
 
   // Search backward through the context until we find a match.
   for (unsigned i=0,n=scope().numVars(); i < n; ++i) {
-    VarDecl* vd = scope().varDecl(i);
-    if (!vd)
-      continue;
+    auto& entry = scope().entry(i);
+    VarDecl *evd = entry.VDecl;
 
-    if (vd->varName() == idstr) {
-      // Translate identifier to a named variable.
-      if (vd->kind() == VarDecl::VK_Let ||
-          vd->kind() == VarDecl::VK_Letrec) {
-        // Map let variables directly to their definitions.
-        return vd->definition();
+    // First check to see if the identifier refers to a named variable.
+    if (evd->varName() == idstr) {
+      // For lets, the substitution can be anything; see traverseLet.
+      // Eliminate the let by returning the substitution.
+      if (evd->kind() == VarDecl::VK_Let)
+        return entry.Subst;
+
+      // For letrecs, the substitution should be a variable.
+      // Eliminate the letrec by returning the variable definition.
+      if (evd->kind() == VarDecl::VK_Letrec) {
+        auto* var = cast<Variable>(entry.Subst);
+        return var->variableDecl()->definition();
       }
-      // Construct a variable, and set it's type.
-      auto* res = newVariable(vd);
-      setResidualBoundingType(res, vd->definition(), BoundingType::BT_Type);
+
+      // For function parameters, the substitution should be a variable.
+      auto* res = cast<Variable>(entry.Subst);
+      if (res->boundingTypeExpr() == nullptr)
+        setResidualBoundingType(res, res->variableDecl()->definition(),
+                                BoundingType::BT_Type);
       return res;
     }
-    else if (vd->kind() == VarDecl::VK_SFun) {
+    // Otherwise look for slots in enclosing modules
+    else if (evd->kind() == VarDecl::VK_SFun) {
+      auto* svar = cast<Variable>(entry.Subst);
+      auto* svd  = svar->variableDecl();
+
       // Map identifiers to slots for record self-variables.
-      if (!vd->definition())
+      if (!svd->definition())
         continue;
-      auto* sfun = cast<Function>(vd->definition());
+      auto* sfun = cast<Function>(svd->definition());
       Record* rec = dyn_cast<Record>(sfun->body());
       if (!rec)
         continue;
@@ -106,17 +119,13 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
         // TODO: do we want to be a bit more sophisticated here?
         return slt->definition();
       }
-      auto* svar = newVariable(vd);
-      svar->setBoundingType(sfun, BoundingType::BT_Type);
       auto* sapp = newApply(svar, nullptr, Apply::FAK_SApply);
-      sapp->setBoundingType(rec,  BoundingType::BT_Type);
       auto* res  = newProject(sapp, idstr);
       setResidualBoundingType(res, slt->definition(), BoundingType::BT_Type);
       return res;
     }
   }
 
-  // TODO: emit warning on name-not-found.
   diag.error("Identifier not found: ") << idstr;
   return new (Arena) Identifier(orig);
 }
@@ -125,11 +134,15 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
 
 SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
   auto* res = CopyReducer::reduceVariable(orig, vd);
-  auto k  = vd->kind();
-  auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
-      BoundingType::BT_Equivalent : BoundingType::BT_Type;
 
-  setResidualBoundingType(res, vd->definition(), bt);
+  // TODO: this is ugly.  fix it.
+  if (auto* var = dyn_cast<Variable>(res)) {
+    auto k  = var->variableDecl()->kind();
+    auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
+      BoundingType::BT_Equivalent : BoundingType::BT_Type;
+    if (var->boundingTypeExpr() == nullptr)
+      setResidualBoundingType(var, var->variableDecl()->definition(), bt);
+  }
   return res;
 }
 
@@ -448,8 +461,8 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   unsigned nargs = 0;
   unsigned sz = scope().numVars();
   while (nargs < sz) {
-    VarDecl* vd = scope().varDecl(nargs);
-    if (vd && vd->kind() == VarDecl::VK_Fun)
+    auto& entry = scope().entry(nargs);
+    if (entry.VDecl && entry.VDecl->kind() == VarDecl::VK_Fun)
       ++nargs;
     else
       break;
@@ -465,11 +478,16 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
   ScopeFrame* ns = scope().clone();
   for (unsigned i = 0; i < nargs; ++i) {
     unsigned j  = nargs-1-i;
-    VarDecl* vd = scope().varDecl(j);
-    Phi*     ph = b->arguments()[i];
-    ph->setInstrName(vd->varName());
-    setResidualBoundingType(ph, vd->definition(), BoundingType::BT_Type);
-    ns->setVar(j, newVarDecl(VarDecl::VK_Let, vd->varName(), ph));
+    auto& entry = ns->entry(j);
+    VarDecl *nvd = cast<Variable>(entry.Subst)->variableDecl();
+
+    Phi* ph = b->arguments()[i];
+    ph->setInstrName(entry.VDecl->varName());
+    setResidualBoundingType(ph, nvd->definition(), BoundingType::BT_Type);
+
+    // Make the function parameters look like let-variables.
+    entry.VDecl = newVarDecl(VarDecl::VK_Let, entry.VDecl->varName(), ph);
+    entry.Subst = ph;
   }
 
   // Add pb to the array of pending blocks.
@@ -485,11 +503,29 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
 
 
-SExpr* CFGReducer::reduceLet(Let &orig, VarDecl *nvd, SExpr *b) {
-  if (currentCFG())
-    return b;   // eliminate the let
-  else
-    return CopyReducer::reduceLet(orig, nvd, b);
+SExpr* CFGReducer::traverseLet(Let* e, TraversalKind k) {
+  if (!currentCFG())
+    return SuperTv::traverseLet(e, k);
+
+  // Otherwise we eliminate the let.
+  auto *vd = e->variableDecl();
+  bool scoped = (vd->varIndex() > 0) || (vd->varName().length() > 0);
+
+  auto *e1 = traverse(vd->definition(), TRV_Decl);
+
+  if (scoped) {
+    if (auto *inst = dyn_cast<Instruction>(e1))
+      inst->setInstrName(vd->varName());
+    // Eliminate let, by replacing all occurrences of the let variable.
+    Scope->enterScope(vd, e1);
+  }
+
+  auto *e2 = traverse(e->body(), TRV_Tail);
+
+  if (scoped)
+    Scope->exitScope(vd);
+
+  return e2;
 }
 
 
@@ -599,6 +635,7 @@ void CFGReducer::endCFG() {
   // TILDebugPrinter::print(Scfg, std::cerr);
 
   SSAPass::ssaTransform(Scfg, Arena);
+
   //std::cerr << "\n===== SSA ======\n";
   //TILDebugPrinter::print(Scfg, std::cerr);
 

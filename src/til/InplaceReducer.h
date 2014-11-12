@@ -39,8 +39,17 @@ namespace til  {
 ///
 /// It is intended to be used as a basic class for destructive in-place
 /// transformations.
-class InplaceReducer : public CFGBuilder, public ScopeHandler {
+class InplaceReducer : public CFGBuilder {
 public:
+  ScopeFrame& scope() { return *Scope; }
+
+  void enterScope(VarDecl *Orig, VarDecl *Nvd) {
+    Scope->enterScope(Orig, nullptr);
+  }
+  void exitScope(VarDecl *Orig) {
+    Scope->exitScope(Orig);
+  }
+
   SExpr*   reduceWeak(Instruction* I) { return scope().lookupInstr(I); }
   VarDecl* reduceWeak(VarDecl *E)     { return E; }
   Slot*    reduceWeak(Slot *S)        { return S; }
@@ -50,7 +59,6 @@ public:
       Scope->updateBlockMap(B, B);
     return B;
   }
-
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
     Orig.rewrite(E);
@@ -194,12 +202,17 @@ public:
     return &Orig;
   }
 
-  InplaceReducer() {
+public:
+  InplaceReducer() : Scope(new ScopeFrame()) {
     OverwriteInstructions = true;
   }
-  InplaceReducer(MemRegionRef A) : CFGBuilder(A) {
+  InplaceReducer(MemRegionRef A) : CFGBuilder(A), Scope(new ScopeFrame()) {
     OverwriteInstructions = true;
   }
+
+public:
+  // TODO: make private
+  std::unique_ptr<ScopeFrame> Scope;
 };
 
 

@@ -28,6 +28,7 @@ namespace ohmu {
 namespace til  {
 
 
+
 SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
   beginCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
   Scope->enterCFG(&Orig, currentCFG());

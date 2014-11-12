@@ -23,19 +23,18 @@ namespace til  {
 
 
 void ScopeFrame::enterCFG(SCFG *Orig, SCFG *S) {
-  assert(!OrigCFG && "No support for nested CFGs");
-  OrigCFG = Orig;
+  assert(BlockMap.size() == 0 && "No support for nested CFGs");
   InstructionMap.resize(Orig->numInstructions(), nullptr);
   BlockMap.resize(Orig->numBlocks(), nullptr);
 
   updateBlockMap(Orig->entry(), S->entry());
   updateBlockMap(Orig->exit(),  S->exit());
-  updateInstructionMap(Orig->exit()->arguments()[0], S->exit()->arguments()[0]);
+  updateInstructionMap(Orig->exit()->arguments()[0],
+                       S->exit()->arguments()[0]);
 }
 
 
 void ScopeFrame::exitCFG() {
-  OrigCFG = nullptr;
   InstructionMap.clear();
   BlockMap.clear();
 }
@@ -56,28 +55,6 @@ void ScopeFrame::updateBlockMap(BasicBlock *Orig, BasicBlock *B) {
   }
 }
 
-
-
-void ScopeHandler::enterScope(VarDecl *Orig, VarDecl *Nv) {
-  // Skip unnamed, unnumbered let variables.
-  if (Orig->varIndex() == 0 && Orig->kind() == VarDecl::VK_Let &&
-      Orig->varName().length() == 0)
-    return;
-
-  Scope->enterScope(Orig, Nv);
-
-  // Copy names of let-variables to their definitions.
-  if (Nv->kind() == VarDecl::VK_Let && Nv->definition()) {
-    if (Instruction *I = dyn_cast<Instruction>(Nv->definition()))
-      if (I->instrName().length() == 0)
-        I->setInstrName(Nv->varName());
-  }
-}
-
-
-void ScopeHandler::exitScope(VarDecl *Orig) {
-  Scope->exitScope(Orig);
-}
 
 
 }  // end namespace til

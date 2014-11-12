@@ -40,14 +40,27 @@ namespace til  {
 
 /// CopyReducer implements the reducer interface to build a new SExpr.
 /// In other words, it makes a deep copy of a term.
-/// It is also useful as a base class for non-destructive rewrites.
-class CopyReducer : public CFGBuilder, public ScopeHandler {
+/// It also useful as a base class for non-destructive rewrites.
+/// It automatically performs variable substitution during the copy.
+class CopyReducer : public CFGBuilder {
 public:
+  ScopeFrame& scope() { return *Scope; }
+
+  void enterScope(VarDecl *Orig, VarDecl *Nvd) {
+    // Rewrite old variable to the new variable.
+    // reduceVariable does the actual replacement.
+    Scope->enterScope(Orig, newVariable(Nvd));
+  }
+  void exitScope(VarDecl *Orig) {
+    Scope->exitScope(Orig);
+  }
+
   SExpr* reduceWeak(Instruction* E) {
     return Scope->lookupInstr(E);
   }
   VarDecl* reduceWeak(VarDecl *E) {
-    return dyn_cast_or_null<VarDecl>(Scope->lookupVar(E));
+    assert(false && "Never called, since we override reduceVar.");
+    return nullptr;
   }
   BasicBlock* reduceWeak(BasicBlock *E);
 
@@ -94,8 +107,9 @@ public:
   LiteralT<T>* reduceLiteralT(LiteralT<T> &Orig) {
     return newLiteralT<T>(Orig.value());
   }
-  Variable* reduceVariable(Variable &Orig, VarDecl* VD) {
-    return newVariable(VD);
+  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
+    // Perform variable substitution
+    return Scope->lookupVar(Orig.variableDecl());
   }
   Apply* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
     return newApply(E0, E1, Orig.applyKind());
@@ -196,8 +210,12 @@ public:
   }
 
 public:
-  CopyReducer() { }
-  CopyReducer(MemRegionRef A) : CFGBuilder(A) { }
+  CopyReducer() : Scope(new ScopeFrame()) { }
+  CopyReducer(MemRegionRef A) : CFGBuilder(A), Scope(new ScopeFrame()) { }
+
+public:
+  // TODO: make private
+  std::unique_ptr<ScopeFrame> Scope;
 };
 
 

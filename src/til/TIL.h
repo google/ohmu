@@ -102,13 +102,33 @@ enum TIL_BinaryOpcode : unsigned char {
   BOP_LogicOr       ///<  ||  (no short-circuit)
 };
 
-/// Opcode for cast operations.  (Currently Very Incomplete)
+
+/// Opcode for cast operations.  (Currently incomplete)
+/// A "cast" is a unary operator that converts from one type to another.
+/// There are many different sorts of casts, which can be categorized on
+/// several axes:
+///
+/// (A) Lossless vs. lossy:
+///     A lossless cast does not discard bits or reduce precision.
+///     E.g. extendNum, extendToFloat, or pointer casts.
+///
+/// (B) Bitwise equality:
+///     Pointer and bit casts have no computational effect; the resulting bit
+///     sequence is equal to the original, merely viewed at a different type.
+///
+/// (C) Semantic equality:
+///     Casts between related semantic types (e.g.  extendNum, or downCast)
+///     return a value that refers to the same object as the original.
+///     Other casts (e.g. toBits) return a result that is semantically
+///     unrelated to the original value.
+///
 enum TIL_CastOpcode : unsigned char {
   CAST_none = 0,
   // numeric casts
   CAST_extendNum,       ///< extend precision of number:  int->int or fp->fp
   CAST_truncNum,        ///< truncate precision of numeric type
-  CAST_intToFloat,      ///< convert integer to floating point type
+  CAST_extendToFloat,   ///< convert integer to larger floating point type
+  CAST_truncToFloat,    ///< convert integer to smaller floating point type
   CAST_truncToInt,      ///< truncate float f to integer i;  abs(i) <= abs(f)
   CAST_roundToInt,      ///< convert float to nearest integer
   // bit casts

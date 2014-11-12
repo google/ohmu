@@ -59,15 +59,16 @@ public:
   SExpr* reduceLoad(Load &orig, SExpr* e);
   SExpr* reduceUnaryOp(UnaryOp &orig, SExpr* e0);
   SExpr* reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1);
-
   SExpr* reduceCode(Code& orig, SExpr* e0, SExpr* e1);
-  SExpr* reduceLet(Let &orig, VarDecl *nvd, SExpr *b);
 
   template <class T>
   MAPTYPE(SExprReducerMap, T) traverse(T* e, TraversalKind k);
 
   // Code traversals will rewrite the code blocks to SCFGs.
   SExpr* traverseCode(Code* e, TraversalKind k);
+
+  // Eliminate let expressions.
+  SExpr* traverseLet(Let* e, TraversalKind k);
 
   // IfThenElse requires a special traverse, because it involves creating
   // additional basic blocks.
@@ -89,6 +90,10 @@ protected:
 
   /// Implement lazy block traversal.
   void traversePendingBlocks();
+
+private:
+  void setResidualBoundingType(Instruction* res, SExpr* typ,
+                               BoundingType::Relation rel);
 
 public:
   CFGReducer(MemRegionRef a) : CopyReducer(a), currentContinuation_(nullptr) {}

@@ -39,8 +39,9 @@ public:
 
   MemRegionRef& arena() { return Arena; }
 
-  SCFG*       currentCFG() { return CurrentCFG; }
-  BasicBlock* currentBB()  { return CurrentBB;  }
+  SCFG*        currentCFG() { return CurrentCFG; }
+  BasicBlock*  currentBB()  { return CurrentBB;  }
+
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -84,8 +85,8 @@ public:
   LiteralT<T>* newLiteralT(T Val) {
     return new (Arena) LiteralT<T>(Val);
   }
-  Variable* newVariable(VarDecl* VD) {
-    return new (Arena) Variable(VD);
+  Variable* newVariable(VarDecl* Vd) {
+    return new (Arena) Variable(Vd);
   }
   Apply* newApply(SExpr* E0, SExpr* E1, Apply::ApplyKind K=Apply::FAK_Apply) {
     return new (Arena) Apply(E0, E1, K);

@@ -29,40 +29,41 @@ namespace ohmu {
 namespace til  {
 
 
-/// A ScopeFrame maintains information about how the lexical scope of a term
-/// is mapped to some other scope during rewriting or inlining.
-/// Lexical scope includes:
+/// A ScopeFrame maintains information about how variables in one lexical
+/// scope are mapped to expressions in another lexical scope.  This includes:
 /// (1) Bindings for all variables (i.e. function parameters).
 /// (2) Bindings for all instructions (which are essentially let-variables.)
 /// (3) Bindings for all blocks (which are essentially function letrecs.)
 class ScopeFrame {
 public:
-  ScopeFrame() : OrigCFG(nullptr) {
-    // Variable ID 0 means uninitialized.
-    VarMap.push_back(nullptr);
-  }
+  struct SubstitutionEntry {
+    SubstitutionEntry(VarDecl* Vd, SExpr *S) : VDecl(Vd), Subst(S) { }
 
-  /// During alpha-renaming (making a copy of a function), the original VarDecl
-  /// (function parameter) is mapped to a new VarDecl.
-  /// During inlining, an SExpr is substituted for each variable, so the
-  /// VarDecl of the variable maps to its substitution.
-  SExpr* lookupVar(VarDecl *Orig) {
-    return VarMap[Orig->varIndex()];
+    VarDecl* VDecl;
+    SExpr*   Subst;
+  };
+
+  /// Return the variable substitution for Orig.
+  SExpr* lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
+
+  /// Return the number of variables (VarDecls) in the current scope.
+  unsigned numVars() { return VarMap.size()-1; }
+
+  /// Return the VarDecl->SExpr map entry for the i^th variable.
+  SubstitutionEntry& entry(unsigned i) {
+    return VarMap[VarMap.size()-i-1];
   }
 
   /// Return the binding for the i^th variable (VarDecl) from the top of the
   /// current scope.
-  SExpr* var(unsigned i) const { return VarMap[VarMap.size() - i - 1];  }
+  SExpr* var(unsigned i) const {
+    return VarMap[VarMap.size()-i-1].Subst;
+  }
 
   /// Set the binding for the i^th variable (VarDecl) from top of scope.
-  void setVar(unsigned i, SExpr *E) { VarMap[VarMap.size() - i - 1] = E; }
-
-  /// Return the binding for the i^th variable (VarDecl) from the top of the
-  /// current scope, or null if it does not map to another VarDecl.
-  VarDecl* varDecl(unsigned i) { return dyn_cast_or_null<VarDecl>(var(i)); }
-
-  /// Return the number of variables (VarDecls) in the current scope.
-  unsigned numVars() { return VarMap.size(); }
+  void setVar(unsigned i, SExpr *E) {
+    VarMap[VarMap.size()-i-1].Subst = E;
+  }
 
   /// Return whatever the given instruction maps to during CFG rewriting.
   SExpr* lookupInstr(Instruction *Orig) {
@@ -76,18 +77,17 @@ public:
 
   /// Enter a function scope (or apply a function), by mapping Orig -> E.
   void enterScope(VarDecl *Orig, SExpr *E) {
+    // Assign indices to variables if they haven't been assigned yet.
     if (Orig->varIndex() == 0)
       Orig->setVarIndex(VarMap.size());
     else
-      assert(Orig->varIndex() == VarMap.size() && "Invalid numbering.");
-    VarMap.push_back(E);
+      assert(Orig->varIndex() == VarMap.size() && "De Bruijn index mismatch.");
+    VarMap.push_back(SubstitutionEntry(Orig, E));
   }
 
   /// Exit a function scope.
   void exitScope(VarDecl *Orig) {
-    if (Orig->varIndex() == 0)
-      return;
-    assert(Orig->varIndex() == VarMap.size()-1 && "Traversal Error.");
+    assert(Orig->varIndex() == VarMap.size()-1 && "Unmatched scopes.");
     VarMap.pop_back();
   }
 
@@ -109,35 +109,21 @@ public:
   /// Create a copy of this scope.  (Used for lazy rewriting)
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
+  ScopeFrame() {
+    // Variable ID 0 means uninitialized.
+    VarMap.push_back(SubstitutionEntry(nullptr, nullptr));
+  }
 
 private:
   ScopeFrame(const ScopeFrame &F)
-      : OrigCFG(F.OrigCFG), VarMap(F.VarMap), InstructionMap(F.InstructionMap),
+      : VarMap(F.VarMap), InstructionMap(F.InstructionMap),
         BlockMap(F.BlockMap) { }
 
-  SCFG*                     OrigCFG;         //< ptr to CFG being rewritten.
-  std::vector<SExpr*>       VarMap;          //< map vars to values
-  std::vector<SExpr*>       InstructionMap;  //< map instrs to values
-  std::vector<BasicBlock*>  BlockMap;        //< map blocks to new blocks
+  std::vector<SubstitutionEntry> VarMap;          //< map vars to values
+  std::vector<SExpr*>            InstructionMap;  //< map instrs to values
+  std::vector<BasicBlock*>       BlockMap;        //< map blocks to new blocks
 };
 
-
-
-class ScopeHandler {
-public:
-  ScopeHandler() : Scope(new ScopeFrame()) { }
-
-  /// Enter the lexical scope of Orig, which is rewritten to Nvd.
-  void enterScope(VarDecl* Orig, VarDecl* Nvd);
-
-  /// Exit the lexical scope of Orig.
-  void exitScope(VarDecl* Orig);
-
-  ScopeFrame& scope() { return *Scope; }
-
-public:
-  std::unique_ptr<ScopeFrame> Scope;
-};
 
 
 }  // end namespace til
