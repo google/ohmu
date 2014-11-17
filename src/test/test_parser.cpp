@@ -55,10 +55,11 @@ int main(int argc, const char** argv) {
   // Convert high-level AST to low-level IR.
   global.lower();
   std::cout << "\n------ Ohmu IR ------\n";
-  //global.print(std::cout);
+  global.print(std::cout);
+  //return 0;
 
   // Find all of the CFGs.
-  VisitCFG visitCFG;
+  //VisitCFG visitCFG;
   //visitCFG.traverseAll(global.global());
 
   //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";

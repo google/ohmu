@@ -95,6 +95,24 @@ struct Event {
   };
 };
 
+namespace ohmu {
+namespace til {
+class BasicBlock;
+}
+}
+
+struct Block {
+  static const size_t NO_DOMINATOR = (size_t)-1;
+  ohmu::til::BasicBlock* basicBlock;
+  Block* list;
+  size_t numArguments;
+  size_t dominator;
+  size_t head;
+  size_t firstEvent;
+  size_t lastEvent;
+  size_t phiSlot;
+};
+
 static const size_t MAX_EVENTS = 1 << 24;
 
 #if 0

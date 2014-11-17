@@ -5,20 +5,15 @@
 #include "til/VisitCFG.h"
 #include "util.h"
 
-
-typedef unsigned int uint;
-
 size_t Event::initNop(Event* events, size_t i, uint payload) {
-  if (events) {
-    events[i + 0] = Event(NOP, payload);
-  }
+  if (!events) return i + 1;
+  events[i + 0] = Event(NOP, payload);
   return i + 1;
 }
 
 size_t Event::initGotoHeader(Event* events, size_t i, uint target) {
-  if (events) {
-    events[i + 0] = Event(GOTO_HEADER, target);
-  }
+  if (!events) return i + 1;
+  events[i + 0] = Event(GOTO_HEADER, target);
   return i + 1;
 }
 
@@ -47,7 +42,8 @@ size_t Event::initJump(Event* events, size_t i, uint target) {
   return i + 1;
 }
 
-size_t Event::initBranch(Event* events, size_t i, uint arg0, uint thenTarget, uint elseTarget) {
+size_t Event::initBranch(Event* events, size_t i, uint arg0, 
+                         uint thenTarget, uint elseTarget) {
   if (!events) return i + 3;
   events[i + 0] = Event(BRANCH, thenTarget);
   events[i + 1] = Event(NOP, elseTarget);
@@ -106,7 +102,7 @@ size_t Event::initMul(Event* events, size_t i, uint arg0, uint arg1) {
 
 size_t Event::initEq(Event* events, size_t i, uint arg0, uint arg1) {
   if (!events) return i + 4;
-  events[i + 0] = Event(SUB, 0);
+  events[i + 0] = Event(EQ, 0);
   events[i + 1] = Event(USE, arg0);
   events[i + 2] = Event(USE, arg1);
   events[i + 3] = Event(VALUE | FLAGS, i + 3);
@@ -115,7 +111,7 @@ size_t Event::initEq(Event* events, size_t i, uint arg0, uint arg1) {
 
 size_t Event::initLt(Event* events, size_t i, uint arg0, uint arg1) {
   if (!events) return i + 4;
-  events[i + 0] = Event(SUB, 0);
+  events[i + 0] = Event(LT, 0);
   events[i + 1] = Event(USE, arg0);
   events[i + 2] = Event(USE, arg1);
   events[i + 3] = Event(VALUE | FLAGS, i + 3);
@@ -124,7 +120,7 @@ size_t Event::initLt(Event* events, size_t i, uint arg0, uint arg1) {
 
 size_t Event::initLe(Event* events, size_t i, uint arg0, uint arg1) {
   if (!events) return i + 4;
-  events[i + 0] = Event(SUB, 0);
+  events[i + 0] = Event(LE, 0);
   events[i + 1] = Event(USE, arg0);
   events[i + 2] = Event(USE, arg1);
   events[i + 3] = Event(VALUE | FLAGS, i + 3);
@@ -132,45 +128,51 @@ size_t Event::initLe(Event* events, size_t i, uint arg0, uint arg1) {
 }
 
 // Binary operand emission.
-size_t emitBinaryOpIntAdd(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initAdd(events, i, arg0, arg1);
+size_t emitBinaryOpIntAdd(Event* events, size_t i,
+                          ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initAdd(events, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntSub(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initSub(events, i, arg0, arg1);
+size_t emitBinaryOpIntSub(Event* events, size_t i,
+                          ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initSub(events, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntMul(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initMul(events, i, arg0, arg1);
+size_t emitBinaryOpIntMul(Event* events, size_t i,
+                          ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initMul(events, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntEq(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initEq(events, i, arg0, arg1);
+size_t emitBinaryOpIntEq(Event* events, size_t i,
+                         ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initEq(events, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntLt(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initLt(events, i, arg0, arg1);
+size_t emitBinaryOpIntLt(Event* events, size_t i,
+                         ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initLt(events, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntLeq(Event* events, size_t i, uint arg0, uint arg1) {
-  return Event::initLe(events, i, arg0, arg1);
+size_t emitBinaryOpIntLeq(Event* events, size_t i,
+                          ohmu::til::BinaryOp& binaryOp) {
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return Event::initLe(events, i, arg0->stackID(), arg1->stackID());
 }
-
-struct Block {
-  static const size_t NO_DOMINATOR = (size_t)-1;
-  ohmu::til::BasicBlock* basicBlock;
-  Block* list;
-  size_t numArguments;
-  size_t dominator;
-  size_t head;
-  size_t firstEvent;
-  size_t lastEvent;
-  size_t phiSlot;
-};
 
 size_t (*emitLiteralTable[32])(Event*, size_t, ohmu::til::Literal&);
-size_t (*emitUnaryOpIntTable[32])(Event*, size_t, uint);
-size_t (*emitBinaryOpIntTable[32])(Event*, size_t, uint, uint);
+size_t (*emitUnaryOpIntTable[32])(Event*, size_t, ohmu::til::UnaryOp&);
+size_t (*emitBinaryOpIntTable[32])(Event*, size_t, ohmu::til::BinaryOp&);
 size_t (*emitInstructionTable[32])(Event*, size_t, ohmu::til::Instruction&);
 size_t (*emitTerminatorTable[32])(Event*, size_t, Block&);
 
@@ -183,8 +185,8 @@ size_t emitBlockHeader(Event* events, size_t i, Block& block) {
   return Event::initGotoHeader(events, i, blocks[block.dominator].lastEvent);
 }
 
-size_t emitPhi(Event* events, size_t i, ohmu::til::Phi&) {
-  return Event::initPhi(events, i);
+size_t emitPhi(Event* events, size_t i, ohmu::til::Phi& phi) {
+  return Event::initPhi(events, phi.setStackID(i));
 }
 
 // Expression emission
@@ -192,45 +194,33 @@ size_t emitIntLiteral(Event* events, size_t i, ohmu::til::Literal& literal) {
   return Event::initIntLiteral(events, i, (uint)literal.as<int>().value());
 }
 
+size_t emitInstruction(Event* events, size_t i, ohmu::til::Instruction& instr) {
+  return (emitInstructionTable[instr.opcode()])(events, i, instr);
+}
+
 // TODO: handle vectors and sizes!
 size_t emitLiteral(Event* events, size_t i, ohmu::til::Instruction& instr) {
-  auto literal = ohmu::cast<ohmu::til::Literal>(instr);
-  return emitLiteralTable[literal.valueType().Base](events, i, literal);
+  auto& literal = *ohmu::cast<ohmu::til::Literal>(&instr);
+  return emitLiteralTable[literal.valueType().Base](
+      events, literal.setStackID(i), literal);
 }
 
-size_t emitVariable(Event*, size_t i, ohmu::til::Instruction&) {
-  // TODO: emit reasonable error.
-  return i;
+size_t emitUnaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
+  auto& unaryOp = *ohmu::cast<ohmu::til::UnaryOp>(&instr);
+  auto arg = ohmu::cast<ohmu::til::Instruction>(unaryOp.expr());
+  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
+  return emitUnaryOpIntTable[unaryOp.unaryOpcode()](
+      events, unaryOp.setStackID(i), unaryOp);
 }
 
-size_t emitGoto(Event* events, size_t i, Block& block) {
-  auto& targetBasicBlock = *ohmu::cast<ohmu::til::Goto>(
-                                block.basicBlock->terminator())->targetBlock();
-  auto& targetBlock = block.list[targetBasicBlock.blockID()];
-  auto phiSlot = block.phiSlot;
-  auto phiOffset = targetBlock.firstEvent + 1;
-  for (auto arg : targetBasicBlock.arguments())
-    i = Event::initPhiCopy(events, i, events
-                               ? ohmu::cast<ohmu::til::Instruction>(
-                                     arg->values()[phiSlot].get())->stackID()
-                               : 0,
-                           phiOffset++);
-  return Event::initJump(events, i, targetBlock.firstEvent);
-}
-
-size_t emitBranch(Event* events, size_t i, Block& block) {
-  auto& branch = *ohmu::cast<ohmu::til::Branch>(block.basicBlock->terminator());
-  auto arg = ohmu::cast<ohmu::til::Instruction>(branch.condition())->stackID();
-  auto& thenBlock = block.list[branch.thenBlock()->blockID()];
-  auto& elseBlock = block.list[branch.elseBlock()->blockID()];
-  return Event::initBranch(events, i, arg, thenBlock.firstEvent,
-                           elseBlock.firstEvent);
-}
-
-size_t emitReturn(Event* events, size_t i, Block& block) {
-  auto& ret = *ohmu::cast<ohmu::til::Return>(block.basicBlock->terminator());
-  auto arg = ohmu::cast<ohmu::til::Instruction>(ret.returnValue())->stackID();
-  return Event::initRet(events, i, arg);
+size_t emitBinaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
+  auto& binaryOp = *ohmu::cast<ohmu::til::BinaryOp>(&instr);
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  if (arg0->isTrivial()) i = emitInstruction(events, i, *arg0);
+  if (arg1->isTrivial()) i = emitInstruction(events, i, *arg1);
+  return emitBinaryOpIntTable[binaryOp.binaryOpcode()](
+      events, binaryOp.setStackID(i), binaryOp);
 }
 
 size_t emitTerminator(Event* events, size_t i, Block& block) {
@@ -238,23 +228,36 @@ size_t emitTerminator(Event* events, size_t i, Block& block) {
     events, i, block);
 }
 
-size_t emitUnaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
-  auto unaryOp = ohmu::cast<ohmu::til::UnaryOp>(instr);
-  auto arg = ohmu::cast<ohmu::til::Instruction>(unaryOp.expr())->stackID();
-  auto& type = unaryOp.valueType();
-  return emitUnaryOpIntTable[unaryOp.unaryOpcode()](events, i, arg);
+size_t emitGoto(Event* events, size_t i, Block& block) {
+  auto& targetBasicBlock = *ohmu::cast<ohmu::til::Goto>(
+    block.basicBlock->terminator())->targetBlock();
+  auto& targetBlock = block.list[targetBasicBlock.blockID()];
+  auto phiSlot = block.phiSlot;
+  auto phiOffset = targetBlock.firstEvent + 1;
+  for (auto arg : targetBasicBlock.arguments())
+    i = Event::initPhiCopy(events, i, events
+    ? ohmu::cast<ohmu::til::Instruction>(
+    arg->values()[phiSlot].get())->stackID()
+    : 0,
+    phiOffset++);
+  return Event::initJump(events, i, targetBlock.firstEvent);
 }
 
-size_t emitBinaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
-  auto binaryOp = ohmu::cast<ohmu::til::BinaryOp>(instr);
-  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0())->stackID();
-  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1())->stackID();
-  auto& valueType = binaryOp.valueType();
-  return emitBinaryOpIntTable[binaryOp.binaryOpcode()](events, i, arg0, arg1);
+size_t emitBranch(Event* events, size_t i, Block& block) {
+  auto& branch = *ohmu::cast<ohmu::til::Branch>(block.basicBlock->terminator());
+  auto arg = ohmu::cast<ohmu::til::Instruction>(branch.condition());
+  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
+  auto& thenBlock = block.list[branch.thenBlock()->blockID()];
+  auto& elseBlock = block.list[branch.elseBlock()->blockID()];
+  return Event::initBranch(events, i, arg->stackID(), thenBlock.firstEvent,
+                           elseBlock.firstEvent);
 }
 
-size_t emitInstruction(Event* events, size_t i, ohmu::til::Instruction& instr) {
-  return (emitInstructionTable[instr.opcode()])(events, i, instr);
+size_t emitReturn(Event* events, size_t i, Block& block) {
+  auto& ret = *ohmu::cast<ohmu::til::Return>(block.basicBlock->terminator());
+  auto arg = ohmu::cast<ohmu::til::Instruction>(ret.returnValue());
+  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
+  return Event::initRet(events, i, arg->stackID());
 }
 
 void initTables() {
@@ -267,9 +270,10 @@ void initTables() {
   emitBinaryOpIntTable[ohmu::til::BOP_Leq] = emitBinaryOpIntLeq;
 
   emitInstructionTable[ohmu::til::COP_Literal] = emitLiteral;
-  emitInstructionTable[ohmu::til::COP_Variable] = emitVariable;
   emitInstructionTable[ohmu::til::COP_UnaryOp] = emitUnaryOp;
   emitInstructionTable[ohmu::til::COP_BinaryOp] = emitBinaryOp;
+
+  emitLiteralTable[ohmu::til::ValueType::BT_Int] = emitIntLiteral;
 
   emitTerminatorTable[ohmu::til::COP_Goto] = emitGoto;
   emitTerminatorTable[ohmu::til::COP_Branch] = emitBranch;
@@ -315,7 +319,7 @@ size_t emitBlock(Event* events, size_t i, Block& block) {
   for (auto arg : basicBlock.arguments())
     i = emitPhi(events, arg->setStackID(i), *arg);
   for (auto instr : basicBlock.instructions())
-    i = emitInstruction(events, instr->setStackID(i), *instr);
+    i = emitInstruction(events, i, *instr);
   return emitTerminator(events, i, block);
 }
 
