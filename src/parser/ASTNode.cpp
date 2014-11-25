@@ -83,6 +83,6 @@ void PrettyPrinter::printAppend(const Append* e, std::ostream& ss) {
 
 
 
-}  // namespace ohmu
-}  // namespace parsing
 }  // namespace ast
+}  // namespace parsing
+}  // namespace ohmu
