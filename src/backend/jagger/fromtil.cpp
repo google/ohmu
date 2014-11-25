@@ -1,5 +1,6 @@
 #include <cassert>
 #include "types.h"
+#include "x64event.h"
 #include "til/til.h"
 #include "til/Global.h"
 #include "til/VisitCFG.h"
@@ -31,7 +32,7 @@ size_t Event::initPhi(Event* events, size_t i) {
 
 size_t Event::initPhiCopy(Event* events, size_t i, uint arg0, uint phi) {
   if (!events) return i + 2;
-  events[i + 0] = Event(PHI_COPY | GPR, phi);
+  events[i + 0] = Event(JOIN_COPY | GPR, phi);
   events[i + 1] = Event(USE, arg0);
   return i + 2;
 }
@@ -325,7 +326,7 @@ size_t emitBlock(Event* events, size_t i, Block& block) {
 
 extern void printDebug(Event* events, size_t numEvents);
 
-void emitEvents(Event* events, ohmu::til::Global& global) {
+void emitEvents(ohmu::til::Global& global) {
   initTables();
 
   // Visit all of the CFGs
