@@ -1,3 +1,4 @@
+#if 0
 #include "types.h"
 
 struct LiveRange {
@@ -155,3 +156,5 @@ void RegisterAllocator::markConflicts() {
     }
   }
 }
+
+#endif

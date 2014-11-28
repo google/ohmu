@@ -1,11 +1,34 @@
 #include <cassert>
 #include "types.h"
-#include "x64event.h"
 #include "til/til.h"
 #include "til/Global.h"
 #include "til/VisitCFG.h"
 #include "util.h"
 
+namespace Jagger {
+
+uchar typeDesc(const ohmu::til::ValueType& type) {
+  static const uchar jaggerType[ohmu::til::ValueType::BT_ValueRef + 1] = {
+      BINARY_DATA,    BINARY_DATA,    UNSIGNED_INTEGER, FLOAT,
+      SIGNED_INTEGER, SIGNED_INTEGER, SIGNED_INTEGER};
+  static const uchar logBits[ohmu::til::ValueType::ST_128 + 1] = {
+      LOG1 << 2,  LOG1 << 2,  LOG8 << 2,  LOG16 << 2,
+      LOG32 << 2, LOG64 << 2, LOG128 << 2};
+  uchar x = jaggerType[type.Base];
+  if (type.Signed && type.Base == ohmu::til::ValueType::BT_Int)
+    x = SIGNED_INTEGER;
+  x |= logBits[type.Size];
+  if (type.VectSize) {
+    assert(!(type.VectSize & type.VectSize - 1));
+    unsigned long size = type.VectSize;
+    unsigned long log;
+    _BitScanReverse(&log, size);
+    x |= log << 5;
+  }
+  return x;
+}
+
+#if 0
 size_t Event::initNop(Event* events, size_t i, uint payload) {
   if (!events) return i + 1;
   events[i + 0] = Event(NOP, payload);
@@ -127,148 +150,211 @@ size_t Event::initLe(Event* events, size_t i, uint arg0, uint arg1) {
   events[i + 3] = Event(VALUE | FLAGS, i + 3);
   return i + 4;
 }
+#endif
 
+#if 0
 // Binary operand emission.
-size_t emitBinaryOpIntAdd(Event* events, size_t i,
+size_t emitBinaryOpIntAdd(EventBuilder builder, size_t i,
+                          ohmu::til::BinaryOp& binaryOp) {
+  binaryOp.valueType();
+  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
+  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
+  return builder.binop(i, ADD, arg0->stackID(), arg1->stackID(), 0);
+}
+
+size_t emitBinaryOpIntSub(EventBuilder builder, size_t i,
                           ohmu::til::BinaryOp& binaryOp) {
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initAdd(events, i, arg0->stackID(), arg1->stackID());
+  return EventBuilder::initSub(builder, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntSub(Event* events, size_t i,
+size_t emitBinaryOpIntMul(EventBuilder builder, size_t i,
                           ohmu::til::BinaryOp& binaryOp) {
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initSub(events, i, arg0->stackID(), arg1->stackID());
+  return EventBuilder::initMul(builder, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntMul(Event* events, size_t i,
-                          ohmu::til::BinaryOp& binaryOp) {
-  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
-  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initMul(events, i, arg0->stackID(), arg1->stackID());
-}
-
-size_t emitBinaryOpIntEq(Event* events, size_t i,
+size_t emitBinaryOpIntEq(EventBuilder builder, size_t i,
                          ohmu::til::BinaryOp& binaryOp) {
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initEq(events, i, arg0->stackID(), arg1->stackID());
+  return EventBuilder::initEq(builder, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntLt(Event* events, size_t i,
+size_t emitBinaryOpIntLt(EventBuilder builder, size_t i,
                          ohmu::til::BinaryOp& binaryOp) {
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initLt(events, i, arg0->stackID(), arg1->stackID());
+  return EventBuilder::initLt(builder, i, arg0->stackID(), arg1->stackID());
 }
 
-size_t emitBinaryOpIntLeq(Event* events, size_t i,
+size_t emitBinaryOpIntLeq(EventBuilder builder, size_t i,
                           ohmu::til::BinaryOp& binaryOp) {
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  return Event::initLe(events, i, arg0->stackID(), arg1->stackID());
+  return EventBuilder::initLe(events, i, arg0->stackID(), arg1->stackID());
 }
+#endif
 
-size_t (*emitLiteralTable[32])(Event*, size_t, ohmu::til::Literal&);
-size_t (*emitUnaryOpIntTable[32])(Event*, size_t, ohmu::til::UnaryOp&);
-size_t (*emitBinaryOpIntTable[32])(Event*, size_t, ohmu::til::BinaryOp&);
-size_t (*emitInstructionTable[32])(Event*, size_t, ohmu::til::Instruction&);
-size_t (*emitTerminatorTable[32])(Event*, size_t, Block&);
+size_t (*emitLiteralTable[32])(EventBuilder, size_t, ohmu::til::Literal&);
+size_t (*emitUnaryOpIntTable[32])(EventBuilder, size_t, ohmu::til::UnaryOp&);
+size_t (*emitBinaryOpIntTable[32])(EventBuilder, size_t, ohmu::til::BinaryOp&);
+size_t (*emitInstructionTable[32])(EventBuilder, size_t, ohmu::til::Instruction&);
+size_t (*emitTerminatorTable[32])(EventBuilder, size_t, Block&);
 
-size_t emitBlockHeader(Event* events, size_t i, Block& block) {
+size_t emitBlockHeader(EventBuilder builder, size_t i, Block& block) {
   auto blocks = block.list;
   if (block.dominator == Block::NO_DOMINATOR)
-    return Event::initNop(events, i, 0);
+    return builder.op(i, NOP, 0);
   if (blocks + block.head != &block)
-    return Event::initWalkHeader(events, i, blocks[block.head].firstEvent);
-  return Event::initGotoHeader(events, i, blocks[block.dominator].lastEvent);
+    return builder.op(i, WALK_HEADER, blocks[block.head].firstEvent);
+  return builder.op(i, GOTO_HEADER, blocks[block.dominator].boundEvent);
 }
 
-size_t emitPhi(Event* events, size_t i, ohmu::til::Phi& phi) {
-  return Event::initPhi(events, phi.setStackID(i));
+size_t emitPhi(EventBuilder builder, size_t i, ohmu::til::Phi& phi) {
+  return builder.op(i, PHI, typeDesc(phi.valueType()));
 }
 
 // Expression emission
-size_t emitIntLiteral(Event* events, size_t i, ohmu::til::Literal& literal) {
-  return Event::initIntLiteral(events, i, (uint)literal.as<int>().value());
+size_t emitIntLiteral(EventBuilder builder, size_t i,
+                      ohmu::til::Literal& literal) {
+  return builder.op(i, BYTES4, (uint)literal.as<int>().value());
 }
 
-size_t emitInstruction(Event* events, size_t i, ohmu::til::Instruction& instr) {
-  return (emitInstructionTable[instr.opcode()])(events, i, instr);
+size_t emitInstruction(EventBuilder builder, size_t i,
+                       ohmu::til::Instruction& instr) {
+  return (emitInstructionTable[instr.opcode()])(builder, i, instr);
 }
 
 // TODO: handle vectors and sizes!
-size_t emitLiteral(Event* events, size_t i, ohmu::til::Instruction& instr) {
+size_t emitLiteral(EventBuilder builder, size_t i,
+                   ohmu::til::Instruction& instr) {
   auto& literal = *ohmu::cast<ohmu::til::Literal>(&instr);
   return emitLiteralTable[literal.valueType().Base](
-      events, literal.setStackID(i), literal);
+      builder, literal.setStackID(i), literal);
 }
 
-size_t emitUnaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
+size_t emitUnaryOp(EventBuilder builder, size_t i,
+                   ohmu::til::Instruction& instr) {
   auto& unaryOp = *ohmu::cast<ohmu::til::UnaryOp>(&instr);
   auto arg = ohmu::cast<ohmu::til::Instruction>(unaryOp.expr());
-  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
+  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
   return emitUnaryOpIntTable[unaryOp.unaryOpcode()](
-      events, unaryOp.setStackID(i), unaryOp);
+      builder, unaryOp.setStackID(i), unaryOp);
 }
 
-size_t emitBinaryOp(Event* events, size_t i, ohmu::til::Instruction& instr) {
+size_t emitBinaryOp(EventBuilder builder, size_t i,
+                    ohmu::til::Instruction& instr) {
   auto& binaryOp = *ohmu::cast<ohmu::til::BinaryOp>(&instr);
   auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  if (arg0->isTrivial()) i = emitInstruction(events, i, *arg0);
-  if (arg1->isTrivial()) i = emitInstruction(events, i, *arg1);
-  return emitBinaryOpIntTable[binaryOp.binaryOpcode()](
-      events, binaryOp.setStackID(i), binaryOp);
+  if (arg0->isTrivial()) i = emitInstruction(builder, i, *arg0);
+  if (arg1->isTrivial()) i = emitInstruction(builder, i, *arg1);
+  static const Opcode opcodeTable[] = {
+    /* BOP_Add      =*/ ADD,
+    /* BOP_Sub      =*/ SUB,
+    /* BOP_Mul      =*/ MUL,
+    /* BOP_Div      =*/ DIV,
+    /* BOP_Rem      =*/ IMOD,
+    /* BOP_Shl      =*/ NOP,
+    /* BOP_Shr      =*/ NOP,
+    /* BOP_BitAnd   =*/ LOGIC,
+    /* BOP_BitXor   =*/ LOGIC,
+    /* BOP_BitOr    =*/ LOGIC,
+    /* BOP_Eq       =*/ COMPARE,
+    /* BOP_Neq      =*/ COMPARE,
+    /* BOP_Lt       =*/ COMPARE,
+    /* BOP_Leq      =*/ COMPARE,
+    /* BOP_Gt       =*/ COMPARE,
+    /* BOP_Geq      =*/ COMPARE,
+    /* BOP_LogicAnd =*/ LOGIC,
+    /* BOP_LogicOr  =*/ LOGIC,
+  };
+  static const uchar controlTable[] = {
+    /* BOP_Add      =*/ 0,
+    /* BOP_Sub      =*/ 0,
+    /* BOP_Mul      =*/ 0,
+    /* BOP_Div      =*/ 0,
+    /* BOP_Rem      =*/ 0,
+    /* BOP_Shl      =*/ 0,
+    /* BOP_Shr      =*/ 0,
+    /* BOP_BitAnd   =*/ LOGICAL_AND,
+    /* BOP_BitXor   =*/ LOGICAL_XOR,
+    /* BOP_BitOr    =*/ LOGICAL_OR,
+    /* BOP_Eq       =*/ CMP_EQ,
+    /* BOP_Neq      =*/ CMP_NEQ,
+    /* BOP_Lt       =*/ CMP_LT,
+    /* BOP_Leq      =*/ CMP_LE,
+    /* BOP_Gt       =*/ CMP_GT,
+    /* BOP_Geq      =*/ CMP_GE,
+    /* BOP_LogicAnd =*/ LOGICAL_AND,
+    /* BOP_LogicOr  =*/ LOGICAL_OR,
+  };
+  Opcode code = opcodeTable[binaryOp.binaryOpcode()];
+  i = builder.op(i, USE, arg0->stackID());
+  i = builder.op(i, USE, arg1->stackID());
+  if (code == COMPARE)
+    return builder.op(i, code,
+               CompareData(typeDesc(arg0->valueType()),
+                           (Compare)controlTable[binaryOp.binaryOpcode()]));
+  if (code == LOGIC)
+    return builder.op(i, code,
+                      LogicData(typeDesc(binaryOp.valueType()),
+                                (Logic)controlTable[binaryOp.binaryOpcode()]));
+  return builder.op(i, code, BasicData(typeDesc(binaryOp.valueType())));
 }
 
-size_t emitTerminator(Event* events, size_t i, Block& block) {
+size_t emitTerminator(EventBuilder builder, size_t i, Block& block) {
   return emitTerminatorTable[block.basicBlock->terminator()->opcode()](
-    events, i, block);
+      builder, i, block);
 }
 
-size_t emitGoto(Event* events, size_t i, Block& block) {
+size_t emitGoto(EventBuilder builder, size_t i, Block& block) {
   auto& targetBasicBlock = *ohmu::cast<ohmu::til::Goto>(
-    block.basicBlock->terminator())->targetBlock();
+                                block.basicBlock->terminator())->targetBlock();
   auto& targetBlock = block.list[targetBasicBlock.blockID()];
   auto phiSlot = block.phiSlot;
   auto phiOffset = targetBlock.firstEvent + 1;
-  for (auto arg : targetBasicBlock.arguments())
-    i = Event::initPhiCopy(events, i, events
-    ? ohmu::cast<ohmu::til::Instruction>(
-    arg->values()[phiSlot].get())->stackID()
-    : 0,
-    phiOffset++);
-  return Event::initJump(events, i, targetBlock.firstEvent);
+  for (auto arg : targetBasicBlock.arguments()) {
+    auto target = builder.root
+                      ? ohmu::cast<ohmu::til::Instruction>(
+                            arg->values()[phiSlot].get())->stackID()
+                      : 0;
+    i = builder.op(i, USE, target);
+    i = builder.op(i, JOIN_COPY, phiOffset++);
+  }
+  return builder.op(i, JUMP, targetBlock.firstEvent);
 }
 
-size_t emitBranch(Event* events, size_t i, Block& block) {
+size_t emitBranch(EventBuilder builder, size_t i, Block& block) {
   auto& branch = *ohmu::cast<ohmu::til::Branch>(block.basicBlock->terminator());
   auto arg = ohmu::cast<ohmu::til::Instruction>(branch.condition());
-  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
+  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
   auto& thenBlock = block.list[branch.thenBlock()->blockID()];
   auto& elseBlock = block.list[branch.elseBlock()->blockID()];
-  return Event::initBranch(events, i, arg->stackID(), thenBlock.firstEvent,
-                           elseBlock.firstEvent);
+  i = builder.op(i, USE, arg->stackID());
+  i = builder.op(i, BRANCH, elseBlock.firstEvent);
+  i = builder.op(i, BRANCH_TARGET, thenBlock.firstEvent);
+  return i;
 }
 
-size_t emitReturn(Event* events, size_t i, Block& block) {
+size_t emitReturn(EventBuilder builder, size_t i, Block& block) {
   auto& ret = *ohmu::cast<ohmu::til::Return>(block.basicBlock->terminator());
   auto arg = ohmu::cast<ohmu::til::Instruction>(ret.returnValue());
-  if (arg->isTrivial()) i = emitInstruction(events, i, *arg);
-  return Event::initRet(events, i, arg->stackID());
+  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
+  return builder.op(i, RET, arg->stackID());
 }
 
 void initTables() {
   // Always instantiate to avoid race conditions.
-  emitBinaryOpIntTable[ohmu::til::BOP_Add] = emitBinaryOpIntAdd;
-  emitBinaryOpIntTable[ohmu::til::BOP_Sub] = emitBinaryOpIntSub;
-  emitBinaryOpIntTable[ohmu::til::BOP_Mul] = emitBinaryOpIntMul;
-  emitBinaryOpIntTable[ohmu::til::BOP_Eq] = emitBinaryOpIntEq;
-  emitBinaryOpIntTable[ohmu::til::BOP_Lt] = emitBinaryOpIntLt;
-  emitBinaryOpIntTable[ohmu::til::BOP_Leq] = emitBinaryOpIntLeq;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Add] = emitBinaryOpIntAdd;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Sub] = emitBinaryOpIntSub;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Mul] = emitBinaryOpIntMul;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Eq] = emitBinaryOpIntEq;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Lt] = emitBinaryOpIntLt;
+  //emitBinaryOpIntTable[ohmu::til::BOP_Leq] = emitBinaryOpIntLeq;
 
   emitInstructionTable[ohmu::til::COP_Literal] = emitLiteral;
   emitInstructionTable[ohmu::til::COP_UnaryOp] = emitUnaryOp;
@@ -281,7 +367,7 @@ void initTables() {
   emitTerminatorTable[ohmu::til::COP_Return] = emitReturn;
 }
 
-void initBlock(Block* blocks, ohmu::til::BasicBlock& basicBlock) {
+size_t initBlock(Block* blocks, ohmu::til::BasicBlock& basicBlock) {
   auto blockID = basicBlock.blockID();
   auto& block = blocks[basicBlock.blockID()];
   block.list = blocks;
@@ -297,12 +383,13 @@ void initBlock(Block* blocks, ohmu::til::BasicBlock& basicBlock) {
 
   // Assign events offsets.
   block.firstEvent = 0;
-  size_t i = emitBlockHeader(nullptr, 0, block);
-  for (auto arg : basicBlock.arguments()) i = emitPhi(nullptr, i, *arg);
+  EventBuilder builder(nullptr);
+  size_t i = emitBlockHeader(builder, 0, block);
+  for (auto arg : basicBlock.arguments()) i = emitPhi(builder, i, *arg);
   for (auto instr : basicBlock.instructions())
-    i = emitInstruction(nullptr, i, *instr);
-  i = emitTerminator(nullptr, i, block);
-  block.lastEvent = i;
+    i = emitInstruction(builder, i, *instr);
+  i = emitTerminator(builder, i, block);
+  return block.boundEvent = i;
 }
 
 void initBlockDominators(Block& block) {
@@ -314,17 +401,17 @@ void initBlockDominators(Block& block) {
   }
 }
 
-size_t emitBlock(Event* events, size_t i, Block& block) {
+size_t emitBlock(EventBuilder builder, size_t i, Block& block) {
   auto& basicBlock = *block.basicBlock;
-  i = emitBlockHeader(events, block.firstEvent, block);
+  i = emitBlockHeader(builder, block.firstEvent, block);
   for (auto arg : basicBlock.arguments())
-    i = emitPhi(events, arg->setStackID(i), *arg);
+    i = emitPhi(builder, arg->setStackID(i), *arg);
   for (auto instr : basicBlock.instructions())
-    i = emitInstruction(events, i, *instr);
-  return emitTerminator(events, i, block);
+    i = emitInstruction(builder, i, *instr);
+  return emitTerminator(builder, i, block);
 }
 
-extern void printDebug(Event* events, size_t numEvents);
+extern void printDebug(EventBuilder builder, size_t numEvents);
 
 void emitEvents(ohmu::til::Global& global) {
   initTables();
@@ -347,9 +434,10 @@ void emitEvents(ohmu::til::Global& global) {
   auto blocks = new Block[numBlocks];
 
   // Initialize the blocks (both loops are parallel safe)
+  size_t numEvents = 0;
   for (size_t i = 0; i < numCFGs; i++)
     for (auto& basicBlock : cfgs[i]->blocks())
-      initBlock(blocks + cfgOffsets[i], *basicBlock.get());
+      numEvents += initBlock(blocks + cfgOffsets[i], *basicBlock.get());
 
   // Initialize the block dominators (outer loop is parallel safe)
   for (size_t i = 0; i < numCFGs; i++)
@@ -357,24 +445,25 @@ void emitEvents(ohmu::til::Global& global) {
       initBlockDominators(blocks[cfgOffsets[i] + basicBlock->blockID()]);
 
   // Perform block prefix sum of block events.
-  size_t i = 0;
+  size_t offset = (numEvents + 2) / 3;
+  size_t i = offset;
   for (auto& block : AdaptRange(blocks, numBlocks)) {
     block.firstEvent = i;
-    block.lastEvent = i = block.lastEvent + i;
+    i = block.boundEvent += i;
     printf("block %d : %d-%d\n", block.basicBlock->blockID(), block.firstEvent,
-           block.lastEvent);
+           block.boundEvent);
   }
-  if (i > MAX_EVENTS) {
-    printf("Too many instructions for the backend to handle.\n");
-    return;
-  }
+
+  auto eventBuffer = (char*)new int[(offset * 3 + 3) / 4 + numEvents];
+  EventBuilder builder(eventBuffer - offset / 4 * 4);
 
   // Emit the events.
-  i = 0;
+  i = offset;
   for (auto& block : AdaptRange(blocks, numBlocks))
-    i = emitBlock(events, i, block);
+    i = emitBlock(builder, i, block);
 
-  printDebug(events, i);
+  printDebug(builder, numEvents);
+  //delete[] eventBuffer;
 
   printf("numCFGs = %d\n", numCFGs);
   printf("numBlocks = %d\n", numBlocks);
@@ -384,3 +473,5 @@ void emitEvents(ohmu::til::Global& global) {
   delete[] cfgOffsets;
   delete[] blocks;
 }
+
+} // namespace Jagger

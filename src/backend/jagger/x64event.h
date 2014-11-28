@@ -69,7 +69,7 @@ size_t X64EventBuilder::destructiveResult(size_t i, X64RegisterFile file) {
 }
 
 size_t X64EventBuilder::add(size_t i, uint arg0, uint arg1, LogBits logBits) {
-  i = op(i, ADD, logBits);
+  i = op(i, X64Opcode::ADD, logBits);
   i = use(i, arg1);
   i = use(i, arg0);
   i = destructiveResult(i, GPR);
@@ -78,7 +78,7 @@ size_t X64EventBuilder::add(size_t i, uint arg0, uint arg1, LogBits logBits) {
 }
 
 size_t X64EventBuilder::sub(size_t i, uint arg0, uint arg1, LogBits logBits) {
-  i = op(i, SUB, logBits);
+  i = op(i, X64Opcode::SUB, logBits);
   i = use(i, arg0);
   i = destructiveResult(i, GPR);
   i = use(i, arg1);
@@ -87,7 +87,7 @@ size_t X64EventBuilder::sub(size_t i, uint arg0, uint arg1, LogBits logBits) {
 }
 
 size_t X64EventBuilder::mul(size_t i, uint arg0, uint arg1, Type type, LogBits logBits) {
-  i = op(i, MUL, (type << 3) + logBits);
+  i = op(i, X64Opcode::MUL, (type << 3) + logBits);
   i = use(i, arg0);
   i = use(i, arg1);
   i = op(i, CLOBBER_LIST, RDX);

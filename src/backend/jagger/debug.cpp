@@ -21,6 +21,8 @@
 #include "types.h"
 #include <stdio.h>
 
+namespace Jagger {
+
 bool validateTIL(ohmu::til::BasicBlock* block) {
   if (!block) {
     printf("block is null.\n");
@@ -89,46 +91,47 @@ bool validateTIL(ohmu::til::Global* global) {
   return true;
 }
 
-namespace {
 const char* opcodeNames[] = {
-    "NOP",    "USE",     "MUTED_USE", "HEADER",    "HEADER_DOMINATES",
-    "INT32",  "LOAD",    "STORE",     "ULOAD",     "USTORE",
-    "GATHER", "SCATTER", "SEXT",      "ZEXT",      "FCVT",
-    "AND",    "OR",      "ANDN",      "ORN",       "XOR",
-    "XNOR",   "NAND",    "NOR",       "NOT",       "SLL",
-    "SLR",    "SAR",     "ROL",       "ROR",       "MIN",
-    "MAX",    "ADD",     "SUB",       "SUBR",      "ADDN",
-    "ADC",    "SBB",     "NEG",       "ABS",       "MUL",
-    "MULHI",  "DIV",     "MOD",       "RCP",       "AOS",
-    "AOSOA",  "MADD",    "MSUB",      "MSUBR",     "MADDN",
-    "FMADD",  "FMSUB",   "FMSUBR",    "FMADDN",    "EQ",
-    "NEQ",    "LT",      "LE",        "ORD",       "EQU",
-    "NEQU",   "LTU",     "LEU",       "UNORD",     "JUMP",
-    "BRANCH", "CALL",    "RET",       "BT",        "BTS",
-    "BTR",    "BTC",     "CTZ",       "CLZ",       "POPCNT",
-    "SQRT",   "RSQRT",   "SHUFFLE",   "BROADCAST", "EXTRACT",
-    "INSERT", "MEMSET",  "MEMCPY",
+    "NOP",                 "ISA_OP",              "JOIN_COPY",
+    "CLOBBER_LIST",        "REGISTER_HINT",       "USE",
+    "INFERIOR_USE",        "VALUE_KEY",           "PHI_0",
+    "PHI_1",               "PHI_2",               "PHI_3",
+    "PHI_4",               "PHI_5",               "PHI_6",
+    "PHI_7",               "DESTRUCTIVE_VALUE_0", "DESTRUCTIVE_VALUE_1",
+    "DESTRUCTIVE_VALUE_2", "DESTRUCTIVE_VALUE_3", "DESTRUCTIVE_VALUE_4",
+    "DESTRUCTIVE_VALUE_5", "DESTRUCTIVE_VALUE_6", "DESTRUCTIVE_VALUE_7",
+    "VALUE_0",             "VALUE_1",             "VALUE_2",
+    "VALUE_3",             "VALUE_4",             "VALUE_5",
+    "VALUE_6",             "VALUE_7",             "GOTO_HEADER",
+    "WALK_HEADER",         "BYTES1",              "BYTES2",
+    "BYTES4",              "BYTES_HEADER",        "ALIGNED_BYTES",
+    "BYTES",               "CALL",                "RET",
+    "JUMP",                "BRANCH",              "BRANCH_TARGET",
+    "COMPARE",             "NOT",                 "LOGIC",
+    "LOGIC3",              "BITFIELD_EXTRACT",    "BITFIELD_INSERT",
+    "BITFIELD_CLEAR",      "COUNT_ZEROS",         "MIN",
+    "MAX",                 "ADD",                 "SUB",
+    "NEG",                 "MUL",                 "DIV",
+    "IMULHI",              "IDIV",                "IMOD",
+    "ABS",                 "RCP",                 "SQRT",
+    "RSQRT",               "EXP2",                "CONVERT",
+    "FIXUP",               "SHUFFLE",             "IGNORE_LANES",
+    "ZERO_LANES",          "PREFETCH",            "LOAD",
+    "GATHER",              "INSERT",              "EXPAND",
+    "STORE",               "SCATTER",             "EXTRACT",
+    "COMPRESS",
 };
 
-const char* aliasSetNames[] = {"???", "GPR", "FLAGS", "MMX",
-                               "SSE", "???", "???",   "???"};
-
-void printDebug(Event event) {
-  if (!event.isValue)
-    printf("%s", opcodeNames[event.code]);
-  else if (event.isFixed)
-    printf("reg-fixed [%s:%d]", aliasSetNames[event.aliasSet], event.fixedReg);
-  else
-    printf("%s [%s]", event.isCopy ? event.isPhiKind ? "phi-copy" : "copy"
-                                   : event.isPhiKind ? "phi" : "value",
-           aliasSetNames[event.aliasSet]);
-}
-}  // namespace {
-
-void printDebug(Event* events, size_t numEvents) {
-  for (size_t i = 0; i < numEvents; ++i) {
-    printf("%3d : %5d > ", i, events[i].data);
-    printDebug(events[i]);
-    printf("\n");
+void printDebug(EventBuilder builder, size_t numEvents) {
+  size_t offset = (numEvents + 2) / 3;
+  for (size_t i = offset, e = numEvents + offset; i != e; ++i) {
+    if (builder.data(i) >= offset && builder.data(i) < e)
+      printf("%3d : %8d > %s\n", i, builder.data(i),
+             opcodeNames[builder.code(i)]);
+    else
+      printf("%3d : %08x > %s\n", i, builder.data(i),
+             opcodeNames[builder.code(i)]);
   }
 }
+
+}  // namespace Jagger {

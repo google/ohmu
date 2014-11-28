@@ -17,8 +17,14 @@
 
 #pragma once
 
+namespace ohmu {
+namespace til {
+class BasicBlock;
+}
+}
+
 namespace Jagger {
-namespace {
+//namespace {
 
 #if 0
 enum {
@@ -68,30 +74,33 @@ enum {
 
 typedef unsigned char Opcode;
 typedef unsigned int uint;
+typedef unsigned char uchar;
 
 enum Type : unsigned char {
-  SIGNED, UNSIGNED, FLOAT, BINARY
+  BINARY_DATA, UNSIGNED_INTEGER, SIGNED_INTEGER, FLOAT
 };
 
 enum LogBits : unsigned char {
-  LOG1, LOG8 = 3, LOG16, LOG32, LOG64
+  LOG1, LOG8 = 3, LOG16, LOG32, LOG64, LOG128
 };
 
 enum VectorWidth : unsigned char {
-  VEC1, VEC2, VEC4, VEC8, VEC16, VEC32, VEC64
+  VEC1, VEC2, VEC4, VEC8, VEC16, VEC32, VEC64, VEC128
 };
 
-struct OpDescriptor {
-  OpDescriptor(Type type, LogBits logBits, VectorWidth vectorWidth = VEC1)
+struct TypeDesc {
+  TypeDesc(Type type, LogBits logBits, VectorWidth vectorWidth = VEC1)
       : type(type), logBits(logBits), vectorWidth(vectorWidth) {}
-  operator uint() const { return *(uint*)this; }
-  unsigned logBits : 3;
-  unsigned vectorWidth : 3;
-  unsigned type : 2;
+  operator uchar() const { return *(uchar*)this; }
+  uchar type : 2;
+  uchar logBits : 3;
+  uchar vectorWidth : 3;
+ private:
+  TypeDesc operator=(const TypeDesc&);
 };
 
-enum Kinds {
-  NOP,
+enum Opcodes {
+  NOP,  
   ISA_OP,
   JOIN_COPY,
   CLOBBER_LIST,
@@ -105,11 +114,15 @@ enum Kinds {
   GOTO_HEADER = VALUE + 8,
   WALK_HEADER,
   BYTES1, BYTES2, BYTES4, BYTES_HEADER, ALIGNED_BYTES, BYTES,
+  CALL, RET,
   JUMP, BRANCH, BRANCH_TARGET,
+
   COMPARE,
   NOT, LOGIC, LOGIC3,
+  BITFIELD_EXTRACT, BITFIELD_INSERT, BITFIELD_CLEAR,
+  COUNT_ZEROS,
   MIN, MAX,
-  ADD, SUB, NEG,
+  ADD, SUB, NEG, ADDR,
   MUL, DIV, IMULHI, IDIV, IMOD,
   ABS, RCP, SQRT, RSQRT, EXP2,
   CONVERT,
@@ -120,15 +133,112 @@ enum Kinds {
   STORE, SCATTER, EXTRACT, COMPRESS,
 };
 
+enum Compare {
+  CMP_FALSE,
+  CMP_LT,
+  CMP_EQ,
+  CMP_LE,
+  CMP_GT,
+  CMP_NEQ,
+  CMP_GE,
+  CMP_ORD,
+  CMP_UNORD,
+  CMP_LTU,
+  CMP_EQU,
+  CMP_LEU,
+  CMP_GTU,
+  CMP_NEQU,
+  CMP_GEU,
+  CMP_TRUE,
+};
+
+enum Logic {
+  LOGICAL_FALSE,
+  LOGICAL_NOR,
+  LOGICAL_GT,
+  LOGICAL_NOTB,
+  LOGICAL_LT,
+  LOGICAL_NOTA,
+  LOGICAL_XOR,
+  LOGICAL_NAND,
+  LOGICAL_AND,
+  LOGICAL_EQ,
+  LOGICAL_A,
+  LOGICAL_GE,
+  LOGICAL_B,
+  LOGICAL_LE,
+  LOGICAL_OR,
+  LOGICAL_TRUE,
+};
+
+struct BasicData {
+  explicit BasicData(uchar type) : type(type) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+};
+
+struct ClobberListData {
+  ClobberListData(uchar reg0, uchar reg1 = 0, uchar reg2 = 0, uchar reg3 = 0)
+      : reg0(reg0), reg1(reg1), reg2(reg2), reg3(reg3) {}
+  operator uint() const { return *(uint*)this; }
+  uint reg0 : 3;
+  uint reg1 : 3;
+  uint reg2 : 3;
+  uint reg3 : 3;
+};
+
+struct CompareData {
+  CompareData(uchar type, Compare kind) : type(type), kind(kind) {}
+  operator uint() const { return *(uint*)this; }
+   uint type : 8;
+   uint kind : 4;
+};
+
+struct LogicData {
+  LogicData(uchar type, Logic kind) : type(type), kind(kind) {}
+  operator uint() const { return *(uint*)this; }
+   uint type : 8;
+   uint kind : 4;
+};
+
+struct Logic3Data {
+  Logic3Data(uchar type, uchar kind) : type(type), kind(kind) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint kind : 8;
+};
+
+struct ConvertData {
+  ConvertData(uchar resultType, uchar sourceType)
+      : resultType(resultType), sourceType(sourceType) {}
+  operator uint() const { return *(uint*)this; }
+  uint resultType : 8;
+  uint sourceType : 8;
+};
+
+struct AddrData {
+  AddrData(uchar type, uchar scale) : type(type), scale(scale) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint scale : 8;
+};
+
+struct BitfieldManipData {
+  BitfieldManipData(uchar type, uchar start, uchar size)
+    : type(type), start(start), size(size) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint start : 8;
+  uint size : 8;
+};
+
 struct EventBuilder {
   explicit EventBuilder(char* root) : root(root) {}
 
+  size_t use(size_t i, uint arg0) { return op(i, USE, arg0); }
+  size_t hint(size_t i, uint index) { return op(i, REGISTER_HINT, index); }
+
   inline size_t op(size_t i, Opcode code, uint data);
-  inline size_t joinCopy(size_t i, uint target, uint phi);
-  inline size_t use(size_t i, uint arg0) { return op(i, USE, arg0); }
-  inline size_t hint(size_t i, uint index) {
-    return op(i, REGISTER_HINT, index);
-  }
 
   Opcode& code(size_t i) const { return ((Opcode*)root)[i]; }
   uint& data(size_t i) const { return ((uint*)root)[i]; }
@@ -140,12 +250,6 @@ size_t EventBuilder::op(size_t i, Opcode code, uint data) {
   this->code(i) = code;
   this->data(i) = data;
   return i + 1;
-}
-
-size_t EventBuilder::joinCopy(size_t i, uint target, uint phi) {
-  i = op(i, USE, target);
-  i = op(i, JOIN_COPY, phi);
-  return i;
 }
 
 
@@ -293,12 +397,6 @@ struct Event {
 };
 #endif
 
-namespace ohmu {
-namespace til {
-class BasicBlock;
-}
-}
-
 struct Block {
   static const size_t NO_DOMINATOR = (size_t)-1;
   ohmu::til::BasicBlock* basicBlock;
@@ -307,11 +405,9 @@ struct Block {
   size_t dominator;
   size_t head;
   size_t firstEvent;
-  size_t lastEvent;
+  size_t boundEvent;
   size_t phiSlot;
 };
-
-static const size_t MAX_EVENTS = 1 << 24;
 
 #if 0
 void print_stream(EventStream events, size_t numInstrs);
@@ -384,5 +480,5 @@ struct CMPFamily {
 };
 #endif
 
-} //  namespace
+//} //  namespace
 } //  namespace Jagger
