@@ -24,8 +24,9 @@ using namespace ohmu;
 using namespace ohmu::parsing;
 using namespace ohmu::til;
 
-extern void emitEvents(Event* events, Global& global);
-
+namespace Jagger {
+extern void emitEvents(Global& global);
+}
 
 void printSExpr(SExpr* e) {
   TILDebugPrinter::print(e, std::cout);
@@ -64,9 +65,7 @@ int main(int argc, const char** argv) {
 
   //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
 
-  auto events = new Event[10000];
-  emitEvents(events, global);
-  delete[] events;
+  Jagger::emitEvents(global);
 
   return 0;
 }

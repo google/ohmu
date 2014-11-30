@@ -52,14 +52,16 @@ struct /*__declspec(align(16))*/ Instr {
 
   union {
     struct {
-      // Vex byte 3.
-      byte code_map : 4;
+      // Vex optional byte.
+      byte code_map : 2;
+      byte evex : 1;
       byte invalid : 1;
+      byte r1 : 1;
       byte long_vex : 3;
 
       // The opcode/raw data info.
       byte align_pad : 4;
-      byte imm_payload : 1;
+      byte raw_data : 1;
       byte : 3;
 
       // Postfixes flags.
@@ -88,11 +90,11 @@ struct /*__declspec(align(16))*/ Instr {
       byte rex_1 : 1;
       byte : 1;
 
-      // Vex byte 2.
+      // Vex byte.
       byte simd_prefix : 2;
       byte l : 1;
       byte vvvv : 4;
-      byte e : 1;
+      byte e : 1; // vex verion of W
 
       // Modrm.
       byte rm : 3;
@@ -124,7 +126,7 @@ struct /*__declspec(align(16))*/ Instr {
 
 inline Instr::byte* Instr::encode(byte* p) const {
   if (invalid) {
-    if (imm_payload) goto ENCODE_NO_DISP;
+    if (raw_data) goto ENCODE_NO_DISP;
     return p;
   }
   // Handle all prefixes, including rex and vex.

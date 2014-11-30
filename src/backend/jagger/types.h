@@ -24,55 +24,7 @@ class BasicBlock;
 }
 
 namespace Jagger {
-//namespace {
 
-#if 0
-enum {
-  NOP = 0, USE, REF, GOTO_HEADER, WALK_HEADER,
-  HALT, IMM8, IMM16, IMM32, IMM64,
-  LOAD, STORE, PREFETCH, CONVERT, CMOV,
-  AND, OR, ANDN, ORN, XOR, XNOR, NAND, NOR, NOT,
-  SLL, SLR, SAR, ROL, ROR,
-  ADD, SUB, NEG, ABS,
-  MUL, MULHI, DIV, MOD,
-  AOS, AOSOA,
-  BT, BTS, BTR, BTC,
-  CTZ, CLZ, POPCNT, /* other bit ops bmi1/bmi2 */
-  KLOGIC, KSHUFFLE,
-  VMOVEMASK, VMASK, VLOAD, VSTORE,
-  VGATHER, VSCATTER, VPREFETCH,
-  VNEG, VADD, VSUB, VMUL, VMULHI, VDIV,
-  FMADD,
-  VSQRT, VRSQRT, VRCP, VEXP2,
-  VMIN, VMAX, VAVG,
-  VLOGIC, VLOGIC3,
-  VSLL, VSLR, VSAR, VROL, VROR,
-  VCONVERT, COMPARE,
-  VPERMUTE, VSHUFFLE,
-  VCOMPRESS, VEXPAND,
-#if 0
-  INT32, LOAD, STORE, ULOAD, USTORE, GATHER, SCATTER,
-  SEXT, ZEXT, FCVT, /* ZEXT/FCVT used for truncation */
-  AND, OR, ANDN, ORN, XOR, XNOR, NAND, NOR, NOT,
-  SLL, SLR, SAR, ROL, ROR,
-  MIN, MAX,
-  ADD, SUB, SUBR, ADDN, ADC, SBB, NEG, ABS,
-  MUL, MULHI, DIV, MOD, RCP,
-  AOS, AOSOA,
-  MADD, MSUB, MSUBR, MADDN,
-  FMADD, FMSUB, FMSUBR, FMADDN,
-  EQ, NEQ, LT, LE, ORD, EQU, NEQU, LTU, LEU, UNORD,
-  JUMP, BRANCH, CALL, RET,
-  BT, BTS, BTR, BTC,
-  CTZ, CLZ, POPCNT, /* other bit ops bmi1/bmi2 */
-  SQRT, RSQRT,
-  SHUFFLE, BROADCAST, EXTRACT, INSERT,
-  MEMSET, MEMCPY,
-#endif
-};
-#endif
-
-typedef unsigned char Opcode;
 typedef unsigned int uint;
 typedef unsigned char uchar;
 
@@ -88,49 +40,37 @@ enum VectorWidth : unsigned char {
   VEC1, VEC2, VEC4, VEC8, VEC16, VEC32, VEC64, VEC128
 };
 
-struct TypeDesc {
-  TypeDesc(Type type, LogBits logBits, VectorWidth vectorWidth = VEC1)
-      : type(type), logBits(logBits), vectorWidth(vectorWidth) {}
-  operator uchar() const { return *(uchar*)this; }
-  uchar type : 2;
-  uchar logBits : 3;
-  uchar vectorWidth : 3;
- private:
-  TypeDesc operator=(const TypeDesc&);
-};
-
-enum Opcodes {
+enum Opcode {
   NOP,  
-  ISA_OP,
+  CASE_HEADER, JOIN_HEADER,
   JOIN_COPY,
-  CLOBBER_LIST,
-  REGISTER_HINT,
-  USE,
-  INFERIOR_USE,
+  USE, LAST_USE, ONLY_USE,
   VALUE_KEY,
   PHI,
   DESTRUCTIVE_VALUE = PHI + 8,
   VALUE = DESTRUCTIVE_VALUE + 8,
-  GOTO_HEADER = VALUE + 8,
-  WALK_HEADER,
-  BYTES1, BYTES2, BYTES4, BYTES_HEADER, ALIGNED_BYTES, BYTES,
+  ISA_OP = VALUE + 8,
+  CLOBBER_LIST, REGISTER_HINT,
+  IMMEDIATE_BYTES, BYTES_HEADER, ALIGNED_BYTES, BYTES,
   CALL, RET,
   JUMP, BRANCH, BRANCH_TARGET,
 
-  COMPARE,
+  COMPARE, COMPARE_ZERO,
   NOT, LOGIC, LOGIC3,
   BITFIELD_EXTRACT, BITFIELD_INSERT, BITFIELD_CLEAR,
-  COUNT_ZEROS,
+  COUNT_ZEROS, POPCNT, BIT_TEST,
   MIN, MAX,
   ADD, SUB, NEG, ADDR,
   MUL, DIV, IMULHI, IDIV, IMOD,
   ABS, RCP, SQRT, RSQRT, EXP2,
   CONVERT,
   FIXUP,
-  SHUFFLE, IGNORE_LANES, ZERO_LANES,
+  SHUFFLE, IGNORE_LANES, BLEND, BLEND_ZERO, // SHUFFLE does BLEND?
   PREFETCH,
-  LOAD, GATHER, INSERT, EXPAND,
-  STORE, SCATTER, EXTRACT, COMPRESS,
+  LOAD, EXPAND, GATHER, INSERT, BROADCAST, // EXPAND covers ULOAD
+  STORE, COMPRESS, SCATTER, EXTRACT,
+  MEMSET, MEMCPY,
+  NUM_OPCODES,
 };
 
 enum Compare {
@@ -171,20 +111,66 @@ enum Logic {
   LOGICAL_TRUE,
 };
 
-struct BasicData {
-  explicit BasicData(uchar type) : type(type) {}
-  operator uint() const { return *(uint*)this; }
-  uint type : 8;
+enum RoundingMode {
+  ROUND_EVEN,
+  ROUND_UP,
+  ROUND_DOWN,
+  ROUND_TRUNC,
+  ROUND_CURRENT,
+};
+
+enum BitTestAction{
+  BIT_TEST_READ,
+  BIT_TEST_CLEAR,
+  BIT_TEST_SET,
+  BIT_TEST_TOGGLE,
+};
+
+enum ShiftKind {
+  SHIFT_RIGHT,
+  SHIFT_LEFT,
+  ROTATE_RIGHT,
+  ROTATE_LEFT,
+  SHIFT_ARITHMETIC,
+};
+
+enum MemoryKind {
+  UNPREDICATED,
+  PREDICATED,
+};
+
+struct TypeDesc {
+  TypeDesc(uchar data) { *(uchar*)this = data; }
+  TypeDesc(Type type, LogBits logBits, VectorWidth vectorWidth = VEC1)
+    : type(type), logBits(logBits), vectorWidth(vectorWidth) {}
+  operator uchar() const { return *(uchar*)this; }
+  uchar type : 2;
+  uchar logBits : 3;
+  uchar vectorWidth : 3;
 };
 
 struct ClobberListData {
   ClobberListData(uchar reg0, uchar reg1 = 0, uchar reg2 = 0, uchar reg3 = 0)
-      : reg0(reg0), reg1(reg1), reg2(reg2), reg3(reg3) {}
+    : reg0(reg0), reg1(reg1), reg2(reg2), reg3(reg3) {}
   operator uint() const { return *(uint*)this; }
   uint reg0 : 3;
   uint reg1 : 3;
   uint reg2 : 3;
   uint reg3 : 3;
+};
+
+struct BasicData {
+  BasicData(uint data) { *(uint*)this = data; }
+  explicit BasicData(uchar type) : type(type) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+};
+
+struct RoundedData {
+  explicit RoundedData(uchar type, RoundingMode mode) : type(type) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint mode : 3;
 };
 
 struct CompareData {
@@ -216,11 +202,32 @@ struct ConvertData {
   uint sourceType : 8;
 };
 
+struct BitTestData {
+  BitTestData(uchar type, BitTestAction action) : type(type), action(action) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint action : 2;
+};
+
+struct ShiftData {
+  ShiftData(uchar type, ShiftKind kind) : type(type), kind(kind) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint kind : 3;
+};
+
 struct AddrData {
   AddrData(uchar type, uchar scale) : type(type), scale(scale) {}
   operator uint() const { return *(uint*)this; }
   uint type : 8;
   uint scale : 8;
+};
+
+struct MemoryData {
+  MemoryData(uchar type, MemoryKind kind) : type(type), kind(kind) {}
+  operator uint() const { return *(uint*)this; }
+  uint type : 8;
+  uint kind : 1;
 };
 
 struct BitfieldManipData {
@@ -235,23 +242,52 @@ struct BitfieldManipData {
 struct EventBuilder {
   explicit EventBuilder(char* root) : root(root) {}
 
-  size_t use(size_t i, uint arg0) { return op(i, USE, arg0); }
-  size_t hint(size_t i, uint index) { return op(i, REGISTER_HINT, index); }
-
-  inline size_t op(size_t i, Opcode code, uint data);
-
-  Opcode& code(size_t i) const { return ((Opcode*)root)[i]; }
+  __forceinline size_t op(size_t i, uchar code, uint data) const {
+    if (!root) return i + 1;
+    this->code(i) = code;
+    this->data(i) = data;
+    return i + 1;
+  }
+  uchar& code(size_t i) const { return ((uchar*)root)[i]; }
   uint& data(size_t i) const { return ((uint*)root)[i]; }
+  bool empty() const { return root == nullptr; }
+
+ private:
   char* root;
 };
 
-size_t EventBuilder::op(size_t i, Opcode code, uint data) {
-  if (!root) return i + 1;
-  this->code(i) = code;
-  this->data(i) = data;
-  return i + 1;
-}
+struct EventList {
+  EventList() : builder(nullptr) {}
+  void init(size_t numEvents) {
+    this->numEvents = numEvents;
+    first = (numEvents + 2) / 3;
+    auto buffer = new uint[(first * 3 + 3) / 4 + numEvents];
+    builder = EventBuilder((char*)(buffer - first / 4));
+  }
+  void destroy() {
+    delete[](&builder.data(0) + first / 4);
+    builder = EventBuilder(nullptr);
+  }
+  size_t bound() const { return first + numEvents; }
+  EventBuilder builder;
+  size_t numEvents;
+  size_t first;
 
+  struct Sort {
+    uint key, value;
+  };
+  unsigned prefixBuffer[NUM_OPCODES + 1];
+  unsigned* prefix;
+  Sort* offsets;
+  Sort* scratch;
+};
+
+struct _Block {
+  size_t firstEvent;
+  size_t boundEvent;
+};
+
+}  // namespace Jagger
 
 #if 0
 union Event {
@@ -397,18 +433,6 @@ struct Event {
 };
 #endif
 
-struct Block {
-  static const size_t NO_DOMINATOR = (size_t)-1;
-  ohmu::til::BasicBlock* basicBlock;
-  Block* list;
-  size_t numArguments;
-  size_t dominator;
-  size_t head;
-  size_t firstEvent;
-  size_t boundEvent;
-  size_t phiSlot;
-};
-
 #if 0
 void print_stream(EventStream events, size_t numInstrs);
 void print_asm(EventStream events, size_t numInstrs);
@@ -481,4 +505,3 @@ struct CMPFamily {
 #endif
 
 //} //  namespace
-} //  namespace Jagger

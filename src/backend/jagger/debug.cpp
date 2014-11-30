@@ -1,15 +1,15 @@
 //===- debug.cpp -----------------------------------------------*- C++ --*-===//
 // Copyright 2014  Google
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
+// Licensed under the Apache License", "Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 //    http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// Unless required by applicable law or agreed to in writing", "software
+// distributed under the License is distributed on an "AS IS" BASIS",
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND", "either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
@@ -92,35 +92,36 @@ bool validateTIL(ohmu::til::Global* global) {
 }
 
 const char* opcodeNames[] = {
-    "NOP",                 "ISA_OP",              "JOIN_COPY",
-    "CLOBBER_LIST",        "REGISTER_HINT",       "USE",
-    "INFERIOR_USE",        "VALUE_KEY",           "PHI_0",
-    "PHI_1",               "PHI_2",               "PHI_3",
-    "PHI_4",               "PHI_5",               "PHI_6",
-    "PHI_7",               "DESTRUCTIVE_VALUE_0", "DESTRUCTIVE_VALUE_1",
-    "DESTRUCTIVE_VALUE_2", "DESTRUCTIVE_VALUE_3", "DESTRUCTIVE_VALUE_4",
-    "DESTRUCTIVE_VALUE_5", "DESTRUCTIVE_VALUE_6", "DESTRUCTIVE_VALUE_7",
-    "VALUE_0",             "VALUE_1",             "VALUE_2",
-    "VALUE_3",             "VALUE_4",             "VALUE_5",
-    "VALUE_6",             "VALUE_7",             "GOTO_HEADER",
-    "WALK_HEADER",         "BYTES1",              "BYTES2",
-    "BYTES4",              "BYTES_HEADER",        "ALIGNED_BYTES",
-    "BYTES",               "CALL",                "RET",
-    "JUMP",                "BRANCH",              "BRANCH_TARGET",
-    "COMPARE",             "NOT",                 "LOGIC",
-    "LOGIC3",              "BITFIELD_EXTRACT",    "BITFIELD_INSERT",
-    "BITFIELD_CLEAR",      "COUNT_ZEROS",         "MIN",
-    "MAX",                 "ADD",                 "SUB",
-    "NEG",                 "MUL",                 "DIV",
-    "IMULHI",              "IDIV",                "IMOD",
-    "ABS",                 "RCP",                 "SQRT",
-    "RSQRT",               "EXP2",                "CONVERT",
-    "FIXUP",               "SHUFFLE",             "IGNORE_LANES",
-    "ZERO_LANES",          "PREFETCH",            "LOAD",
-    "GATHER",              "INSERT",              "EXPAND",
-    "STORE",               "SCATTER",             "EXTRACT",
-    "COMPRESS",
-};
+    "NOP",                "CASE_HEADER",        "JOIN_HEADER",
+    "JOIN_COPY",          "USE",                "LAST_USE",
+    "ONLY_USE",           "VALUE_KEY",          "PHI0",
+    "PHI1",               "PHI2",               "PHI3",
+    "PHI4",               "PHI5",               "PHI6",
+    "PHI7",               "DESTRUCTIVE_VALUE0", "DESTRUCTIVE_VALUE1",
+    "DESTRUCTIVE_VALUE2", "DESTRUCTIVE_VALUE3", "DESTRUCTIVE_VALUE4",
+    "DESTRUCTIVE_VALUE5", "DESTRUCTIVE_VALUE6", "DESTRUCTIVE_VALUE7",
+    "VALUE0",             "VALUE1",             "VALUE2",
+    "VALUE3",             "VALUE4",             "VALUE5",
+    "VALUE6",             "VALUE7",             "ISA_OP",
+    "CLOBBER_LIST",       "REGISTER_HINT",      "IMMEDIATE_BYTES",
+    "BYTES_HEADER",       "ALIGNED_BYTES",      "BYTES",
+    "CALL",               "RET",                "JUMP",
+    "BRANCH",             "BRANCH_TARGET",
+    "COMPARE",            "COMPARE_ZERO",       "NOT",
+    "LOGIC",              "LOGIC3",             "BITFIELD_EXTRACT",
+    "BITFIELD_INSERT",    "BITFIELD_CLEAR",     "COUNT_ZEROS",
+    "POPCNT",             "BIT_TEST",           "MIN",
+    "MAX",                "ADD",                "SUB",
+    "NEG",                "ADDR",               "MUL",
+    "DIV",                "IMULHI",             "IDIV",
+    "IMOD",               "ABS",                "RCP",
+    "SQRT",               "RSQRT",              "EXP2",
+    "CONVERT",            "FIXUP",              "SHUFFLE",
+    "IGNORE_LANES",       "BLEND",              "BLEND_ZERO",
+    "PREFETCH",           "LOAD",               "EXPAND",
+    "GATHER",             "INSERT",             "BROADCAST",
+    "STORE",              "COMPRESS",           "SCATTER",
+    "EXTRACT",            "MEMSET",             "MEMCPY"};
 
 void printDebug(EventBuilder builder, size_t numEvents) {
   size_t offset = (numEvents + 2) / 3;
