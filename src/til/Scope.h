@@ -57,6 +57,7 @@ public:
   /// Return the binding for the i^th variable (VarDecl) from the top of the
   /// current scope.
   SExpr* var(unsigned i) const {
+    assert(i < VarMap.size() && "Variable index out of bounds.");
     return VarMap[VarMap.size()-i-1].Subst;
   }
 
@@ -75,7 +76,16 @@ public:
     return BlockMap[Orig->blockID()];
   }
 
+  // Create and return a fresh DeBruin index for a newly-allocated VarDecl.
+  // Should be called in conjunction with enterScope.
+  unsigned allocVarIndex() { return DeBruin++; }
+
+  // Free the DeBruijn index.
+  // Should be called in conjunction with exitScope.
+  void freeVarIndex() { --DeBruin; }
+
   /// Enter a function scope (or apply a function), by mapping Orig -> E.
+  /// IncDeBruin should be true if E is a new
   void enterScope(VarDecl *Orig, SExpr *E) {
     // Assign indices to variables if they haven't been assigned yet.
     if (Orig->varIndex() == 0)
@@ -109,21 +119,24 @@ public:
   /// Create a copy of this scope.  (Used for lazy rewriting)
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
-  ScopeFrame() {
+  ScopeFrame() : DeBruin(1) {
     // Variable ID 0 means uninitialized.
     VarMap.push_back(SubstitutionEntry(nullptr, nullptr));
   }
 
 private:
   ScopeFrame(const ScopeFrame &F)
-      : VarMap(F.VarMap), InstructionMap(F.InstructionMap),
+      : DeBruin(F.DeBruin), VarMap(F.VarMap), InstructionMap(F.InstructionMap),
         BlockMap(F.BlockMap) { }
 
+  unsigned                       DeBruin;         //< current debruin index
   std::vector<SubstitutionEntry> VarMap;          //< map vars to values
   std::vector<SExpr*>            InstructionMap;  //< map instrs to values
   std::vector<BasicBlock*>       BlockMap;        //< map blocks to new blocks
 };
 
+
+typedef std::unique_ptr<ScopeFrame> UniqueScope;
 
 
 }  // end namespace til

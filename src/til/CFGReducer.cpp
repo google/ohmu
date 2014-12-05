@@ -22,6 +22,7 @@ namespace ohmu {
 namespace til  {
 
 
+
 /// A Future which creates a new CFG from the traversal.
 class CFGFuture : public LazyCopyFuture<CFGReducer> {
 public:
@@ -30,40 +31,79 @@ public:
   { }
 
   virtual SExpr* evaluate() override {
+    auto* S = Reducer->switchScope(Scope);
     Reducer->beginCFG(nullptr);
-    Reducer->Scope = std::move(this->Scope);
     Reducer->traverse(PendingExpr, TRV_Tail);
     auto *res = Reducer->currentCFG();
     Reducer->endCFG();
-    PendingExpr = nullptr;
+    Reducer->restoreScope(S);
+
+    finish();
     return res;
   }
 };
 
 
-// Set bounding type of residual.
-void CFGReducer::setResidualBoundingType(Instruction* res, SExpr* typ,
-                                         BoundingType::Relation rel) {
-  if (Future* fut = dyn_cast<Future>(typ))
-    typ = fut->force();
 
-  if (typ->isValue()) {
-    // Variable definition is a value, so use that as the type.
-    res->setBoundingType(typ, rel);
+/// Set the ValueType of i, based on the type expression e.
+static void setValueTypeFromExpr(Instruction* i, SExpr* e) {
+  if (!e)
     return;
+  if (auto *f = dyn_cast<Future>(e))
+    e = f->force();
+
+  switch (e->opcode()) {
+    case COP_Function:
+    case COP_Code:
+    case COP_Field:
+    case COP_Record:
+      i->setValueType(ValueType::getValueType<void*>());
+      break;
+    case COP_ScalarType:
+      i->setValueType(cast<ScalarType>(e)->valueType());
+      break;
+    case COP_Literal:
+      i->setValueType(cast<Literal>(e)->valueType());
+      break;
+    default:
+      assert(false && "Type expression must be a value.");
+      break;
   }
-  auto* ityp = dyn_cast<Instruction>(typ);
-  if (ityp) {
-    auto* vtyp = ityp->boundingTypeExpr();
-    if (vtyp) {
-      assert(vtyp->isValue() && "Bounding type must be a value.");
-      // Grab the upper bound of the type expr.
-      auto vtrel = ityp->boundingType().Rel;
-      res->setBoundingType(vtyp, BoundingType::minRelation(rel, vtrel));
-      return;
-    }
+}
+
+
+// Traverse e to find its bounding type, and set the value type of res.
+// Returns res; the bounding type is stored in resultType_.
+SExpr* CFGReducer::calculateResidualType(SExpr* res, SExpr* e) {
+  // Short-circuit: no need for detailed type info if res is not a pointer.
+  // I.e. don't traverse arithmetic expressions.
+  auto* ires = dyn_cast_or_null<Instruction>(res);
+  if (ires && ires->valueType().Base != ValueType::BT_Pointer
+           && ires->valueType().Base != ValueType::BT_Void) {
+    return res;
   }
-  diag.error("Type does not have a value upper bound: ") << typ;
+
+  // Short-circuit: the bounding type of a value is itself.
+  // We don't want to copy the value!
+  if (e->isValue()) {
+    resultType_.set(e, BoundingType::BT_Equivalent);
+  }
+  else {
+    // auto m = switchMode(RM_Promote);
+    auto b = switchEmit(false);
+
+    // Type will be stored in resultType_.  We discard the result.
+    traverse(e, TRV_Path);
+
+    restoreEmit(b);
+    // restoreMode(m);
+  }
+
+  // Use the type expression we computed to set the valueType.
+  if (ires)
+    setValueTypeFromExpr(ires, resultType_.typeExpr());
+
+  return res;
 }
 
 
@@ -79,23 +119,27 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
 
     // First check to see if the identifier refers to a named variable.
     if (evd->varName() == idstr) {
-      // For lets, the substitution can be anything; see traverseLet.
-      // Eliminate the let by returning the substitution.
-      if (evd->kind() == VarDecl::VK_Let)
-        return entry.Subst;
+      SExpr* res = entry.Subst;
+      SExpr* e   = res;
 
-      // For letrecs, the substitution should be a variable.
-      // Eliminate the letrec by returning the variable definition.
-      if (evd->kind() == VarDecl::VK_Letrec) {
-        auto* var = cast<Variable>(entry.Subst);
-        return var->variableDecl()->definition();
+      // Promote variables.  (See reduceVariable.)
+      if (auto* v = dyn_cast<Variable>(res)) {
+        e = v->variableDecl()->definition();
+
+        // TODO: this is a hack to eliminate letrecs.  Fix it.
+        if (evd->kind() == VarDecl::VK_Letrec)
+          res = nullptr;
       }
 
-      // For function parameters, the substitution should be a variable.
-      auto* res = cast<Variable>(entry.Subst);
-      if (res->boundingTypeExpr() == nullptr)
-        setResidualBoundingType(res, res->variableDecl()->definition(),
-                                BoundingType::BT_Type);
+      // TODO: this is a hack to eliminate let for heap values.  Fix it.
+      if (evd->kind() == VarDecl::VK_Let && res->isHeapValue())
+        res = nullptr;
+
+      // A null scope means that we are rewriting in the output scope.
+      // (See reduceVariable.)
+      auto* s = switchScope(nullptr);
+      calculateResidualType(res, e);   // stores type of e in in resultType_.
+      restoreScope(s);
       return res;
     }
     // Otherwise look for slots in enclosing modules
@@ -106,6 +150,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       // Map identifiers to slots for record self-variables.
       if (!svd->definition())
         continue;
+
       auto* sfun = cast<Function>(svd->definition());
       Record* rec = dyn_cast<Record>(sfun->body());
       if (!rec)
@@ -114,95 +159,134 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       if (!slt)
         continue;
 
-      if (slt->hasModifier(Slot::SLT_Final) &&
-          slt->definition()->isTrivial()) {
+      auto* sdef = slt->definition();
+      if (slt->hasModifier(Slot::SLT_Final) && sdef->isTrivial()) {
         // TODO: do we want to be a bit more sophisticated here?
-        return slt->definition();
+        resultType_.set(sdef, BoundingType::BT_Equivalent);
+        return sdef;
       }
+
       auto* sapp = newApply(svar, nullptr, Apply::FAK_SApply);
       auto* res  = newProject(sapp, idstr);
-      setResidualBoundingType(res, slt->definition(), BoundingType::BT_Type);
+
+      resultArgs_.push_back(svar);
+      resultType_.set(sdef, BoundingType::BT_Type);
+      // TODO:  automatically insert loads for slots.
+      setValueTypeFromExpr(res, sdef);
       return res;
     }
   }
 
   diag.error("Identifier not found: ") << idstr;
+  resultType_.clear();
   return new (Arena) Identifier(orig);
 }
 
 
 
-SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
-  auto* res = CopyReducer::reduceVariable(orig, vd);
+Function* CFGReducer::reduceFunction(Function &orig, VarDecl *nvd, SExpr* e0) {
+  auto* res = CopyReducer::reduceFunction(orig, nvd, e0);
+  resultType_.set(res, BoundingType::BT_Equivalent);
+  return res;
+}
 
-  // TODO: this is ugly.  fix it.
-  if (auto* var = dyn_cast<Variable>(res)) {
-    auto k  = var->variableDecl()->kind();
-    auto bt = (k == VarDecl::VK_Let || k == VarDecl::VK_Letrec) ?
-      BoundingType::BT_Equivalent : BoundingType::BT_Type;
-    if (var->boundingTypeExpr() == nullptr)
-      setResidualBoundingType(var, var->variableDecl()->definition(), bt);
+
+Code* CFGReducer::reduceCode(Code &orig, SExpr* e0, SExpr* e1) {
+  auto* res = CopyReducer::reduceCode(orig, e0, e1);
+  resultType_.set(res, BoundingType::BT_Equivalent);
+  return res;
+}
+
+
+Field* CFGReducer::reduceField(Field &orig, SExpr* e0, SExpr* e1) {
+  auto* res = CopyReducer::reduceField(orig, e0, e1);
+  resultType_.set(res, BoundingType::BT_Equivalent);
+  return res;
+}
+
+
+Record* CFGReducer::reduceRecordEnd(Record *res) {
+  resultType_.set(res, BoundingType::BT_Equivalent);
+  return res;
+}
+
+
+
+SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
+  SExpr* res;
+  SExpr* e;
+
+  if (Scope) {
+    // Look up the substitution for this variable, which will be the residual.
+    // The substitution is an expression in the output scope.
+    auto* res = Scope->lookupVar(orig.variableDecl());
+
+    // The default substitution just rewrites a variable to a new variable,
+    // so optimize for that case.
+    if (auto* v = dyn_cast<Variable>(res))
+      e = v->variableDecl()->definition();
+    else
+      e = res;
   }
+  else {
+    // If Scope is null, then we are rewriting an expression that is in the
+    // output scope.  Don't substitute, just promote the variable.
+    res = &orig;
+    e   = orig.variableDecl()->definition();
+  }
+
+  // Set scope to null, which signifies the output scope.
+  auto* s = switchScope(nullptr);
+  calculateResidualType(res, e);   // stores type of e in in resultType_.
+  restoreScope(s);
+
+  // Return the substitution as a residual.
   return res;
 }
 
 
 
 SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
-  auto* f = dyn_cast<Function>(e);
-  Instruction* fi = nullptr;
-  bool isVal = f;
-
-  if (!f) {
-    fi = dyn_cast<Instruction>(e);
-    if (fi) {
-      auto* ftyp = fi->boundingTypeExpr();
-      f = dyn_cast_or_null<Function>(ftyp);
-    }
-  }
+  // resultType_ holds the type of e.
+  auto* f = dyn_cast_or_null<Function>(resultType_.typeExpr());
 
   if (!f) {
     // Undefined marks a previous error, so omit the warning.
     if (!isa<Undefined>(e))
       diag.error("Expression is not a function: ") << e;
+    resultType_.clear();
     return newUndefined();
   }
 
-  pendingArgs_.push_back(a);
-  if (isVal) {
-    // Partially evaluate the Apply.
-    return f->body();
-  }
+  // Handle self-arguments.
+  if (!a && orig.applyKind() == Apply::FAK_SApply)
+    a = e;
 
-  // Construct a residual, and set its type.
-  auto *res = CopyReducer::reduceApply(orig, e, a);
-  setResidualBoundingType(res, f->body(), fi->boundingType().Rel);
-  return res;
+  // Set the result type, and the result arguments.
+  auto* restyp = f->body();       // TODO -- evaluate body
+  resultArgs_.push_back(a);
+  resultType_.set(restyp);
+
+  if (e && mode_ == RM_Reduce) {
+    auto* res = CopyReducer::reduceApply(orig, e, a);
+    setValueTypeFromExpr(res, restyp);
+    return res;
+  }
+  return nullptr;
 }
 
 
 
 SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
-  auto* r = dyn_cast<Record>(e);
-  Instruction* ri = nullptr;
-  bool isVal = r;
+  // resultType_ holds the type of e.
+  auto* r = dyn_cast_or_null<Record>(resultType_.typeExpr());
   if (!r) {
-    ri = dyn_cast<Instruction>(e);
-    if (ri) {
-      auto* rtyp = ri->boundingTypeExpr();
-      r = dyn_cast_or_null<Record>(rtyp);
-      if (!r) {
-        // Automatically insert implicit self-applications.
-        auto* sfuntyp = dyn_cast_or_null<Function>(rtyp);
-        if (sfuntyp && sfuntyp->isSelfApplicable()) {
-          r = dyn_cast<Record>(sfuntyp->body());
-          if (r) {
-            auto *sapp = newApply(e, nullptr, Apply::FAK_SApply);
-            sapp->setBoundingType(r, ri->boundingType().Rel);
-            ri = sapp;
-          }
-        }
-      }
+    // syntactic sugar: automatically insert self-applications if necessary.
+    auto* sfuntyp = dyn_cast_or_null<Function>(resultType_.typeExpr());
+    if (sfuntyp && sfuntyp->isSelfApplicable()) {
+      resultArgs_.push_back(e);                   // push self-argument.
+      r = dyn_cast<Record>(sfuntyp->body());
+      e = newApply(e, nullptr, Apply::FAK_SApply);
     }
   }
 
@@ -210,60 +294,60 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
     // Undefined marks a previous error, so omit the warning.
     if (!isa<Undefined>(e))
       diag.error("Expression is not a record: ") << e;
+    resultType_.clear();
     return newUndefined();
   }
 
   Slot* slt = r->findSlot(orig.slotName());
   if (!slt) {
     diag.error("Slot not found: ") << orig.slotName();
+    resultType_.clear();
     return newUndefined();
   }
 
-  if (isVal) {
-    // Partially evaluate the Project.
-    return slt->definition();
+  // Set the result type
+  auto* restyp = slt->definition();   // TODO -- evaluate definition.
+  resultType_.set(restyp);
+
+  if (e && mode_ == RM_Reduce) {
+    auto* res = CopyReducer::reduceProject(orig, e);
+    setValueTypeFromExpr(res, restyp);
+    return res;
   }
-  // Construct a residual.
-  auto* res = CopyReducer::reduceProject(orig, ri);
-  setResidualBoundingType(res, slt->definition(), ri->boundingType().Rel);
-  return res;
+  return nullptr;
 }
 
 
 
 SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
-  // Reducing Apply pushes arguments onto pendingArgs_.
-  // Reducing Call will consume those arguments.
-  auto* c = dyn_cast<Code>(e);
+  // Apply pushes arguments onto resultArgs_.
+  // Call will consume those arguments.
+  auto* c = dyn_cast_or_null<Code>(resultType_.typeExpr());
   if (c) {
-    auto it = codeMap_.find(c);
-    if (it != codeMap_.end()) {
-      // inlineLocalCall with clearPendingArgs()
-      return inlineLocalCall(it->second, c);
+    if (!e) {
+      auto it = codeMap_.find(c);
+      if (it != codeMap_.end())
+        return inlineLocalCall(it->second, c);   // calls clearPendingArgs().
     }
   }
-  Instruction* ci = nullptr;
-  // bool isVal = c;
-  if (!c) {
-    ci = dyn_cast<Instruction>(e);
-    if (ci) {
-      auto* ctyp = ci->boundingTypeExpr();
-      c = dyn_cast<Code>(ctyp);
-    }
-  }
-
-  if (!c) {
+  else {
     if (!isa<Undefined>(e))
       diag.error("Expression is not a code block: ") << e;
-    pendingArgs_.clear();
+    resultArgs_.clear();
+    resultType_.clear();
     return newUndefined();
   }
 
-  pendingArgs_.clear();
+  resultArgs_.clear();
+  auto* restyp = c->returnType();     // TODO -- evaluate return type.
+  resultType_.set(restyp);
 
-  auto* res = CopyReducer::reduceCall(orig, e);
-  setResidualBoundingType(res, c->returnType(), BoundingType::BT_Type);
-  return res;
+  if (e && mode_ == RM_Reduce) {
+    auto* res = CopyReducer::reduceCall(orig, e);
+    setValueTypeFromExpr(res, restyp);
+    return res;
+  }
+  return nullptr;
 }
 
 
@@ -276,8 +360,8 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
   if (!cont)
     cont = newBlock(1);
   // TODO: should we check against an existing type?
-  setResidualBoundingType(cont->arguments()[0],
-                          c->returnType(), BoundingType::BT_Type);
+  // TODO: evaluate returnType()
+  setValueTypeFromExpr(cont->arguments()[0], c->returnType());
 
   // Set the continuation of the pending block to the current continuation.
   // If there are multiple calls, the continuations must match.
@@ -291,8 +375,10 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
   }
 
   // End current block with a jump to the new one.
-  newGoto(pb->block, pendingArgs_.elements());
-  pendingArgs_.clear();
+  newGoto(pb->block, resultArgs_.elements());
+
+  resultArgs_.clear();
+  resultType_.clear();
 
   // If this was a newly-created continuation, then continue where we
   // left off.
@@ -439,7 +525,10 @@ SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
 
 
 SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
+  assert(Scope && "Cannot rewrite in output scope.");
+
   auto* nt = self()->traverse(e->returnType(), TRV_Type);
+
   // If we're not in a CFG, then evaluate body in a Future that creates one.
   // Otherwise set the body to null; it will be handled as a pending block.
   if (!currentCFG()) {
@@ -447,14 +536,6 @@ SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
     FutureQueue.push(nb);
     return self()->reduceCode(*e, nt, nb);
   }
-  return self()->reduceCode(*e, nt, nullptr);
-}
-
-
-
-SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
-  if (!currentCFG())
-    return CopyReducer::reduceCode(orig, e0, e1);
 
   // Code blocks inside a CFG will be lowered to basic blocks.
   // Function arguments will become phi nodes in the block.
@@ -483,7 +564,7 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
     Phi* ph = b->arguments()[i];
     ph->setInstrName(entry.VDecl->varName());
-    setResidualBoundingType(ph, nvd->definition(), BoundingType::BT_Type);
+    setValueTypeFromExpr(ph, nvd->definition());
 
     // Make the function parameters look like let-variables.
     entry.VDecl = newVarDecl(VarDecl::VK_Let, entry.VDecl->varName(), ph);
@@ -492,11 +573,11 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
   // Add pb to the array of pending blocks.
   // It will not be enqueued until we see a call to the block.
-  auto* pb = new PendingBlock(orig.body(), b, ns);
+  auto* pb = new PendingBlock(e->body(), b, ns);
   pendingBlocks_.emplace_back(std::unique_ptr<PendingBlock>(pb));
 
   // Create a code expr, and add it to the code map.
-  Code* c = CopyReducer::reduceCode(orig, e0, e1);
+  Code* c = self()->reduceCode(*e, nt, nullptr);
   codeMap_.insert(std::make_pair(c, pb));
   return c;
 }
@@ -504,6 +585,8 @@ SExpr* CFGReducer::reduceCode(Code& orig, SExpr* e0, SExpr* e1) {
 
 
 SExpr* CFGReducer::traverseLet(Let* e, TraversalKind k) {
+  assert(Scope && "Cannot rewrite in output scope.");
+
   if (!currentCFG())
     return SuperTv::traverseLet(e, k);
 
@@ -517,6 +600,7 @@ SExpr* CFGReducer::traverseLet(Let* e, TraversalKind k) {
     if (auto *inst = dyn_cast<Instruction>(e1))
       inst->setInstrName(vd->varName());
     // Eliminate let, by replacing all occurrences of the let variable.
+    // Don't allocVarIndex(), because we are eliminating let variable.
     Scope->enterScope(vd, e1);
   }
 
@@ -574,9 +658,6 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
 
 
 void CFGReducer::traversePendingBlocks() {
-  // Save the current context.
-  std::unique_ptr<ScopeFrame> oldScope = std::move(Scope);
-
   // Process pending blocks.
   while (!pendingBlockQueue_.empty()) {
     PendingBlock* pb = pendingBlockQueue_.front();
@@ -585,28 +666,20 @@ void CFGReducer::traversePendingBlocks() {
     if (!pb->continuation)
       continue;   // unreachable block.
 
-    // std::cerr << "processing pending block " << pi << "\n";
-    // TILDebugPrinter::print(pb->expr, std::cerr);
-    // std::cerr << "\n";
-
-    Scope = std::move(pb->scope);
+    auto *s = switchScope(pb->scope);
     setContinuation(pb->continuation);
     beginBlock(pb->block);
-    SExpr *e = pb->expr;
 
-    traverse(e, TRV_Tail);  // may invalidate pb
+    traverse(pb->expr, TRV_Tail);  // may invalidate pb
 
     setContinuation(nullptr);
-    Scope = nullptr;
+    restoreScope(s);
   }
 
   // Delete all pending blocks.
   // We wait until all blocks have been processed before deleting them.
   pendingBlocks_.clear();
   codeMap_.shrink_and_clear();
-
-  // Restore the current context.
-  Scope = std::move(oldScope);
 }
 
 
@@ -631,8 +704,8 @@ void CFGReducer::endCFG() {
   SCFG* Scfg = currentCFG();
   CopyReducer::endCFG();
 
-  // std::cerr << "\n===== Normalized ======\n";
-  // TILDebugPrinter::print(Scfg, std::cerr);
+  //std::cerr << "\n===== Normalized ======\n";
+  //TILDebugPrinter::print(Scfg, std::cerr);
 
   SSAPass::ssaTransform(Scfg, Arena);
 

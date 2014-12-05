@@ -110,7 +110,7 @@ protected:
   StringRef printableName(StringRef N) {
     if (N.length() > 0)
       return N;
-    return StringRef("_x", 2);
+    return StringRef("x", 1);
   }
 
 
@@ -121,7 +121,7 @@ protected:
     }
     if (Sub) {
       if (const auto *I = E->asCFGInstruction()) {
-        SS << printableName(I->instrName()) << I->instrID();
+        SS << "_" << printableName(I->instrName()) << I->instrID();
         return;
       }
     }
@@ -236,17 +236,18 @@ protected:
   }
 
   void printVariable(const Variable *E, StreamType &SS) {
-    if (E->variableDecl()->varName().length() > 0) {
-      SS << E->variableDecl()->varName();
+    auto* Vd = E->variableDecl();
+    if (Vd->varName().length() > 0) {
+      SS << Vd->varName() << Vd->varIndex();
       return;
     }
-    SS << "_x";
+    SS << "x_" << Vd->varIndex();
   }
 
   void printVarDecl(const VarDecl *E, StreamType &SS) {
     if (E->kind() == VarDecl::VK_SFun)
       SS << "@";
-    SS << printableName(E->varName());
+    SS << printableName(E->varName()) << E->varIndex();
     switch (E->kind()) {
     case VarDecl::VK_Fun:
       SS << ": ";
@@ -481,7 +482,7 @@ protected:
     }
     self()->newline(SS);
     if (E->opcode() != COP_Store) {
-      SS << "let " << printableName(E->instrName()) << E->instrID();
+      SS << "let " << "_" << printableName(E->instrName()) << E->instrID();
       if (Verbose) {
         SS << ": " << E->valueType().getTypeName();
       }

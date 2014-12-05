@@ -32,18 +32,61 @@ namespace ohmu {
 namespace til  {
 
 
+/// Holds the type of a term, which is a value that describes the type.
+/// Values include ScalarType, Function, Record, Code, Field.
+struct BoundingType {
+  enum Relation {
+    BT_Type,           ///<  Term has type TypeExpr
+    BT_ExactType,      ///<  Term has exact type TypeExpr
+    BT_Equivalent      ///<  Term is equivalent to TypeExpr
+  };
+
+  static Relation minRelation(Relation r1, Relation r2) {
+    return (r1 < r2) ? r1 : r2;
+  }
+
+  void clear() {
+    TypeExpr = nullptr;
+    Rel = BT_Type;
+  }
+
+  void set(SExpr* e) { TypeExpr = e; }
+  void set(SExpr* e, Relation r) { TypeExpr = e; Rel = r; }
+
+  SExpr* typeExpr() const { return TypeExpr; }
+
+private:
+  SExpr* TypeExpr;     ///< The type expression for the term.
+  Relation Rel;        ///< How the type is related to the term.
+};
+
+
+
+/// Holds information needed for a block that's being lazily rewritten.
 struct PendingBlock {
   SExpr*      expr;
   BasicBlock* block;
   BasicBlock* continuation;
-  std::unique_ptr<ScopeFrame> scope;
+  ScopeFrame* scope;
 
   PendingBlock(SExpr *e, BasicBlock *b, ScopeFrame* s)
     : expr(e), block(b), continuation(nullptr), scope(s)
   { }
+  ~PendingBlock() {
+    if (scope) delete scope;
+  }
 };
 
 
+
+enum ReducerMode {
+  RM_Reduce,    // Rewrite expression to an equivalent value.
+  RM_Promote    // Abstract interpret expression to find bounding type.
+};
+
+
+
+/// CFGReducer will rewrite a high-level ohmu AST to a CFG.
 class CFGReducer : public CopyReducer, public LazyCopyTraversal<CFGReducer> {
 public:
   typedef LazyCopyTraversal<CFGReducer> SuperTv;
@@ -51,15 +94,19 @@ public:
   BasicBlock* currentContinuation()   { return currentContinuation_; }
   void setContinuation(BasicBlock *b) { currentContinuation_ = b;    }
 
-  SExpr* reduceIdentifier(Identifier &orig);
-  SExpr* reduceVariable(Variable &orig, VarDecl* vd);
-  SExpr* reduceProject(Project &orig, SExpr* e);
-  SExpr* reduceApply(Apply &orig, SExpr* e, SExpr* a);
-  SExpr* reduceCall(Call &orig, SExpr* e);
-  SExpr* reduceLoad(Load &orig, SExpr* e);
-  SExpr* reduceUnaryOp(UnaryOp &orig, SExpr* e0);
-  SExpr* reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1);
-  SExpr* reduceCode(Code& orig, SExpr* e0, SExpr* e1);
+  Function* reduceFunction(Function &orig, VarDecl *nvd, SExpr* e0);
+  Code*     reduceCode(Code &orig, SExpr* e0, SExpr* e1);
+  Field*    reduceField(Field &orig, SExpr* e0, SExpr* e1);
+  Record*   reduceRecordEnd(Record *res);
+
+  SExpr*    reduceIdentifier(Identifier &orig);
+  SExpr*    reduceVariable(Variable &orig, VarDecl* vd);
+  SExpr*    reduceProject(Project &orig, SExpr* e);
+  SExpr*    reduceApply(Apply &orig, SExpr* e, SExpr* a);
+  SExpr*    reduceCall(Call &orig, SExpr* e);
+  SExpr*    reduceLoad(Load &orig, SExpr* e);
+  SExpr*    reduceUnaryOp(UnaryOp &orig, SExpr* e0);
+  SExpr*    reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1);
 
   template <class T>
   MAPTYPE(SExprReducerMap, T) traverse(T* e, TraversalKind k);
@@ -82,6 +129,16 @@ public:
 
 
 protected:
+  ReducerMode switchMode(ReducerMode m) {
+    auto om = mode_;
+    mode_ = m;
+    return om;
+  }
+
+  void restoreMode(ReducerMode m) { mode_ = m; }
+
+  SExpr* calculateResidualType(SExpr* res, SExpr* e);
+
   /// Inline a call to a function defined inside the current CFG.
   SExpr* inlineLocalCall(PendingBlock *pb, Code *c);
 
@@ -91,17 +148,16 @@ protected:
   /// Implement lazy block traversal.
   void traversePendingBlocks();
 
-private:
-  void setResidualBoundingType(Instruction* res, SExpr* typ,
-                               BoundingType::Relation rel);
-
 public:
-  CFGReducer(MemRegionRef a) : CopyReducer(a), currentContinuation_(nullptr) {}
+  CFGReducer(MemRegionRef a)
+     : CopyReducer(a), mode_(RM_Reduce), currentContinuation_(nullptr) {}
   ~CFGReducer() { }
 
 private:
+  ReducerMode  mode_;
   BasicBlock*  currentContinuation_;    //< continuation for current block.
-  NestedStack<SExpr*> pendingArgs_;     //< unapplied arguments on curr path.
+  NestedStack<SExpr*> resultArgs_;      //< unapplied arguments on curr path.
+  BoundingType        resultType_;      //< type bound for current path.
 
   std::vector<std::unique_ptr<PendingBlock>> pendingBlocks_;
   std::queue<PendingBlock*>                  pendingBlockQueue_;
@@ -112,24 +168,37 @@ private:
 
 template <class T>
 MAPTYPE(SExprReducerMap, T) CFGReducer::traverse(T* e, TraversalKind k) {
-  // Save pending arguments, if we're not on the spine of a path.
-  unsigned argsave = 0;
-  if (k != TRV_Path)
-    argsave = pendingArgs_.save();
+  // Save pending arguments and resultType.
+  unsigned     argSave;
+  BoundingType resultTypeSave;
+  if (k != TRV_Path) {
+    argSave        = resultArgs_.save();
+    resultTypeSave = resultType_;
+  }
 
-  // Save the currentcontinuation.  (This is a CPS transform.)
+  // Save the current continuation.
   BasicBlock* cont = currentContinuation();
   if (k != TRV_Tail)
     setContinuation(nullptr);
 
-  // Do the traversal
+  // Clear the result type; the traversal will write a result here.
+  resultType_.clear();
+
+  // Do the traversal.  (This will set resultType_ and may add pending args).
   auto* result = SuperTv::traverse(e, k);
+
+  // diag.warning("trace: ") << e << " --> " << result << " : " << resultType_.typeExpr();
 
   // Restore the continuation.
   setContinuation(cont);
-  // Restore pending arguments, and ensure the traversal didn't add any.
-  if (k != TRV_Path)
-    pendingArgs_.restore(argsave);
+
+  // Restore old pending arguments and resultType.
+  // (Discard the ones we just calculated.)
+  if (k != TRV_Path) {
+    resultArgs_.clear();
+    resultArgs_.restore(argSave);
+    resultType_ = resultTypeSave;
+  }
 
   if (!currentBB())
     return result;

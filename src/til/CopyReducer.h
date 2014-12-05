@@ -46,12 +46,25 @@ class CopyReducer : public CFGBuilder {
 public:
   ScopeFrame& scope() { return *Scope; }
 
+  /// Switch to a new scope, and return pointer to old scope.
+  ScopeFrame* switchScope(ScopeFrame* NewScope) {
+    auto* S = Scope; Scope = NewScope; return S;
+  }
+
+  /// Restore the previous scope.
+  void restoreScope(ScopeFrame* OldScope) { Scope = OldScope; }
+
+
   void enterScope(VarDecl *Orig, VarDecl *Nvd) {
+    assert(Scope && "Cannot rewrite in output scope.");
     // Rewrite old variable to the new variable.
     // reduceVariable does the actual replacement.
+    Nvd->setVarIndex(Scope->allocVarIndex());
     Scope->enterScope(Orig, newVariable(Nvd));
   }
   void exitScope(VarDecl *Orig) {
+    assert(Scope && "Cannot rewrite in output scope.");
+    Scope->freeVarIndex();
     Scope->exitScope(Orig);
   }
 
@@ -59,7 +72,7 @@ public:
     return Scope->lookupInstr(E);
   }
   VarDecl* reduceWeak(VarDecl *E) {
-    assert(false && "Never called, since we override reduceVar.");
+    // Ignored, since we override reduceVar.
     return nullptr;
   }
   BasicBlock* reduceWeak(BasicBlock *E);
@@ -212,10 +225,13 @@ public:
 public:
   CopyReducer() : Scope(new ScopeFrame()) { }
   CopyReducer(MemRegionRef A) : CFGBuilder(A), Scope(new ScopeFrame()) { }
+  ~CopyReducer() {
+    if (Scope) delete Scope;
+  }
 
 public:
   // TODO: make private
-  std::unique_ptr<ScopeFrame> Scope;
+  ScopeFrame* Scope;
 };
 
 
@@ -228,22 +244,31 @@ public:
   LazyCopyFuture(SExpr* E, Visitor* R, ScopeFrame* S)
     : PendingExpr(E), Reducer(R), Scope(S)
   { }
+  ~LazyCopyFuture() {
+    if (Scope) delete Scope;
+  }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
-    std::unique_ptr<ScopeFrame> oldScope = std::move(Reducer->Scope);
-    Reducer->Scope = std::move(this->Scope);
+    auto* S = Reducer->switchScope(Scope);
     // TODO: store the context in which the future was created.
     auto* Res = Reducer->traverse(PendingExpr, TRV_Decl);
-    PendingExpr = nullptr;
-    Reducer->Scope = std::move(oldScope);
+    Reducer->restoreScope(S);
+
+    finish();
     return Res;
   }
 
 protected:
-  SExpr*    PendingExpr;                // The expression to be rewritten
-  Visitor*  Reducer;                    // The reducer object.
-  std::unique_ptr<ScopeFrame> Scope;    // The context in which it occurs
+  void finish() {
+    delete Scope;
+    Scope = 0;
+    PendingExpr = nullptr;
+  }
+
+  SExpr*      PendingExpr;    // The expression to be rewritten
+  Visitor*    Reducer;        // The reducer object.
+  ScopeFrame* Scope;          // The context in which it occurs
 };
 
 

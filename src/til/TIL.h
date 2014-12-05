@@ -195,6 +195,9 @@ public:
   /// Return true if this SExpr is a value (e.g. function, record, constant)
   bool isValue();
 
+  /// Return true if this SExpr is a heap-allocated value (e.g. function)
+  bool isHeapValue();
+
   /// Cast this SExpr to a CFG instruction, or return null if it is not one.
   Instruction* asCFGInstruction();
 
@@ -285,28 +288,6 @@ typedef SExprRefT<SExpr> SExprRef;
 
 
 
-/// Holds the type of a term.
-struct BoundingType {
-  enum Relation {
-    BT_Type,              ///<  Term has type TypeExpr
-    BT_ExactType,         ///<  Term has exact type TypeExpr
-    BT_Equivalent         ///<  Term is equivalent to TypeExpr
-  };
-
-  static Relation minRelation(Relation r1, Relation r2) {
-    return (r1 < r2) ? r1 : r2;
-  }
-
-  BoundingType() : TypeExpr(nullptr), Rel(BT_Type) { }
-  BoundingType(SExpr* E, Relation R) : TypeExpr(E), Rel(R) { }
-
-  void set(SExpr *E, Relation R) { TypeExpr.reset(E); Rel = R; }
-
-  SExprRef TypeExpr;   ///< The type expression for the term.
-  Relation Rel;        ///< How the type is related to the term.
-};
-
-
 
 /// Instructions are expressions with computational effect that can appear
 /// inside basic blocks.
@@ -358,22 +339,10 @@ public:
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { InstrName = N; }
 
-  /// Return the full type expression for this instruction.  The full type
-  /// expression is only needed for instructions that return pointers.
-  const BoundingType& boundingType() const { return TypeBound; }
-  BoundingType&       boundingType()       { return TypeBound; }
-
-  const SExpr* boundingTypeExpr() const { return TypeBound.TypeExpr.get(); }
-  SExpr*       boundingTypeExpr()       { return TypeBound.TypeExpr.get(); }
-
-  /// Set the type of this instruction.
-  void setBoundingType(SExpr* E, BoundingType::Relation R);
-
 protected:
   ValueType     ValType;    ///< The scalar type (simple type) of this instr.
   unsigned      InstrID;    ///< An ID that is unique within the CFG.
   unsigned      StackID;    ///< An ID for stack machine interpretation.
-  BoundingType  TypeBound;  ///< The full type of this instruction.
   BasicBlock*   Block;      ///< The basic block where this instruction occurs.
   StringRef     InstrName;  ///< The name of this instruction (if any).
 };

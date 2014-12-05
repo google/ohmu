@@ -42,6 +42,16 @@ public:
   SCFG*        currentCFG() { return CurrentCFG; }
   BasicBlock*  currentBB()  { return CurrentBB;  }
 
+  /// Set the emitInstrs flag, and return old flag.
+  /// If b is true, then the builder will add instructions to the current CFG.
+  bool switchEmit(bool b) {
+    bool ob = EmitInstrs;
+    EmitInstrs = b;
+    return ob;
+  }
+
+  /// Restore the emitInstrs flag.
+  void restoreEmit(bool b) { EmitInstrs = b; }
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -179,11 +189,11 @@ public:
 
   CFGBuilder()
     : OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true)
   { }
   CFGBuilder(MemRegionRef A)
     : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true)
   { }
   virtual ~CFGBuilder() { }
 
@@ -199,6 +209,7 @@ protected:
   BasicBlock*                CurrentBB;
   std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
+  bool                       EmitInstrs;      //< should we emit instrs?
 
   DiagnosticEmitter diag;
 };
@@ -206,8 +217,8 @@ protected:
 
 template<class T>
 inline T* CFGBuilder::addInstr(T* I) {
-  if (!I)
-    return nullptr;
+  if (!I || !EmitInstrs)
+    return I;
 
   if (I->block() == nullptr)
     I->setBlock(CurrentBB);        // Mark I as having been added.
@@ -217,8 +228,8 @@ inline T* CFGBuilder::addInstr(T* I) {
 }
 
 inline Phi* CFGBuilder::addArg(Phi* A) {
-  if (!A)
-    return nullptr;
+  if (!A || !EmitInstrs)
+    return A;
 
   if (A->block() == nullptr)
     A->setBlock(CurrentBB);      // Mark A as having been added

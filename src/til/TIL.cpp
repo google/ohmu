@@ -163,19 +163,14 @@ bool SExpr::isValue() {
 }
 
 
-
-void Instruction::setBoundingType(SExpr* E, BoundingType::Relation R) {
-  assert(!isa<Future>(E) && "Cannot set the bounding type to a future.");
-  if (auto *SC = dyn_cast<ScalarType>(E)) {
-    ValType = SC->valueType();
-  }
-  else if (auto *L = dyn_cast<Literal>(E)) {
-    ValType = L->valueType();
-  }
-  else {
-    // Not a scalar type, so store the full type info.
-    ValType = ValueType::getValueType<void*>();
-    TypeBound.set(E, R);
+bool SExpr::isHeapValue() {
+  switch (Opcode) {
+    case COP_Function:   return true;
+    case COP_Slot:       return true;
+    case COP_Record:     return true;
+    case COP_Code:       return true;
+    case COP_Field:      return true;
+    default:             return false;
   }
 }
 
