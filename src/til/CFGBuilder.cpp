@@ -149,13 +149,13 @@ void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
 
   // Update the type of the Phi node.
   // All phi arguments must have the exact same type.
-  if (Idx == 0 && Ph->valueType().Base == ValueType::BT_Void) {
+  if (Idx == 0 && Ph->baseType().Base == BaseType::BT_Void) {
     // Set the initial type of the Phi node.
-    Ph->setValueType(I->valueType());
+    Ph->setBaseType(I->baseType());
   }
-  else if (Ph->valueType() != I->valueType()) {
+  else if (Ph->baseType() != I->baseType()) {
     diag.error("Type mismatch in branch: ")
-      << I << " does not have type " << Ph->valueType().getTypeName();
+      << I << " does not have type " << Ph->baseType().getTypeName();
   }
 }
 

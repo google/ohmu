@@ -51,7 +51,7 @@
 // reused outside of clang/llvm.  All clang and llvm dependencies should go
 // in TILDependencies.h.
 #include "TILDependencies.h"
-#include "TILValueType.h"
+#include "TILBaseType.h"
 
 
 #include <stdint.h>
@@ -165,7 +165,7 @@ StringRef getCastOpcodeString(TIL_CastOpcode Op);
 
 /// If Vt1 can be converted to Vt2 without loss of precision, then return
 /// the opcode that does the cast, otherwise return CAST_none.
-TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2);
+TIL_CastOpcode typeConvertable(BaseType Vt1, BaseType Vt2);
 
 
 
@@ -300,14 +300,14 @@ public:
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
 
   Instruction(TIL_Opcode Op, unsigned char SubOp = 0)
-      : SExpr(Op, SubOp), ValType(ValueType::getValueType<void>()),
+      : SExpr(Op, SubOp), BType(BaseType::getBaseType<void>()),
         InstrID(0), StackID(0), Block(nullptr), InstrName("", 0) { }
   Instruction(const Instruction &E)
-      : SExpr(E), ValType(E.ValType),
+      : SExpr(E), BType(E.BType),
         InstrID(0), StackID(0), Block(nullptr), InstrName(E.InstrName) { }
 
   /// Return the simple scalar type (e.g. int/float/pointer) of this instr.
-  ValueType valueType() const { return ValType; }
+  BaseType baseType() const { return BType; }
 
   /// Returns the instruction ID for this instruction.
   /// All basic block instructions have an ID that is unique within the CFG.
@@ -333,14 +333,14 @@ public:
   /// Set the stack ID for this instruction.
   void setStackID(unsigned D) { StackID = D; }
 
-  /// Sets the ValueType for this instruction.
-  void setValueType(ValueType Vt) { ValType = Vt; }
+  /// Sets the BaseType for this instruction.
+  void setBaseType(BaseType Vt) { BType = Vt; }
 
   /// Sets the name of this instructions.
   void setInstrName(StringRef N) { InstrName = N; }
 
 protected:
-  ValueType     ValType;    ///< The scalar type (simple type) of this instr.
+  BaseType      BType;      ///< The scalar type (simple type) of this instr.
   unsigned      InstrID;    ///< An ID that is unique within the CFG.
   unsigned      StackID;    ///< An ID for stack machine interpretation.
   BasicBlock*   Block;      ///< The basic block where this instruction occurs.
@@ -427,15 +427,15 @@ class ScalarType : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_ScalarType; }
 
-  ScalarType(ValueType VT) : SExpr(COP_ScalarType), ValType(VT)  { }
+  ScalarType(BaseType BT) : SExpr(COP_ScalarType), BType(BT)  { }
 
   /// Return the type of this instruction
-  ValueType valueType() const { return ValType; }
+  BaseType baseType() const { return BType; }
 
   DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
 
 private:
-  ValueType ValType;
+  BaseType BType;
 };
 
 
@@ -668,7 +668,7 @@ class Literal : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Literal; }
 
-  Literal(ValueType VT) : Instruction(COP_Literal) { ValType = VT; }
+  Literal(BaseType BT) : Instruction(COP_Literal) { BType = BT; }
   Literal(const Literal &L) : Instruction(L) { }
 
   template<class T> const LiteralT<T>& as() const {
@@ -686,7 +686,7 @@ public:
 template<class T>
 class LiteralT : public Literal {
 public:
-  LiteralT(T Dat) : Literal(ValueType::getValueType<T>()), Val(Dat) { }
+  LiteralT(T Dat) : Literal(BaseType::getBaseType<T>()), Val(Dat) { }
 
   T  value() const { return Val;}
   T& value() { return Val; }
@@ -826,7 +826,7 @@ public:
   };
 
   Alloc(SExpr *E, AllocKind K) : Instruction(COP_Alloc, K), InitExpr(E) {
-    setValueType(ValueType::getValueType<void*>());
+    setBaseType(BaseType::getBaseType<void*>());
   }
 
   void rewrite(SExpr *I) { InitExpr.reset(I); }

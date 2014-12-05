@@ -24,7 +24,7 @@ namespace til  {
 
 template<class T>
 inline Slot* scalarTypeSlot(Global &G, StringRef Name) {
-  auto* Ty = new (G.LangArena) ScalarType(ValueType::getValueType<T>());
+  auto* Ty = new (G.LangArena) ScalarType(BaseType::getBaseType<T>());
   auto* Slt = new (G.ParseArena) Slot(Name, Ty);
   Slt->setModifier(Slot::SLT_Final);
   return Slt;

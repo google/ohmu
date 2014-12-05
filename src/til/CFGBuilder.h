@@ -89,7 +89,7 @@ public:
   }
 
   Literal* newLiteralVoid() {
-    return new (Arena) Literal(ValueType::getValueType<void>());
+    return new (Arena) Literal(BaseType::getBaseType<void>());
   }
   template<class T>
   LiteralT<T>* newLiteralT(T Val) {

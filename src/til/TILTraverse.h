@@ -404,55 +404,56 @@ MAPTYPE(V::RMap, ScalarType) ScalarType::traverse(V &Vs) {
 
 template <class V>
 MAPTYPE(V::RMap, Literal) Literal::traverse(V &Vs) {
-  switch (ValType.Base) {
-  case ValueType::BT_Void:
+  switch (BType.Base) {
+  case BaseType::BT_Void:
     break;
-  case ValueType::BT_Bool:
+  case BaseType::BT_Bool:
     return Vs.reduceLiteralT(as<bool>());
-  case ValueType::BT_Int: {
-    switch (ValType.Size) {
-    case ValueType::ST_8:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int8_t>());
-      else
-        return Vs.reduceLiteralT(as<uint8_t>());
-    case ValueType::ST_16:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int16_t>());
-      else
-        return Vs.reduceLiteralT(as<uint16_t>());
-    case ValueType::ST_32:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int32_t>());
-      else
-        return Vs.reduceLiteralT(as<uint32_t>());
-    case ValueType::ST_64:
-      if (ValType.Signed)
-        return Vs.reduceLiteralT(as<int64_t>());
-      else
-        return Vs.reduceLiteralT(as<uint64_t>());
+  case BaseType::BT_Int: {
+    switch (BType.Size) {
+    case BaseType::ST_8:
+      return Vs.reduceLiteralT(as<int8_t>());
+    case BaseType::ST_16:
+      return Vs.reduceLiteralT(as<int16_t>());
+    case BaseType::ST_32:
+      return Vs.reduceLiteralT(as<int32_t>());
+    case BaseType::ST_64:
+      return Vs.reduceLiteralT(as<int64_t>());
     default:
       break;
     }
     break;
   }
-  case ValueType::BT_Float: {
-    switch (ValType.Size) {
-    case ValueType::ST_32:
+  case BaseType::BT_UnsignedInt: {
+    switch (BType.Size) {
+    case BaseType::ST_8:
+      return Vs.reduceLiteralT(as<uint8_t>());
+    case BaseType::ST_16:
+      return Vs.reduceLiteralT(as<uint16_t>());
+    case BaseType::ST_32:
+      return Vs.reduceLiteralT(as<uint32_t>());
+    case BaseType::ST_64:
+      return Vs.reduceLiteralT(as<uint64_t>());
+    default:
+      break;
+    }
+    break;
+  }
+  case BaseType::BT_Float: {
+    switch (BType.Size) {
+    case BaseType::ST_32:
       return Vs.reduceLiteralT(as<float>());
-    case ValueType::ST_64:
+    case BaseType::ST_64:
       return Vs.reduceLiteralT(as<double>());
     default:
       break;
     }
     break;
   }
-  case ValueType::BT_String:
+  case BaseType::BT_String:
     return Vs.reduceLiteralT(as<StringRef>());
-  case ValueType::BT_Pointer:
+  case BaseType::BT_Pointer:
     return Vs.reduceLiteralT(as<void*>());
-  case ValueType::BT_ValueRef:
-    break;
   }
   return Vs.reduceLiteral(*this);
 }

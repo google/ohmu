@@ -45,8 +45,8 @@ public:
 
 
 
-/// Set the ValueType of i, based on the type expression e.
-static void setValueTypeFromExpr(Instruction* i, SExpr* e) {
+/// Set the BaseType of i, based on the type expression e.
+static void setBaseTypeFromExpr(Instruction* i, SExpr* e) {
   if (!e)
     return;
   if (auto *f = dyn_cast<Future>(e))
@@ -57,13 +57,13 @@ static void setValueTypeFromExpr(Instruction* i, SExpr* e) {
     case COP_Code:
     case COP_Field:
     case COP_Record:
-      i->setValueType(ValueType::getValueType<void*>());
+      i->setBaseType(BaseType::getBaseType<void*>());
       break;
     case COP_ScalarType:
-      i->setValueType(cast<ScalarType>(e)->valueType());
+      i->setBaseType(cast<ScalarType>(e)->baseType());
       break;
     case COP_Literal:
-      i->setValueType(cast<Literal>(e)->valueType());
+      i->setBaseType(cast<Literal>(e)->baseType());
       break;
     default:
       assert(false && "Type expression must be a value.");
@@ -78,8 +78,8 @@ SExpr* CFGReducer::calculateResidualType(SExpr* res, SExpr* e) {
   // Short-circuit: no need for detailed type info if res is not a pointer.
   // I.e. don't traverse arithmetic expressions.
   auto* ires = dyn_cast_or_null<Instruction>(res);
-  if (ires && ires->valueType().Base != ValueType::BT_Pointer
-           && ires->valueType().Base != ValueType::BT_Void) {
+  if (ires && ires->baseType().Base != BaseType::BT_Pointer
+           && ires->baseType().Base != BaseType::BT_Void) {
     return res;
   }
 
@@ -101,7 +101,7 @@ SExpr* CFGReducer::calculateResidualType(SExpr* res, SExpr* e) {
 
   // Use the type expression we computed to set the valueType.
   if (ires)
-    setValueTypeFromExpr(ires, resultType_.typeExpr());
+    setBaseTypeFromExpr(ires, resultType_.typeExpr());
 
   return res;
 }
@@ -172,7 +172,7 @@ SExpr* CFGReducer::reduceIdentifier(Identifier &orig) {
       resultArgs_.push_back(svar);
       resultType_.set(sdef, BoundingType::BT_Type);
       // TODO:  automatically insert loads for slots.
-      setValueTypeFromExpr(res, sdef);
+      setBaseTypeFromExpr(res, sdef);
       return res;
     }
   }
@@ -269,7 +269,7 @@ SExpr* CFGReducer::reduceApply(Apply &orig, SExpr* e, SExpr *a) {
 
   if (e && mode_ == RM_Reduce) {
     auto* res = CopyReducer::reduceApply(orig, e, a);
-    setValueTypeFromExpr(res, restyp);
+    setBaseTypeFromExpr(res, restyp);
     return res;
   }
   return nullptr;
@@ -311,7 +311,7 @@ SExpr* CFGReducer::reduceProject(Project &orig, SExpr* e) {
 
   if (e && mode_ == RM_Reduce) {
     auto* res = CopyReducer::reduceProject(orig, e);
-    setValueTypeFromExpr(res, restyp);
+    setBaseTypeFromExpr(res, restyp);
     return res;
   }
   return nullptr;
@@ -344,7 +344,7 @@ SExpr* CFGReducer::reduceCall(Call &orig, SExpr *e) {
 
   if (e && mode_ == RM_Reduce) {
     auto* res = CopyReducer::reduceCall(orig, e);
-    setValueTypeFromExpr(res, restyp);
+    setBaseTypeFromExpr(res, restyp);
     return res;
   }
   return nullptr;
@@ -361,7 +361,7 @@ SExpr* CFGReducer::inlineLocalCall(PendingBlock *pb, Code* c) {
     cont = newBlock(1);
   // TODO: should we check against an existing type?
   // TODO: evaluate returnType()
-  setValueTypeFromExpr(cont->arguments()[0], c->returnType());
+  setBaseTypeFromExpr(cont->arguments()[0], c->returnType());
 
   // Set the continuation of the pending block to the current continuation.
   // If there are multiple calls, the continuations must match.
@@ -396,7 +396,7 @@ SExpr* CFGReducer::reduceLoad(Load &orig, SExpr* e) {
   // If we can map the load to a local variable, then set the type.
   if (Alloc* a = dyn_cast<Alloc>(e)) {
     if (auto* instr = dyn_cast_or_null<Instruction>(a->initializer()))
-      res->setValueType(instr->valueType());
+      res->setBaseType(instr->baseType());
   }
   return res;
 }
@@ -412,42 +412,42 @@ SExpr* CFGReducer::reduceUnaryOp(UnaryOp &orig, SExpr* e0) {
 
   switch (orig.unaryOpcode()) {
     case UOP_Minus: {
-      if (!i0->valueType().isNumeric())
+      if (!i0->baseType().isNumeric())
         diag.error("Operator requires a numeric type: ") << &orig;
       break;
     }
     case UOP_BitNot: {
-      if (i0->valueType().Base != ValueType::BT_Int)
+      if (i0->baseType().Base != BaseType::BT_Int)
         diag.error("Bitwise operations require integer type.") << &orig;
       break;
     }
     case UOP_LogicNot: {
-      if (i0->valueType().Base != ValueType::BT_Bool)
+      if (i0->baseType().Base != BaseType::BT_Bool)
         diag.error("Logical operations require boolean type.") << &orig;
       break;
     }
   }
 
   auto* res = CopyReducer::reduceUnaryOp(orig, i0);
-  res->setValueType(i0->valueType());
+  res->setBaseType(i0->baseType());
   return res;
 }
 
 
 
 bool CFGReducer::checkAndExtendTypes(Instruction*& i0, Instruction*& i1) {
-  if (i0->valueType() == i1->valueType())
+  if (i0->baseType() == i1->baseType())
     return true;
-  TIL_CastOpcode op = typeConvertable(i0->valueType(), i1->valueType());
+  TIL_CastOpcode op = typeConvertable(i0->baseType(), i1->baseType());
   if (op != CAST_none) {
     i0 = newCast(op, i0);
-    i0->setValueType(i1->valueType());
+    i0->setBaseType(i1->baseType());
     return true;
   }
-  op = typeConvertable(i1->valueType(), i0->valueType());
+  op = typeConvertable(i1->baseType(), i0->baseType());
   if (op != CAST_none) {
     i1 = newCast(op, i1);
-    i1->setValueType(i0->valueType());
+    i1->setBaseType(i0->baseType());
     return true;
   }
   return false;
@@ -468,16 +468,16 @@ SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
     return newUndefined();
   }
 
-  ValueType vt = ValueType::getValueType<void>();
+  BaseType vt = BaseType::getBaseType<void>();
   switch (orig.binaryOpcode()) {
     case BOP_Add:
     case BOP_Sub:
     case BOP_Mul:
     case BOP_Div:
     case BOP_Rem: {
-      if (!i0->valueType().isNumeric())
+      if (!i0->baseType().isNumeric())
         diag.error("Operator requires a numeric type: ") << &orig;
-      vt = i0->valueType();
+      vt = i0->baseType();
       break;
     }
     case BOP_Shl:
@@ -485,40 +485,40 @@ SExpr* CFGReducer::reduceBinaryOp(BinaryOp &orig, SExpr* e0, SExpr* e1) {
     case BOP_BitAnd:
     case BOP_BitXor:
     case BOP_BitOr: {
-      if (i0->valueType().Base != ValueType::BT_Int)
+      if (i0->baseType().Base != BaseType::BT_Int)
         diag.error("Bitwise operations require integer type.") << &orig;
-      vt = i0->valueType();
+      vt = i0->baseType();
       break;
     }
     case BOP_Eq:
     case BOP_Neq:
     case BOP_Lt:
     case BOP_Leq: {
-      vt = ValueType::getValueType<bool>();
+      vt = BaseType::getBaseType<bool>();
       break;
     }
     case BOP_Gt: {
       // rewrite > to <
       auto* res = newBinaryOp(BOP_Lt, i1, i0);
-      res->setValueType(ValueType::getValueType<bool>());
+      res->setBaseType(BaseType::getBaseType<bool>());
       return res;
     }
     case BOP_Geq: {
       // rewrite >= to <=
       auto* res = newBinaryOp(BOP_Leq, i1, i0);
-      res->setValueType(ValueType::getValueType<bool>());
+      res->setBaseType(BaseType::getBaseType<bool>());
       return res;
     }
     case BOP_LogicAnd:
     case BOP_LogicOr: {
-      if (i0->valueType().Base != ValueType::BT_Bool)
+      if (i0->baseType().Base != BaseType::BT_Bool)
         diag.error("Logical operations require boolean type.") << &orig;
-      vt = ValueType::getValueType<bool>();
+      vt = BaseType::getBaseType<bool>();
       break;
     }
   }
   auto* res = CopyReducer::reduceBinaryOp(orig, i0, i1);
-  res->setValueType(vt);
+  res->setBaseType(vt);
   return res;
 }
 
@@ -564,7 +564,7 @@ SExpr* CFGReducer::traverseCode(Code* e, TraversalKind k) {
 
     Phi* ph = b->arguments()[i];
     ph->setInstrName(entry.VDecl->varName());
-    setValueTypeFromExpr(ph, nvd->definition());
+    setBaseTypeFromExpr(ph, nvd->definition());
 
     // Make the function parameters look like let-variables.
     entry.VDecl = newVarDecl(VarDecl::VK_Let, entry.VDecl->varName(), ph);
@@ -623,7 +623,7 @@ SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
   // End current block with a branch
   SExpr* nc = this->self()->traverseArg(e->condition());
   Instruction* nci = dyn_cast<Instruction>(nc);
-  if (!nci || nci->valueType().Base != ValueType::BT_Bool)
+  if (!nci || nci->baseType().Base != BaseType::BT_Bool)
     diag.error("Branch condition is not a boolean: ") << nci;
 
   Branch* br = newBranch(nc);

@@ -159,7 +159,7 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
   for (unsigned j = 0; j < i; ++j)
     Ph->values().emplace_back(Arena, E);
   if (Instruction *I = dyn_cast<Instruction>(E))
-    Ph->setValueType(I->valueType());
+    Ph->setBaseType(I->baseType());
   return Ph;
 }
 

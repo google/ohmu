@@ -13,24 +13,26 @@ namespace ohmu {
 namespace til  {
 
 
-const char* ValueType::getTypeName() {
+const char* BaseType::getTypeName() {
   switch (Base) {
     case BT_Void: return "Void";
     case BT_Bool: return "Bool";
     case BT_Int: {
       switch (Size) {
-      case ST_8:
-        if (Signed) return "Int8";
-        else        return "UInt8";
-      case ST_16:
-        if (Signed) return "Int16";
-        else        return "UInt16";
-      case ST_32:
-        if (Signed) return "Int32";
-        else        return "UInt32";
-      case ST_64:
-        if (Signed) return "Int64";
-        else        return "UInt64";
+      case ST_8:  return "Int8";
+      case ST_16: return "Int16";
+      case ST_32: return "Int32";
+      case ST_64: return "Int64";
+      default:
+        break;
+      }
+    }
+    case BT_UnsignedInt: {
+      switch (Size) {
+      case ST_8:  return "UInt8";
+      case ST_16: return "UInt16";
+      case ST_32: return "UInt32";
+      case ST_64: return "UInt64";
       default:
         break;
       }
@@ -45,23 +47,22 @@ const char* ValueType::getTypeName() {
     }
     case BT_String:   return "String";
     case BT_Pointer:  return "Pointer";
-    case BT_ValueRef: return "Unknown";
   }
   return "InvalidType";
 }
 
 
-TIL_CastOpcode typeConvertable(ValueType Vt1, ValueType Vt2) {
-  if (Vt1.Base == ValueType::BT_Int) {
-    if (Vt2.Base == ValueType::BT_Int)
+TIL_CastOpcode typeConvertable(BaseType Vt1, BaseType Vt2) {
+  if (Vt1.isIntegral()) {
+    if (Vt2.Base == Vt1.Base)
       if (Vt1.Size <= Vt2.Size)
         return CAST_extendNum;
-    if (Vt2.Base == ValueType::BT_Float)
+    if (Vt2.Base == BaseType::BT_Float)
       if (static_cast<unsigned>(Vt1.Size) <= static_cast<unsigned>(Vt2.Size)-1)
         return CAST_extendToFloat;
   }
-  else if (Vt1.Base == ValueType::BT_Float &&
-           Vt2.Base == ValueType::BT_Float) {
+  else if (Vt1.Base == BaseType::BT_Float &&
+           Vt2.Base == BaseType::BT_Float) {
     if (Vt1.Size <= Vt2.Size)
       return CAST_extendNum;
   }

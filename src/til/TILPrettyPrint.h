@@ -148,7 +148,7 @@ protected:
   }
 
   void printScalarType(const ScalarType *E, StreamType &SS) {
-    SS << E->valueType().getTypeName();
+    SS << E->baseType().getTypeName();
   }
 
   template<class T>
@@ -161,56 +161,63 @@ protected:
   }
 
   void printLiteral(const Literal *E, StreamType &SS) {
-    ValueType VT = E->valueType();
+    BaseType VT = E->baseType();
     switch (VT.Base) {
-    case ValueType::BT_Void: {
+    case BaseType::BT_Void: {
       SS << "void";
       return;
     }
-    case ValueType::BT_Bool: {
+    case BaseType::BT_Bool: {
       if (E->as<bool>().value())
         SS << "true";
       else
         SS << "false";
       return;
     }
-    case ValueType::BT_Int: {
+    case BaseType::BT_Int: {
       switch (VT.Size) {
-      case ValueType::ST_8:
-        if (VT.Signed)
-          printLiteralT(&E->as<int8_t>(), SS);
-        else
-          printLiteralT(&E->as<uint8_t>(), SS);
+      case BaseType::ST_8:
+        printLiteralT(&E->as<int8_t>(), SS);
         return;
-      case ValueType::ST_16:
-        if (VT.Signed)
-          printLiteralT(&E->as<int16_t>(), SS);
-        else
-          printLiteralT(&E->as<uint16_t>(), SS);
+      case BaseType::ST_16:
+        printLiteralT(&E->as<int16_t>(), SS);
         return;
-      case ValueType::ST_32:
-        if (VT.Signed)
-          printLiteralT(&E->as<int32_t>(), SS);
-        else
-          printLiteralT(&E->as<uint32_t>(), SS);
+      case BaseType::ST_32:
+        printLiteralT(&E->as<int32_t>(), SS);
         return;
-      case ValueType::ST_64:
-        if (VT.Signed)
-          printLiteralT(&E->as<int64_t>(), SS);
-        else
-          printLiteralT(&E->as<uint64_t>(), SS);
+      case BaseType::ST_64:
+        printLiteralT(&E->as<int64_t>(), SS);
         return;
       default:
         break;
       }
       break;
     }
-    case ValueType::BT_Float: {
+    case BaseType::BT_UnsignedInt: {
       switch (VT.Size) {
-      case ValueType::ST_32:
+      case BaseType::ST_8:
+        printLiteralT(&E->as<uint8_t>(), SS);
+        return;
+      case BaseType::ST_16:
+        printLiteralT(&E->as<uint16_t>(), SS);
+        return;
+      case BaseType::ST_32:
+        printLiteralT(&E->as<uint32_t>(), SS);
+        return;
+      case BaseType::ST_64:
+        printLiteralT(&E->as<uint64_t>(), SS);
+        return;
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_Float: {
+      switch (VT.Size) {
+      case BaseType::ST_32:
         printLiteralT(&E->as<float>(), SS);
         return;
-      case ValueType::ST_64:
+      case BaseType::ST_64:
         printLiteralT(&E->as<double>(), SS);
         return;
       default:
@@ -218,18 +225,14 @@ protected:
       }
       break;
     }
-    case ValueType::BT_String: {
+    case BaseType::BT_String: {
       SS << "\"";
       printLiteralT(&E->as<StringRef>(), SS);
       SS << "\"";
       return;
     }
-    case ValueType::BT_Pointer: {
+    case BaseType::BT_Pointer: {
       SS << "#ptr";
-      return;
-    }
-    case ValueType::BT_ValueRef: {
-      SS << "#vref";
       return;
     }
     }
@@ -484,7 +487,7 @@ protected:
     if (E->opcode() != COP_Store) {
       SS << "let " << "_" << printableName(E->instrName()) << E->instrID();
       if (Verbose) {
-        SS << ": " << E->valueType().getTypeName();
+        SS << ": " << E->baseType().getTypeName();
       }
       SS << " = ";
     }
