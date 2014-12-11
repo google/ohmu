@@ -219,7 +219,7 @@ SExpr* CFGReducer::reduceVariable(Variable &orig, VarDecl *vd) {
   if (Scope) {
     // Look up the substitution for this variable, which will be the residual.
     // The substitution is an expression in the output scope.
-    auto* res = Scope->lookupVar(orig.variableDecl());
+    res = Scope->lookupVar(orig.variableDecl());
 
     // The default substitution just rewrites a variable to a new variable,
     // so optimize for that case.
