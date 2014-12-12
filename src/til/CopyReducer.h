@@ -27,6 +27,7 @@
 
 #include "CFGBuilder.h"
 #include "Scope.h"
+#include "AttributeGrammar.h"
 
 #include <cstddef>
 #include <memory>
@@ -42,6 +43,7 @@ namespace til  {
 /// In other words, it makes a deep copy of a term.
 /// It also useful as a base class for non-destructive rewrites.
 /// It automatically performs variable substitution during the copy.
+
 class CopyReducer : public CFGBuilder {
 public:
   ScopeFrame& scope() { return *Scope; }
@@ -75,7 +77,7 @@ public:
     // Ignored, since we override reduceVar.
     return nullptr;
   }
-  BasicBlock* reduceWeak(BasicBlock *E);
+  inline BasicBlock* reduceWeak(BasicBlock *E);
 
 
   VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
@@ -186,7 +188,7 @@ public:
     return newReturn(E);
   }
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
+  inline BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
   void handleBBArg(Phi &Orig, SExpr* Res) {
     if (OverwriteArguments)
       scope().updateInstructionMap(&Orig, Res);
@@ -194,13 +196,13 @@ public:
   void handleBBInstr(Instruction &Orig, SExpr* Res) {
     scope().updateInstructionMap(&Orig, Res);
   }
-  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
+  inline BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig);
+  inline SCFG* reduceSCFG_Begin(SCFG &Orig);
   void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
     /* BlockMap updated by reduceWeak(BasicBlock). */
   }
-  SCFG* reduceSCFG_End(SCFG* Scfg);
+  inline SCFG* reduceSCFG_End(SCFG* Scfg);
 
   SExpr* reduceUndefined(Undefined &Orig) {
     return newUndefined();
@@ -237,7 +239,7 @@ public:
 
 
 /// An implementation of Future for lazy, non-destructive traversals.
-/// Visitor extends CopyReducer
+/// Visitor extends CopyReducer.
 template<class Visitor>
 class LazyCopyFuture : public Future {
 public:
@@ -332,6 +334,52 @@ public:
     return Copier.traverseAll(E);
   }
 };
+
+
+
+
+SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
+  beginCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
+  Scope->enterCFG(&Orig, currentCFG());
+  return currentCFG();
+}
+
+SCFG* CopyReducer::reduceSCFG_End(SCFG* Scfg) {
+  Scope->exitCFG();
+  endCFG();
+  Scfg->renumber();
+  return Scfg;
+}
+
+
+BasicBlock* CopyReducer::reduceBasicBlockBegin(BasicBlock &Orig) {
+  BasicBlock *B = reduceWeak(&Orig);
+  beginBlock(B);
+  return B;
+}
+
+
+BasicBlock* CopyReducer::reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
+  // Sanity check.
+  // If Term isn't null, then writing the terminator should end the block.
+  if (currentBB())
+    endBlock(nullptr);
+  return B;
+}
+
+
+// Create new blocks on demand, as we encounter jumps to them.
+BasicBlock* CopyReducer::reduceWeak(BasicBlock *B) {
+  auto *B2 = Scope->lookupBlock(B);
+  if (!B2) {
+    // Create new block, and add all of its Phi nodes to InstructionMap.
+    // This has to be done before we process a Goto.
+    unsigned Nargs = B->arguments().size();
+    B2 = newBlock(Nargs, B->numPredecessors());
+    Scope->updateBlockMap(B, B2);
+  }
+  return B2;
+}
 
 
 }  // end namespace til
