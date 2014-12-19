@@ -55,6 +55,7 @@
 // Literal hoisting:  In general, it's not necessary to allocate registers for
 // literals.  They can use one
 
+#if 0
 #include "types.h"
 #include "interface.h"
 #include <vector>
@@ -710,3 +711,4 @@ void encode(SCFG* cfg, char* output) {
   //X64Builder builder;
   //emitASM(builder, InstructionStream.events.data(), InstructionStream.events.size());
 }
+#endif

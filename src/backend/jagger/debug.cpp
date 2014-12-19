@@ -21,7 +21,7 @@
 #include "types.h"
 #include <stdio.h>
 
-namespace Jagger {
+namespace Core {
 
 bool validateTIL(ohmu::til::BasicBlock* block) {
   if (!block) {
@@ -92,46 +92,34 @@ bool validateTIL(ohmu::til::Global* global) {
 }
 
 const char* opcodeNames[] = {
-    "NOP",                "CASE_HEADER",        "JOIN_HEADER",
-    "JOIN_COPY",          "USE",                "LAST_USE",
-    "ONLY_USE",           "VALUE_KEY",          "PHI0",
-    "PHI1",               "PHI2",               "PHI3",
-    "PHI4",               "PHI5",               "PHI6",
-    "PHI7",               "DESTRUCTIVE_VALUE0", "DESTRUCTIVE_VALUE1",
-    "DESTRUCTIVE_VALUE2", "DESTRUCTIVE_VALUE3", "DESTRUCTIVE_VALUE4",
-    "DESTRUCTIVE_VALUE5", "DESTRUCTIVE_VALUE6", "DESTRUCTIVE_VALUE7",
-    "VALUE0",             "VALUE1",             "VALUE2",
-    "VALUE3",             "VALUE4",             "VALUE5",
-    "VALUE6",             "VALUE7",             "ISA_OP",
-    "CLOBBER_LIST",       "REGISTER_HINT",      "IMMEDIATE_BYTES",
-    "BYTES_HEADER",       "ALIGNED_BYTES",      "BYTES",
-    "CALL",               "RET",                "JUMP",
-    "BRANCH",             "BRANCH_TARGET",
-    "COMPARE",            "COMPARE_ZERO",       "NOT",
-    "LOGIC",              "LOGIC3",             "BITFIELD_EXTRACT",
-    "BITFIELD_INSERT",    "BITFIELD_CLEAR",     "COUNT_ZEROS",
-    "POPCNT",             "BIT_TEST",           "MIN",
-    "MAX",                "ADD",                "SUB",
-    "NEG",                "ADDR",               "MUL",
-    "DIV",                "IMULHI",             "IDIV",
-    "IMOD",               "ABS",                "RCP",
-    "SQRT",               "RSQRT",              "EXP2",
-    "CONVERT",            "FIXUP",              "SHUFFLE",
-    "IGNORE_LANES",       "BLEND",              "BLEND_ZERO",
-    "PREFETCH",           "LOAD",               "EXPAND",
-    "GATHER",             "INSERT",             "BROADCAST",
-    "STORE",              "COMPRESS",           "SCATTER",
-    "EXTRACT",            "MEMSET",             "MEMCPY"};
+    "NOP",             "CASE_HEADER",     "JOIN_HEADER",  "USE",
+    "LAST_USE",        "ONLY_USE",        "ANCHOR",        "JOIN_COPY",
+    "PHI",             "IMMEDIATE_BYTES", "BYTES_HEADER", "ALIGNED_BYTES",
+    "BYTES",           "CALL",            "RET",          "JUMP",
+    "BRANCH",          "BRANCH_TARGET",   "COMPARE",      "COMPARE_ZERO",
+    "NOT",             "LOGIC",           "LOGIC3",       "BITFIELD_EXTRACT",
+    "BITFIELD_INSERT", "BITFIELD_CLEAR",  "COUNT_ZEROS",  "POPCNT",
+    "BIT_TEST",        "MIN",             "MAX",          "ADD",
+    "SUB",             "NEG",             "ADDR",         "MUL",
+    "DIV",             "IMULHI",          "IDIV",         "IMOD",
+    "ABS",             "RCP",             "SQRT",         "RSQRT",
+    "EXP2",            "CONVERT",         "FIXUP",        "SHUFFLE",
+    "IGNORE_LANES",    "BLEND",           "BLEND_ZERO",   "PREFETCH",
+    "LOAD",            "EXPAND",          "GATHER",       "INSERT",
+    "BROADCAST",       "STORE",           "COMPRESS",     "SCATTER",
+    "EXTRACT",         "ATOMIC_ADD",      "ATOMIC_SUB",   "ATOMIC_LOGIC",
+    "ATOMIC_XCHG",     "ATOMIC_CMP_XCHG", "MEMSET",       "MEMCPY",
+    "NUM_OPCODES"};
 
 void printDebug(EventBuilder builder, size_t numEvents) {
   size_t offset = (numEvents + 2) / 3;
   for (size_t i = offset, e = numEvents + offset; i != e; ++i) {
     if (builder.data(i) >= offset && builder.data(i) < e)
       printf("%3d : %8d > %s\n", i, builder.data(i),
-             opcodeNames[builder.code(i)]);
+             opcodeNames[builder.kind(i)]);
     else
       printf("%3d : %08x > %s\n", i, builder.data(i),
-             opcodeNames[builder.code(i)]);
+             opcodeNames[builder.kind(i)]);
   }
 }
 

@@ -17,6 +17,33 @@
 
 #include "types.h"
 
+void allocate(Core::EventList in, size_t numEvents) {
+  computeOffsets();
+  prefixSumOffsets();
+  translate();
+  createAndSortX64Ops();
+  lowerKnownValues();
+  walkUsesCountConflicts();
+  allocateConflicts();
+  walkUsesGatherConflicts();
+  sortConflicts(); // TODO: do we need this?
+  allocateCopies();
+  listCopies(); // we hope to eliminate them
+  sortCopies(); // TODO: do we need this?
+  createWorklist(); // of registers
+  sortWorklist();
+  renumberAndResortConflicts(); // with work positions
+  renumberAndResortCopies(); // with work positions
+  allocateRegisters();
+  countGeneratedInstrs();
+  prefixSumGeneratedInstrs();
+  allocateInstrs();
+  generateInstrs();
+}
+
+
+#if 0
+
 namespace Jagger {
 namespace {
 
@@ -175,3 +202,4 @@ EventList lower(const EventList& in) {
 
 }  // namespace
 }  // namespace Jagger
+#endif

@@ -16,15 +16,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "types.h"
+#include <algorithm>
 #include <stdio.h>
 
-namespace Jagger {
+namespace Core {
+namespace {
 
 struct LiveRange {
   struct Iterator {
     struct EventRef {
       __forceinline EventRef(uchar& code, uint& data, const Iterator& i)
-        : code(code), data(data), i(i) {}
+          : code(code), data(data), i(i) {}
       uchar& code;
       uint& data;
       const Iterator& i;
@@ -33,17 +35,19 @@ struct LiveRange {
     __forceinline Iterator(EventBuilder builder, size_t index)
         : builder(builder), index(index), skipUntil(index + 1) {}
     __forceinline EventRef operator*() const {
-      return EventRef(builder.code(index), builder.data(index), *this);
+      return EventRef(builder.kind(index), builder.data(index), *this);
     }
     Iterator& operator++() {
-      if (builder.code(index) == JOIN_HEADER)
+      if (builder.kind(index) == JOIN_HEADER)
         skipUntil = builder.data(index);
-      else if (builder.code(index) == CASE_HEADER && notSkipping())
+      else if (builder.kind(index) == CASE_HEADER && notSkipping())
         index = builder.data(index);
       index--;
       return *this;
     }
-    __forceinline bool operator!=(const Iterator& a) const { return index != a.index; }
+    __forceinline bool operator!=(const Iterator& a) const {
+      return index != a.index;
+    }
     __forceinline bool notSkipping() const { return index < skipUntil; }
 
     EventBuilder builder;
@@ -61,13 +65,14 @@ struct LiveRange {
   size_t def;
   size_t use;
 };
+}  // namespace
 
 void normalize(const EventList& in) {
   // Determine last uses.
   EventBuilder builder = in.builder;
   auto isOnlyUse = new uchar[in.numEvents] - in.first;
   for (size_t i = in.first, e = in.bound(); i != e; ++i) {
-    if (builder.code(i) != LAST_USE) continue;
+    if (builder.kind(i) != LAST_USE) continue;
     size_t target = builder.data(i);
     isOnlyUse[i] = 1;
     for (auto other : LiveRange(builder, target, i))
@@ -79,16 +84,48 @@ void normalize(const EventList& in) {
         }
       }
   }
+  // Set upgrade last uses to only uses where possible.
   for (size_t i = in.first, e = in.bound(); i != e; ++i)
-    if (builder.code(i) == LAST_USE && isOnlyUse[i]) builder.code(i) = ONLY_USE;
+    if (builder.kind(i) == LAST_USE && isOnlyUse[i]) builder.kind(i) = ONLY_USE;
   delete[](isOnlyUse + in.first);
 
+  // Commute commutable operations to save copies.
   for (size_t i = in.first, e = in.bound(); i != e; ++i) {
-    if (builder.code(i) != JOIN_COPY || builder.code(i - 1) == USE) continue;
-    size_t phi = (size_t)builder.data(i);
-    if (builder.data(phi) > builder.data(i - 1))
-      builder.data(phi) = builder.data(i - 1);
+    if (builder.kind(i) != ADD) continue;
+    if (builder.kind(i - 2) == USE && builder.kind(i - 1) != USE) {
+      builder.kind(i - 2) = builder.kind(i - 1);
+      builder.kind(i - 1) = USE;
+      auto temp = builder.data(i - 2);
+      builder.data(i - 2) = builder.data(i - 1);
+      builder.data(i - 1) = temp;
+    }
   }
 }
 
+void sort(const EventList& in) {
+  EventBuilder builder = in.builder;
+  for (size_t i = 0, e = in.numEvents, j = in.first; i != e; j++, i++) {
+    in.offsets[i].key = builder.kind(j);
+    in.offsets[i].value = (unsigned)j;
+  }
+  std::stable_sort(in.offsets, in.offsets + in.numEvents);
+}
+
+void eliminatePhis(const EventList& in) {
+  EventBuilder builder = in.builder;
+  for (size_t i = in.first, e = in.bound(); i != e; ++i) {
+    if (builder.kind(i) != JOIN_COPY || builder.kind(i - 1) == USE) continue;
+    size_t phi = (size_t)builder.data(i);
+    if (builder.data(phi) < builder.data(i - 1))
+      builder.data(phi) = builder.data(i - 1);
+  }
+
+  for (size_t i = in.first, e = in.bound(); i != e; ++i) {
+    if (builder.kind(i) != PHI) continue;
+    if (auto j = builder.data(i)) {
+      while (builder.data(j)) j = builder.data(j);
+      builder.data(i) = j;
+    }
+  }
+}
 }  // namespace Jagger

@@ -16,7 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
-#include "clang/Analysis/Analyses/ThreadSafetyTIL.h"
+#include "til/TIL.h"
 
 // FIXME: Should take an allocator rather than a buffer.
-void encode(clang::threadSafety::til::SCFG* cfg, char* output);
+void encode(ohmu::til::SCFG* cfg, char* output);

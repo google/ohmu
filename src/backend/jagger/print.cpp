@@ -15,6 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if 0
 #include "types.h"
 #include <stdio.h>
 #include <map>
@@ -197,3 +198,4 @@ void make_asm(EventStream events, size_t numEvents) {
   for (auto i = buffer; i < tmp; i++)
     printf("%02x  ", *i);
 }
+#endif

@@ -19,94 +19,121 @@
 
 #include "types.h"
 
-namespace Jagger {
+namespace X64 {
+using Core::uchar;
+using Core::uint;
 
-enum X64Opcode {
-  AND, OR, XOR, ADD,
-  SUB,
-  NOT, NEG,
-  TEST, CMP,
-  SLL, SLR, SAR, ROL, ROR,
-  MUL, DIV, IMUL, IDIV,
-  LEA,
-  JMP, RET,
-  JZ, JNZ,
-  IMM32, LOAD_IMM32,
+enum X64Event {
+  X64_CASE_HEADER, X64_JOIN_HEADER,
+  REG, RM, VVVV, BASE, RIP, ZERO_BASE, INDEX_1, INDEX_2, INDEX_4, INDEX_8,
+  DISP,
+  IMM_8,
+  IMM_16,
+  IMM_32,
+  IMM_64,
+  IMM_64,
+  X64_OPCODE,
+  GPR_VALUE, VEC_VALUE, FLAGS_VALUE, MASK_VALUE, MMX_VALUE,
+  KNOWN_GPR_VALUE, KNOWN_VEC_VALUE, KNOWN_FLAGS_VALUE, KNOWN_MASK_VALUE, KNOWN_MMX_VALUE,
 };
 
-enum X64RegisterFile {
-  GPR = 1,
-  FLAGS,
-  VPU,
-  MASK,
-  MMX,
+enum Register { EAX, EDX, ECX, EBX };
+
+union Instruction {
+  struct {
+    unsigned foramt : 2; // none/rex/vex/evex
+    unsigned lockRep : 1;
+    unsigned size : 1;
+    unsigned address : 1;
+    unsigned override : 3;
+
+    unsigned rmResult : 1;
+    unsigned regResult : 1;
+    unsigned modrm_reg : 3;
+    unsigned sib_scale : 2; // don't need
+    unsigned vex_E : 1;
+
+    unsigned vex_mm : 2;
+    unsigned vex_L : 1;
+    unsigned rex_W : 1;
+    unsigned evex_b : 1;
+    unsigned evex_L : 1;
+    unsigned evex_L1 : 1;
+    unsigned evex_z : 1;
+
+    unsigned opcode : 8;
+  };
+  unsigned bits;
 };
 
-enum X64GPR {
-  RAX, RDX, RCX, RBX, RBP, RSP, RSI, RDI
-};
+namespace OpcodeBits {
+  const unsigned add = 0;
+  const unsigned sub = 0;
+  const unsigned mul = 0;
+  const unsigned mov = 0;
+}
 
-struct X64EventBuilder : EventBuilder {
-  inline size_t result(size_t i, X64RegisterFile file);
-  inline size_t destructiveResult(size_t i, X64RegisterFile file);
-  inline size_t add(size_t i, uint arg0, uint arg1, LogBits logBits);
-  inline size_t sub(size_t i, uint arg0, uint arg1, LogBits logBits);
-  inline size_t mul(size_t i, uint arg0, uint arg1, Type type, LogBits logBits);
+struct X64Builder : Core::EventBuilder {
+  inline size_t add(size_t i, EventBuilder in, size_t index);
+  inline size_t sub(size_t i, EventBuilder in, size_t index);
+  inline size_t mul(size_t i, EventBuilder in, size_t index);
+#if 0
   inline size_t cmp(size_t i, uint arg0, uint arg1, LogBits logBits);
   inline size_t test(size_t i, uint arg0, uint arg1, LogBits logBits);
   inline size_t jmp(size_t i, uint target);
   inline size_t jz(size_t i, uint arg0, uint target);
   inline size_t ret(size_t i);
   inline size_t imm32(size_t i, uint value);
+#endif
 };
 
-size_t X64EventBuilder::result(size_t i, X64RegisterFile file) {
-  return op(i, VALUE | file, 0);
-}
-
-size_t X64EventBuilder::destructiveResult(size_t i, X64RegisterFile file) {
-  return op(i, DESTRUCTIVE_VALUE | file, 0);
-}
-
-size_t X64EventBuilder::add(size_t i, uint arg0, uint arg1, LogBits logBits) {
-  i = op(i, X64Opcode::ADD, logBits);
-  i = use(i, arg1);
-  i = use(i, arg0);
-  i = destructiveResult(i, GPR);
-  i = result(i, FLAGS);
+size_t X64Builder::add(size_t i, EventBuilder in, size_t index) {
+  // TODO: fold load
+  if (in.kind(index - 2) == Core::USE) {
+    i = op(i, X64_OPCODE, OpcodeBits::mov);
+    i = op(i, RM, in.data(index - 1));
+    i = op(i, GPR_VALUE, 0);
+  }
+  i = op(i, X64_OPCODE, OpcodeBits::add); // TODO: switch on incoming number of bits
+  i = op(i, REG, in.kind(index - 2) == Core::USE ? i - 2 : in.data(in.data(index - 2) - 1));
+  i = op(i, RM, in.data(in.data(index - 1) - 1));
+  i = op(i, FLAGS_VALUE, 0);
   return i;
 }
 
-size_t X64EventBuilder::sub(size_t i, uint arg0, uint arg1, LogBits logBits) {
-  i = op(i, X64Opcode::SUB, logBits);
-  i = use(i, arg0);
-  i = destructiveResult(i, GPR);
-  i = use(i, arg1);
-  i = result(i, FLAGS);
+size_t X64Builder::sub(size_t i, EventBuilder in, size_t index) {
+  // TODO: fold load
+  if (in.kind(index - 2) == Core::USE) {
+    i = op(i, X64_OPCODE, OpcodeBits::mov);
+    i = op(i, RM, in.data(index - 2));
+    i = op(i, GPR_VALUE, 0);
+  }
+  i = op(i, X64_OPCODE, OpcodeBits::sub); // TODO: switch on incoming number of bits
+  i = op(i, REG, in.kind(index - 2) == Core::USE ? i - 2 : in.data(in.data(index - 2) - 1));
+  i = op(i, RM, in.data(in.data(index - 1) - 1));
+  i = op(i, FLAGS_VALUE, 0);
   return i;
 }
 
-size_t X64EventBuilder::mul(size_t i, uint arg0, uint arg1, Type type, LogBits logBits) {
-  i = op(i, X64Opcode::MUL, (type << 3) + logBits);
-  i = use(i, arg0);
-  i = use(i, arg1);
-  i = op(i, CLOBBER_LIST, RDX);
-  auto hiHint = i;
-  i = hint(i, 0);
-  i = op(i, CLOBBER_LIST, RAX);
-  auto loHint = i;
-  i = hint(i, 0);
-  i = hint(i, arg0);
-  i = hint(i, arg1);
-  data(loHint) = i;
-  i = result(i, GPR);
-  data(hiHint) = i;
-  i = result(i, GPR);
-  i = result(i, FLAGS);
+size_t X64Builder::mul(size_t i, EventBuilder in, size_t index) {
+  i = op(i, X64_OPCODE, OpcodeBits::mov);
+  i = op(i, RM, in.data(index - 2)); // set the value to hint-value
+  i = op(i, KNOWN_GPR_VALUE, EAX);
+  i = op(i, X64_OPCODE, OpcodeBits::mul); // TODO: switch on incoming number of bits and signed/unsigned
+  i = op(i, RM, in.data(index - 1)); // set the value to hint-value
+  i = op(i, KNOWN_GPR_VALUE, 0);
+  i = op(i, KNOWN_GPR_VALUE, 1);
+  i = op(i, FLAGS_VALUE, 0);
+  i = op(i, X64_OPCODE, OpcodeBits::mov /*from eax*/); 
+  i = op(i, GPR_VALUE, 0);
+  // TODO: add a second mullo/mulhi combo translator
+  //i = op(i, X64_OPCODE, OpcodeBits::mov /*from edx*/);
+  //i = op(i, HINT_GPR_VALUE, EDX);
   return i;
 }
 
-size_t X64EventBuilder::cmp(size_t i, uint arg0, uint arg1, LogBits logBits) {
+#if 0
+size_t X64Builder::cmp(size_t i, uint arg0, uint arg1, LogBits logBits) {
   i = op(i, CMP, logBits);
   i = use(i, arg0);
   i = use(i, arg1);
@@ -114,7 +141,7 @@ size_t X64EventBuilder::cmp(size_t i, uint arg0, uint arg1, LogBits logBits) {
   return i;
 }
 
-size_t X64EventBuilder::test(size_t i, uint arg0, uint arg1, LogBits logBits) {
+size_t X64Builder::test(size_t i, uint arg0, uint arg1, LogBits logBits) {
   i = op(i, TEST, logBits);
   i = use(i, arg0);
   i = use(i, arg1);
@@ -122,24 +149,31 @@ size_t X64EventBuilder::test(size_t i, uint arg0, uint arg1, LogBits logBits) {
   return i;
 }
 
-size_t X64EventBuilder::jmp(size_t i, uint target) {
+size_t X64Builder::jmp(size_t i, uint target) {
   return op(i, JMP, target);
 }
 
-size_t X64EventBuilder::jz(size_t i, uint arg0, uint target) {
+size_t X64Builder::jz(size_t i, uint arg0, uint target) {
   i = use(i, arg0);
   i = op(i, JZ, target);
   return i;
 }
 
-size_t X64EventBuilder::ret(size_t i) {
+size_t X64Builder::ret(size_t i) {
   return op(i, RET, 0);
 }
 
-size_t X64EventBuilder::imm32(size_t i, uint value) {
+size_t X64Builder::imm32(size_t i, uint value) {
   i = op(i, IMM32, value);
   i = op(i, NOP, 0); //< in case it gets upgraded to a load
   return i;
 }
+#endif
+
+// sort values
+// lower known values
+// mark conflicts
+// mark goals, found by the mov instruction ?
+// allocate values
 
 } //  namespace Jagger

@@ -17,14 +17,7 @@
 
 #pragma once
 
-namespace ohmu {
-namespace til {
-class BasicBlock;
-}
-}
-
-namespace Jagger {
-
+namespace Core {
 typedef unsigned int uint;
 typedef unsigned char uchar;
 
@@ -41,20 +34,13 @@ enum VectorWidth : unsigned char {
 };
 
 enum Opcode {
-  NOP,  
+  NOP,
   CASE_HEADER, JOIN_HEADER,
-  JOIN_COPY,
   USE, LAST_USE, ONLY_USE,
-  VALUE_KEY,
-  PHI,
-  DESTRUCTIVE_VALUE = PHI + 8,
-  VALUE = DESTRUCTIVE_VALUE + 8,
-  ISA_OP = VALUE + 8,
-  CLOBBER_LIST, REGISTER_HINT,
+  ANCHOR, JOIN_COPY, PHI,
   IMMEDIATE_BYTES, BYTES_HEADER, ALIGNED_BYTES, BYTES,
   CALL, RET,
   JUMP, BRANCH, BRANCH_TARGET,
-
   COMPARE, COMPARE_ZERO,
   NOT, LOGIC, LOGIC3,
   BITFIELD_EXTRACT, BITFIELD_INSERT, BITFIELD_CLEAR,
@@ -69,6 +55,8 @@ enum Opcode {
   PREFETCH,
   LOAD, EXPAND, GATHER, INSERT, BROADCAST, // EXPAND covers ULOAD
   STORE, COMPRESS, SCATTER, EXTRACT,
+  ATOMIC_ADD, ATOMIC_SUB, ATOMIC_LOGIC,
+  ATOMIC_XCHG, ATOMIC_CMP_XCHG,
   MEMSET, MEMCPY,
   NUM_OPCODES,
 };
@@ -242,13 +230,13 @@ struct BitfieldManipData {
 struct EventBuilder {
   explicit EventBuilder(char* root) : root(root) {}
 
-  __forceinline size_t op(size_t i, uchar code, uint data) const {
+  __forceinline size_t op(size_t i, uchar kind, uint data) const {
     if (!root) return i + 1;
-    this->code(i) = code;
+    this->kind(i) = kind;
     this->data(i) = data;
     return i + 1;
   }
-  uchar& code(size_t i) const { return ((uchar*)root)[i]; }
+  uchar& kind(size_t i) const { return ((uchar*)root)[i]; }
   uint& data(size_t i) const { return ((uint*)root)[i]; }
   bool empty() const { return root == nullptr; }
 
@@ -263,9 +251,11 @@ struct EventList {
     first = (numEvents + 2) / 3;
     auto buffer = new uint[(first * 3 + 3) / 4 + numEvents];
     builder = EventBuilder((char*)(buffer - first / 4));
+    offsets = new Sort[numEvents];
   }
   void destroy() {
     delete[](&builder.data(0) + first / 4);
+    delete[]offsets;
     builder = EventBuilder(nullptr);
   }
   size_t bound() const { return first + numEvents; }
@@ -275,6 +265,7 @@ struct EventList {
 
   struct Sort {
     uint key, value;
+    bool operator <(const Sort& a) const { return key < a.key; }
   };
   unsigned prefixBuffer[NUM_OPCODES + 1];
   unsigned* prefix;
@@ -286,8 +277,30 @@ struct _Block {
   size_t firstEvent;
   size_t boundEvent;
 };
+}  // namespace Core
 
-}  // namespace Jagger
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #if 0
 union Event {

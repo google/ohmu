@@ -5,7 +5,7 @@
 #include "til/VisitCFG.h"
 #include "util.h"
 
-namespace Jagger {
+namespace Core {
   extern void printDebug(EventBuilder builder, size_t numEvents);
   extern void normalize(const EventList& in);
 
@@ -65,7 +65,8 @@ size_t emitPhi(EventBuilder builder, size_t i, ohmu::til::Phi& phi) {
 // Expression emission
 size_t emitIntLiteral(EventBuilder builder, size_t i,
                       ohmu::til::Literal& literal) {
-  return builder.op(i, IMMEDIATE_BYTES, (uint)literal.as<int>().value());
+  i = builder.op(i, IMMEDIATE_BYTES, (uint)literal.as<int>().value());
+  return builder.op(i, ANCHOR, 0);
 }
 
 size_t emitInstruction(EventBuilder builder, size_t i,
@@ -77,8 +78,9 @@ size_t emitInstruction(EventBuilder builder, size_t i,
 size_t emitLiteral(EventBuilder builder, size_t i,
                    ohmu::til::Instruction& instr) {
   auto& literal = *ohmu::cast<ohmu::til::Literal>(&instr);
-  return emitLiteralTable[literal.valueType().Base](
-      builder, literal.setStackID(i), literal);
+  i = emitLiteralTable[literal.valueType().Base](builder, i, literal);
+  literal.setStackID(i - 1);
+  return i;
 }
 
 size_t emitUnaryOp(EventBuilder builder, size_t i,
@@ -97,6 +99,7 @@ size_t emitBinaryOp(EventBuilder builder, size_t i,
   auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
   if (arg0->isTrivial()) i = emitInstruction(builder, i, *arg0);
   if (arg1->isTrivial()) i = emitInstruction(builder, i, *arg1);
+  //TODO: pull these out and initialize them dynamically
   static const uchar opcodeTable[] = {
     /* BOP_Add      =*/ ADD,
     /* BOP_Sub      =*/ SUB,
@@ -140,16 +143,18 @@ size_t emitBinaryOp(EventBuilder builder, size_t i,
   uchar code = opcodeTable[binaryOp.binaryOpcode()];
   i = builder.op(i, LAST_USE, arg0->stackID());
   i = builder.op(i, LAST_USE, arg1->stackID());
+  i = builder.op(
+      i, code, code == COMPARE
+                   ? (unsigned)CompareData(
+                         typeDesc(arg0->valueType()),
+                         (Compare)controlTable[binaryOp.binaryOpcode()])
+                   : code == LOGIC
+                         ? (unsigned)LogicData(
+                               typeDesc(binaryOp.valueType()),
+                               (Logic)controlTable[binaryOp.binaryOpcode()])
+                         : (unsigned)BasicData(typeDesc(binaryOp.valueType())));
   binaryOp.setStackID(i);
-  if (code == COMPARE)
-    return builder.op(
-        i, code, CompareData(typeDesc(arg0->valueType()),
-                             (Compare)controlTable[binaryOp.binaryOpcode()]));
-  if (code == LOGIC)
-    return builder.op(i, code,
-                      LogicData(typeDesc(binaryOp.valueType()),
-                                (Logic)controlTable[binaryOp.binaryOpcode()]));
-  return builder.op(i, code, BasicData(typeDesc(binaryOp.valueType())));
+  return builder.op(i, ANCHOR, 0);
 }
 
 size_t emitTerminator(EventBuilder builder, size_t i, Block& block) {
