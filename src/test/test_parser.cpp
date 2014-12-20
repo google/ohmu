@@ -24,7 +24,7 @@ using namespace ohmu;
 using namespace ohmu::parsing;
 using namespace ohmu::til;
 
-namespace Jagger {
+namespace Core {
 extern void emitEvents(Global& global);
 }
 
@@ -65,7 +65,7 @@ int main(int argc, const char** argv) {
 
   //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
 
-  Jagger::emitEvents(global);
+  Core::emitEvents(global);
 
   return 0;
 }

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <stdio.h>
 
+#if 0
 namespace Core {
 namespace {
 
@@ -129,3 +130,4 @@ void eliminatePhis(const EventList& in) {
   }
 }
 }  // namespace Jagger
+#endif
