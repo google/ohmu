@@ -28,10 +28,10 @@ struct TypedPtr {
     this->data(i) = data;
     return i + 1;
   }
-  uchar& type(size_t i) const { return ((uchar*)root)[i]; }
-  uint& data(size_t i) const { return ((uint*)root)[i]; }
-  bool empty() const { return root == nullptr; }
-  struct TypedRef operator [](size_t i) const;
+  __forceinline uchar& type(size_t i) const { return ((uchar*)root)[i]; }
+  __forceinline uint& data(size_t i) const { return ((uint*)root)[i]; }
+  __forceinline bool empty() const { return root == nullptr; }
+  __forceinline struct TypedRef operator[](size_t i) const;
 
  private:
   friend struct TypedArray;
@@ -40,20 +40,37 @@ struct TypedPtr {
 };
 
 struct TypedRef {
-  TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
   template <typename T>
-  T as() const {
+  __forceinline T as() const {
     return *(const T*)this;
   }
-  static size_t slotCount() { return 1; }
+  bool operator ==(const TypedRef& a) const { return i == a.i; }
+  bool operator !=(const TypedRef& a) const { return i != a.i; }
+  TypedRef& operator ++() { ++i; return *this; }
+  TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
   TypedPtr p;
   size_t i;
+};
+
+template <typename Payload, size_t SIZE>
+struct TypedStruct : TypedRef {
+  __forceinline Payload& operator*() const {
+    static_assert(sizeof(Payload) <= sizeof(p.data(i)),
+                  "Can't cast to object of larger size.");
+    return *(Payload*)&p.data(i);
+  }
+  __forceinline Payload* operator->() const { return (Payload*)&p.data(i); }
+  __forceinline TypedRef pointee() const { return TypedRef(p, p.data(i)); }
+  template <typename T>
+  __forceinline T field(size_t j) const {
+    return TypedRef(p, j).as<T>();
+  }
+  __forceinline static size_t slotCount(size_t i = 0) { return SIZE + i; }
 };
 
 inline TypedRef TypedPtr::operator[](size_t i) const {
   return TypedRef(*this, i);
 }
-
 
 struct TypedArray {
   explicit TypedArray(size_t size) : p(nullptr), size(size) {
@@ -65,6 +82,9 @@ struct TypedArray {
   TypedArray& operator=(const TypedArray&) = delete;
   ~TypedArray() { delete[](&p[0] + first / 4); }
   size_t bound() const { return first + size; }
+
+  TypedRef begin() const { return TypedRef(p, first); }
+  TypedRef end() const { return TypedRef(p, bound()); }
 
   TypedPtr p;
   size_t size;

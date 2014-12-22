@@ -20,7 +20,11 @@
 #include "util.h"
 
 namespace Jagger {
-namespace Fez {
+namespace Wax {
+
+//==============================================================================
+// Type: Holds information about the type an object.
+//==============================================================================
 
 struct Type {
   enum : uchar { SIZE = 0x03, KIND = 0x1c, COUNT = 0x60, VARIANCE = 0x80 };
@@ -55,66 +59,30 @@ struct Type {
   uchar data;
 };
 
-struct SlotRef : TypedRef {
-  TypedRef target() const { return TypedRef(p, p.data(i)); }
-};
+//==============================================================================
+// Code: The type codes.
+//==============================================================================
 
-struct BinaryData : TypedRef {
-  uint& data() const { return p.data(i); }
-};
-
-struct HasResult : TypedRef {
-  Type& type() const { return ((Type*)&p.data(i))[3]; }
-};
-
-struct UnaryOp : HasResult {
-  Use arg() const { return TypedRef(p, i - 1).as<Use>(); }
-  static size_t slotCount() { return 2; }
-};
-
-struct BinaryOp : HasResult {
-  Use arg0() const { return TypedRef(p, i - 1).as<Use>(); }
-  Use arg1() const { return TypedRef(p, i - 2).as<Use>(); }
-  static size_t slotCount() { return 3; }
-};
-
-struct BitfieldOp : UnaryOp {
-  uchar& first() const { return ((uchar*)&p.data(i))[2]; }
-  uchar& last() const { return ((uchar*)&p.data(i))[1]; }
-};
-
-struct MemoryOp : TypedRef {
-  Use address() const { return TypedRef(p, i - 1).as<Use>(); }
-  LinkAddress link() const { return TypedRef(p, i - 1).as<LinkAddress>(); }
-  bool isLink() const { return p.type(i - 1) == LINK_ADDRESS; }
-  static size_t slotCount() { return 2; }
-};
-
-struct ResultMemoryOp : MemoryOp {
-  Type& type() const { return ((Type*)&p.data(i))[3]; }
-};
-
-enum Opcode {
-  NOP,
+enum Code : uchar {
+  INVALID,
   CASE_HEADER,
   JOIN_HEADER,
+  BYTES,
+  ALIGNED_BYTES,
+  ZERO,
+  UNDEFINED_VALUE,
+  STATIC_ADDRESS,
   USE,
   PHI,
-  JOIN_COPY,
-  LINK_ADDRESS,
-
+  PHI_ARGUMENT,
   CALL,
   CALL_SPMD,
   RETURN,
   JUMP,
-  INDIRECT_JUMP,
   BRANCH,
+  SWITCH,
 
-  BYTES,
-  ALIGNED_BYTES,
-  ZERO,
-  UNDEFINED,
-
+  COMPUTE_ADDRESS,
   PREFETCH,
   LOAD,
   STORE,
@@ -127,23 +95,30 @@ enum Opcode {
   PERMUTE,
   SHUFFLE,
 
-  COMPARE,
   BIT_TEST,
   NOT,
   LOGIC,
   LOGIC3,
   SHIFT,
+  BITFIELD_EXTRACT,
+  BITFIELD_INSERT,
+  BITFIELD_CLEAR,
+  COUNT_ZEROS,
+  POPCNT,
+
+  COMPARE,
   MIN,
   MAX,
   NEG,
+  ABS,
   ADD,
   SUB,
-  ADDR,
   MUL,
-  MULHI,
   DIV,
+
+  MULHI,
   MOD,
-  ABS,
+
   RCP,
   SQRT,
   RSQRT,
@@ -151,12 +126,6 @@ enum Opcode {
   ROUND,
   CONVERT,
   FIXUP,
-
-  BITFIELD_EXTRACT,
-  BITFIELD_INSERT,
-  BITFIELD_CLEAR,
-  COUNT_ZEROS,
-  POPCNT,
 
   ATOMIC_XCHG,
   ATOMIC_COMPARE_XCHG,
@@ -166,180 +135,286 @@ enum Opcode {
   NUM_OPCODES,
 };
 
-struct Nop : BinaryData {};
-struct CaseHeader: SlotRef {};
-struct JoinHeader: SlotRef {};
-struct Use : SlotRef {};
-struct Phi : SlotRef {};
-struct JoinCopy : TypedRef {
-  Use arg() const { return TypedRef(p, i - 1).as<Use>(); }
-  Phi phi() const { return TypedRef(p, p.data(i)).as<Phi>(); }
-  static size_t slotCount() { return 2; }
-};
-struct LinkAddress : SlotRef {};
+//==============================================================================
+// Structural opcodes.
+//==============================================================================
 
-struct Call : MemoryOp {
-  Use arg(size_t j) const { return TypedRef(p, i - 2 - j).as<Use>(); }
-  uint& numArgs() const { return p.data(i); }
-  static size_t slotCount(size_t numArgs) { return 2 + numArgs; }
+namespace Local {
+struct Address : TypedStruct<Address, 1> {
+  bool isStatic() const { return p.type(i) == STATIC_ADDRESS; }
 };
-struct CallSPMD : MemoryOp {
-  Use workCount() const { return TypedRef(p, i - 2).as<Use>(); }
-  Use arg(size_t j) const { return TypedRef(p, i - 3 - j).as<Use>(); }
-  uint& numArgs() const { return p.data(i); }
-  static size_t slotCount(size_t numArgs) { return 3 + numArgs; }
+}  // namespace Local
+
+struct Invalid : TypedStruct<uint, 1> {};
+struct CaseHeader : TypedStruct<uint, 1> {};
+struct JoinHeader : TypedStruct<uint, 1> {};
+struct AlignedBytes : TypedStruct<uint, 1> {};
+struct Bytes : TypedStruct<uint, 1>{};
+struct Zero : TypedStruct<uint, 1> {};
+struct UndefinedValue : TypedStruct<uint, 1>{};
+struct StaticAddress : TypedStruct<StaticAddress, 1> {};
+struct Use : TypedStruct<uint, 1> {};
+struct Phi : TypedStruct<uint, 1> {};
+struct PhiArgument : TypedStruct<uint, 2> {
+  Use arg() const { return field<Use>(i + 1); }
+  Phi phi() const { return pointee().as<Phi>(); }
 };
-struct Return : TypedRef {};
-struct Jump : SlotRef {};
-struct IndirectJump : SlotRef {};
-struct Branch : UnaryOp {
-  LinkAddress target(size_t j) const {
-    return TypedRef(p, i - 2 - j).as<LinkAddress>();
+struct Call : TypedStruct<uint, 2> {
+  uint& numArgs() const { return **this; }
+  Local::Address callee() const { return field<Local::Address>(i + 1); }
+  Use arg(size_t j) const { return field<Use>(i + 2 + j); }
+};
+struct CallSPMD : TypedStruct<uint, 3> {
+  uint& numArgs() const { return **this; }
+  Local::Address callee() const { return field<Local::Address>(i + 1); }
+  uint& workCount() const { return *field<Bytes>(i + 2); }
+  Use arg(size_t j) const { return field<Use>(i + 3 + j); }
+};
+struct Return : TypedStruct<uint, 1> {};
+struct Jump : TypedStruct<uint, 2> {
+  Local::Address target() const { return field<Local::Address>(i + 1); }
+};
+struct Branch : TypedStruct<uint, 4> {
+  Use arg() const { return field<Use>(i + 1); }
+  StaticAddress target0() const { return field<StaticAddress>(i + 2); }
+  StaticAddress target1() const { return field<StaticAddress>(i + 3); }
+};
+struct Switch : TypedStruct<uint, 2> {
+  StaticAddress target(size_t j) const {
+    return field<StaticAddress>(i + 2 + j);
   }
-  uint& numTargets() const { return p.data(i); }
-  static size_t slotCount(size_t numTargets) { return 2 + numTargets; }
+  uint& numTargets() const { return **this; }
 };
 
-struct AlignedBytes : BinaryData {};
-struct Bytes : BinaryData {};
-struct Zero : HasResult {};
-struct Undefined : HasResult {};
+//==============================================================================
+// Helper types.
+//==============================================================================
 
-struct Prefetch : MemoryOp {
-  enum Kind { NT, L1, L2, L3 };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+namespace Local {
+template <typename Payload>
+struct Unary : TypedStruct<Payload, 2> {
+  Use arg() const { return field<Use>(i + 1); }
 };
-struct Load : ResultMemoryOp {
-  enum Kind { NORMAL, NON_TEMPORAL, UNALIGNED };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+template <typename Payload>
+struct Binary : TypedStruct<Payload, 3> {
+  Use arg0() const { return field<Use>(i + 1); }
+  Use arg1() const { return field<Use>(i + 2); }
 };
-struct Store : MemoryOp {
-  enum Kind { NORMAL, NON_TEMPORAL, UNALIGNED };
-  Use value() const { return TypedRef(p, i - 2).as<Use>(); }
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
-  static size_t slotCount() { return 3; }
+}  // namespace Local
+
+//==============================================================================
+// Memory opcodes.
+//==============================================================================
+
+struct ComputeAddressPayload {
+  uchar scale;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct MemSet : MemoryOp {
-  Use size() const { return TypedRef(p, i - 2).as<Use>(); }
-  Use value() const { return TypedRef(p, i - 3).as<Use>(); }
-  uchar& alignment() const { return ((uchar*)&p.data(i))[2]; }
-  static size_t slotCount() { return 4; }
+struct PrefetchPayload {
+  enum Kind : uint { NT, L1, L2, L3 } kind;
 };
-struct MemCopy : MemoryOp {
-  Use size() const { return TypedRef(p, i - 2).as<Use>(); }
-  Use source() const { return TypedRef(p, i - 3).as<Use>(); }
-  uchar& alignment() const { return ((uchar*)&p.data(i))[2]; }
-  static size_t slotCount() { return 4; }
+struct LoadStorePayload {
+  enum Flags : uchar { NON_TEMPORAL = 0x01, UNALIGNED = 0x02 } flags;
+  uchar : 8;
+  uchar : 8;
+  Type type;
+};
+struct MemOpPayload {
+  uchar logAlignment;
+  enum Flags : uchar { NON_TEMPORAL = 1 } flags;
+};
+struct ComputeAddress : TypedStruct<ComputeAddressPayload, 4> {
+  Bytes disp() const { return field<Bytes>(i + 1); }
+  Use base() const { return field<Use>(i + 2); }
+  Use index() const { return field<Use>(i + 3); }
+};
+struct Prefetch : TypedStruct<PrefetchPayload, 2> {
+  Local::Address address() const { return field<Local::Address>(i + 1); }
+};
+struct Load : TypedStruct<LoadStorePayload, 2> {
+  Local::Address address() const { return field<Local::Address>(i + 1); }
+};
+struct Store : TypedStruct<LoadStorePayload, 3> {
+  Local::Address address() const { return field<Local::Address>(i + 1); }
+  Use arg() const { return field<Use>(i + 2); }
+};
+struct MemSet : TypedStruct<MemOpPayload, 4> {
+  Local::Address address() const { return field<Local::Address>(i + 1); }
+  Use value() const { return field<Use>(i + 2); }
+  Use size() const { return field<Use>(i + 3); }
+};
+struct MemCopy : TypedStruct<MemOpPayload, 4> {
+  Local::Address dst() const { return field<Local::Address>(i + 1); }
+  Local::Address src() const { return field<Local::Address>(i + 2); }
+  Use size() const { return field<Use>(i + 3); }
 };
 
-struct Extract : UnaryOp {
-  enum Kind { SLOT_0, SLOT_1, SLOT_2, SLOT_3 };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
-};
-struct Insert : HasResult {
-  enum Kind { SLOT_0, SLOT_1, SLOT_2, SLOT_3 };
-  Use vector() const { return TypedRef(p, i - 1).as<Use>(); }
-  Use scalar() const { return TypedRef(p, i - 2).as<Use>(); }
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
-  static size_t slotCount() { return 3; }
-};
-struct BroadCast : UnaryOp {};
-struct Permute : UnaryOp {
-  uchar& control() const { return ((uchar*)&p.data(i))[2]; }
-};
-struct Shuffle : BinaryOp {
-  uchar& control0() const { return ((uchar*)&p.data(i))[2]; }
-  uchar& control1() const { return ((uchar*)&p.data(i))[1]; }
-};
+//==============================================================================
+// Explicitly SIMD opcodes.
+//==============================================================================
 
-struct Compare : BinaryOp {
-  enum Kind {
-    FALSE, LT, EQ, LE, GT, NEQ, GE, ORD,
-    UNORD, LTU, EQU, LEU, GTU, NEQU, GEU, TRUE,
-  };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+struct TypedPayload {
+  uchar : 8;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct BitTest : UnaryOp {
-  enum Kind { READ, CLEAR, SET, TOGGLE };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+struct ExtractInsertPayload {
+  uchar lane;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct Not : UnaryOp {};
-struct Logic : BinaryOp {
+struct ShufflePayload {
+  uchar lane0 : 4;
+  uchar lane1 : 4;
+  uchar lane2 : 4;
+  uchar lane3 : 4;
+  uchar : 8;
+  Type type;
+};
+struct Extract : Local::Unary<ExtractInsertPayload> {};
+struct Insert : TypedStruct<ExtractInsertPayload, 3> {
+  Use scalarArg() const { return field<Use>(i + 1); }
+  Use vectorArg() const { return field<Use>(i + 2); }
+};
+struct BroadCast : Local::Unary<TypedPayload> {};
+struct Permute : Local::Unary<ShufflePayload> {};
+struct Shuffle : Local::Binary<ShufflePayload> {};
+
+//==============================================================================
+// Bit opcodes.
+//==============================================================================
+
+struct BitTestPayload {
+  enum Kind : uchar { READ, CLEAR, SET, TOGGLE } kind;
+  uchar : 8;
+  uchar : 8;
+  Type type;
+};
+struct LogicPayload {
   enum Kind : uchar {
     FALSE, NOR, GT, NOTB, LT, NOTA, XOR, NAND,
     AND, EQ, A, GE, B, LE, OR, TRUE,
-  };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+  } kind;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct Logic3 : BinaryOp {
-  uchar& kind() const { return ((uchar*)&p.data(i))[2]; }
+struct Logic3Payload {
+  uchar kind;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct Shift : BinaryOp {
-  enum Kind { SHIFT, RIGHT = 0x00, LEFT, ROTATE, ARITHMETIC = 0x04 };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+struct ShiftPayload {
+  enum Flags : uchar {
+    SHIFT = 0x00,
+    RIGHT = 0x00,
+    LEFT = 0x01,
+    ROTATE = 0x02,
+    ARITHMETIC = 0x04
+  } flags;
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct Min : BinaryOp {};
-struct Max : BinaryOp {};
-struct Neg : UnaryOp {};
-struct Add : BinaryOp {};
-struct Sub : BinaryOp {};
-struct Addr : HasResult {
-  Use base() const { return TypedRef(p, i - 1).as<Use>(); }
-  Use index() const { return TypedRef(p, i - 2).as<Use>(); }
-  Bytes disp() const { return TypedRef(p, i - 3).as<Bytes>(); }
-  uchar& scale() const { return ((uchar*)&p.data(i))[2]; }
-  static size_t slotCount() { return 4; }
+struct BitFieldPayload {
+  uchar begin;
+  uchar end;
+  uchar : 8;
+  Type type;
 };
-struct Mul : BinaryOp {};
-struct Mulhi : BinaryOp {};
-struct Div : BinaryOp {};
-struct Mod : BinaryOp {};
-struct Abs : UnaryOp {};
-struct Rcp : UnaryOp {};
-struct Sqrt : UnaryOp {};
-struct Rsqrt : UnaryOp {};
-struct Exp2 : UnaryOp {};
-struct Fixup : UnaryOp {};
-struct Round : UnaryOp {
-  enum Kind { EVEN, UP, DOWN, TRUNC, CURRENT };
-  Kind& kind() const { return ((Kind*)&p.data(i))[2]; }
+struct CountZerosPayload {
+  enum Kind : uchar { TRAILING, LEADING };
+  uchar : 8;
+  uchar : 8;
+  Type type;
 };
-struct Convert : UnaryOp {
-  Type& from() const { return ((Type*)&p.data(i))[2]; }
+struct BitTest : Local::Unary<BitTestPayload> {};
+struct Not : Local::Unary<TypedPayload> {};
+struct Logic : Local::Binary<LogicPayload> {};
+struct Logic3 : TypedStruct<Logic3Payload, 4>{
+  Use arg0() const { return field<Use>(i + 1); }
+  Use arg1() const { return field<Use>(i + 2); }
+  Use arg2() const { return field<Use>(i + 3); }
 };
-struct Fixup : HasResult {
-  Use arg() const { return TypedRef(p, i - 1).as<Use>(); }
-  Bytes control() const { return TypedRef(p, i - 2).as<Bytes>(); }
-  static size_t slotCount() { return 3; }
+struct Shift : Local::Binary<ShiftPayload> {};
+struct BitfieldExtract : Local::Unary<BitFieldPayload> {};
+struct BitfieldInsert : TypedStruct<BitFieldPayload, 3> {
+  Use target() const { return field<Use>(i + 1); }
+  Use source() const { return field<Use>(i + 2); }
+};
+struct BitfieldClear : Local::Unary<BitFieldPayload> {};
+struct CountZeros : Local::Unary<CountZerosPayload> {};
+struct PopCnt : Local::Unary<TypedPayload>{};
+
+//==============================================================================
+// Math opcodes.
+//==============================================================================
+
+struct ComparePayload {
+  enum Kind : uchar {
+    FALSE, LT, EQ, LE, GT, NEQ, GE, ORD,
+    UNORD, LTU, EQU, LEU, GTU, NEQU, GEU, TRUE,
+  } kind;
+  uchar : 8;
+  uchar : 8;
+  Type type;
+};
+struct Compare : Local::Binary<ComparePayload> {};
+struct Min : Local::Binary<TypedPayload> {};
+struct Max : Local::Binary<TypedPayload> {};
+struct Neg : Local::Unary<TypedPayload> {};
+struct Abs : Local::Unary<TypedPayload> {};
+struct Add : Local::Binary<TypedPayload> {};
+struct Sub : Local::Binary<TypedPayload> {};
+struct Mul : Local::Binary<TypedPayload> {};
+struct Div : Local::Binary<TypedPayload> {};
+
+//==============================================================================
+// Integer math opcodes.
+//==============================================================================
+
+struct Mulhi : Local::Binary<TypedPayload> {};
+struct Mod : Local::Binary<TypedPayload> {};
+
+//==============================================================================
+// Floating point math operations.
+//==============================================================================
+
+struct RoundPayload {
+  enum Mode { EVEN, UP, DOWN, TRUNC, CURRENT } mode;
+  uchar : 8;
+  uchar : 8;
+  Type type;
+};
+struct Rcp : Local::Unary<TypedPayload> {};
+struct Sqrt : Local::Unary<TypedPayload> {};
+struct Rsqrt : Local::Unary<TypedPayload> {};
+struct Exp2 : Local::Unary<TypedPayload> {};
+struct Round : Local::Unary<RoundPayload> {};
+struct Convert : Local::Unary<TypedPayload> {};
+struct Fixup : TypedStruct<TypedPayload, 3> {
+  Bytes control() const { return field<Bytes>(i + 1); }
+  Use arg() const { return field<Use>(i + 2); }
 };
 
-struct BitfieldExtract : BitfieldOp {};
-struct BitfieldInsert : BitfieldOp {
-  Use input() const { return TypedRef(p, i - 2).as<Use>(); }
-  static size_t slotCount() { return 3; }
-};
-struct BitfieldClear : BitfieldOp {};
-struct CountZeros : UnaryOp {
-  enum Kind { TRAILING, LEADING };
-  Kind& scale() const { return ((Kind*)&p.data(i))[2]; }
-};
-struct PopCnt : UnaryOp {};
+//==============================================================================
+// Atomic operations.
+//==============================================================================
 
-struct AtomicXchg : ResultMemoryOp {
-  Use arg() const { return TypedRef(p, i - 2).as<Use>(); }
-  static size_t slotCount() { return 3; }
+struct AtomicXchg : Store {};
+struct AtomicCompareXchg : TypedStruct<TypedPayload, 4> {
+  Local::Address address() const { return field<Local::Address>(i + 1); }
+  Use value() const { return field<Use>(i + 2); }
+  Use comparand() const { return field<Use>(i + 3); }
 };
-struct AtomicCompareXchg : ResultMemoryOp {
-  Use setTo() const { return TypedRef(p, i - 2).as<Use>(); }
-  Use compareTo() const { return TypedRef(p, i - 3).as<Use>(); }
-  static size_t slotCount() { return 4; }
-};
-struct AtomicLogicXchg : AtomicXchg {
-  Logic::Kind& kind() const { return ((Logic::Kind*)&p.data(i))[2]; }
-  static size_t slotCount() { return 3; }
-};
-struct AtomicAddXchg : AtomicXchg {};
-struct AtomicSubXchg : AtomicXchg {};
+struct AtomicLogicXchg : Store {};
+struct AtomicAddXchg : Store {};
+struct AtomicSubXchg : Store {};
 
-}  // namespace Fez
+}  // namespace Wax
 }  // namespace Jagger

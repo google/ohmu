@@ -3,11 +3,11 @@
 #include "til/til.h"
 #include "til/Global.h"
 #include "til/VisitCFG.h"
-#include "util.h"
 
-namespace Core {
-  extern void printDebug(EventBuilder builder, size_t numEvents);
-  extern void normalize(const EventList& in);
+#if 0
+namespace Jagger {
+//extern void printDebug(EventBuilder builder, size_t numEvents);
+//extern void normalize(const EventList& in);
 
 struct Block {
   static const size_t NO_DOMINATOR = (size_t)-1;
@@ -350,4 +350,5 @@ for (size_t size = 1; size < 16; size++) {
   if (bound != 80)
     printf("\n");
 }
+#endif
 #endif
