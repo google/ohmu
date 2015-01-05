@@ -19,8 +19,46 @@
 
 #include "util.h"
 
-namespace Jagger {
-namespace Wax {
+namespace jagger {
+namespace wax {
+struct Block {
+  bool dominates(const Block& other) const {
+    return other.domTreeID - domTreeID < domTreeSize;
+  }
+  bool postDominates(const Block& other) const {
+    return other.postDomTreeID - domTreeID < domTreeSize;
+  }
+  uint dominator;
+  uint domTreeID;
+  uint domTreeSize;
+  uint postDominator;
+  uint postDomTreeID;
+  uint postDomTreeSize;
+  uint caseIndex;
+  uint phiIndex;
+  uint firstEvent;
+  uint boundEvent;
+  uint loopDepth;
+  uint blockID;
+  Range successors;
+  Range predecessors;
+};
+
+struct Function {
+  Range blocks;
+  // calling convension.
+};
+
+struct Module {
+  Module(const Module&) = delete;
+  Module& operator=(const Module&) = delete;
+  Array<Block> blockArray;
+  Array<Function> functionArray;
+  Array<uint> neighborArray;
+  TypedArray instrArray;
+
+  void computeDominators();
+};
 
 //==============================================================================
 // Type: Holds information about the type an object.
@@ -139,11 +177,11 @@ enum Code : uchar {
 // Structural opcodes.
 //==============================================================================
 
-namespace Local {
+namespace local {
 struct Address : TypedStruct<Address, 1> {
   bool isStatic() const { return p.type(i) == STATIC_ADDRESS; }
 };
-}  // namespace Local
+}  // namespace local
 
 struct Invalid : TypedStruct<uint, 1> {};
 struct CaseHeader : TypedStruct<uint, 1> {};
@@ -161,18 +199,18 @@ struct PhiArgument : TypedStruct<uint, 2> {
 };
 struct Call : TypedStruct<uint, 2> {
   uint& numArgs() const { return **this; }
-  Local::Address callee() const { return field<Local::Address>(i + 1); }
+  local::Address callee() const { return field<local::Address>(i + 1); }
   Use arg(size_t j) const { return field<Use>(i + 2 + j); }
 };
 struct CallSPMD : TypedStruct<uint, 3> {
   uint& numArgs() const { return **this; }
-  Local::Address callee() const { return field<Local::Address>(i + 1); }
+  local::Address callee() const { return field<local::Address>(i + 1); }
   uint& workCount() const { return *field<Bytes>(i + 2); }
   Use arg(size_t j) const { return field<Use>(i + 3 + j); }
 };
 struct Return : TypedStruct<uint, 1> {};
 struct Jump : TypedStruct<uint, 2> {
-  Local::Address target() const { return field<Local::Address>(i + 1); }
+  local::Address target() const { return field<local::Address>(i + 1); }
 };
 struct Branch : TypedStruct<uint, 4> {
   Use arg() const { return field<Use>(i + 1); }
@@ -190,7 +228,7 @@ struct Switch : TypedStruct<uint, 2> {
 // Helper types.
 //==============================================================================
 
-namespace Local {
+namespace local {
 template <typename Payload>
 struct Unary : TypedStruct<Payload, 2> {
   Use arg() const { return field<Use>(i + 1); }
@@ -200,7 +238,7 @@ struct Binary : TypedStruct<Payload, 3> {
   Use arg0() const { return field<Use>(i + 1); }
   Use arg1() const { return field<Use>(i + 2); }
 };
-}  // namespace Local
+}  // namespace local
 
 //==============================================================================
 // Memory opcodes.
@@ -231,23 +269,23 @@ struct ComputeAddress : TypedStruct<ComputeAddressPayload, 4> {
   Use index() const { return field<Use>(i + 3); }
 };
 struct Prefetch : TypedStruct<PrefetchPayload, 2> {
-  Local::Address address() const { return field<Local::Address>(i + 1); }
+  local::Address address() const { return field<local::Address>(i + 1); }
 };
 struct Load : TypedStruct<LoadStorePayload, 2> {
-  Local::Address address() const { return field<Local::Address>(i + 1); }
+  local::Address address() const { return field<local::Address>(i + 1); }
 };
 struct Store : TypedStruct<LoadStorePayload, 3> {
-  Local::Address address() const { return field<Local::Address>(i + 1); }
+  local::Address address() const { return field<local::Address>(i + 1); }
   Use arg() const { return field<Use>(i + 2); }
 };
 struct MemSet : TypedStruct<MemOpPayload, 4> {
-  Local::Address address() const { return field<Local::Address>(i + 1); }
+  local::Address address() const { return field<local::Address>(i + 1); }
   Use value() const { return field<Use>(i + 2); }
   Use size() const { return field<Use>(i + 3); }
 };
 struct MemCopy : TypedStruct<MemOpPayload, 4> {
-  Local::Address dst() const { return field<Local::Address>(i + 1); }
-  Local::Address src() const { return field<Local::Address>(i + 2); }
+  local::Address dst() const { return field<local::Address>(i + 1); }
+  local::Address src() const { return field<local::Address>(i + 2); }
   Use size() const { return field<Use>(i + 3); }
 };
 
@@ -275,14 +313,14 @@ struct ShufflePayload {
   uchar : 8;
   Type type;
 };
-struct Extract : Local::Unary<ExtractInsertPayload> {};
+struct Extract : local::Unary<ExtractInsertPayload> {};
 struct Insert : TypedStruct<ExtractInsertPayload, 3> {
   Use scalarArg() const { return field<Use>(i + 1); }
   Use vectorArg() const { return field<Use>(i + 2); }
 };
-struct BroadCast : Local::Unary<TypedPayload> {};
-struct Permute : Local::Unary<ShufflePayload> {};
-struct Shuffle : Local::Binary<ShufflePayload> {};
+struct BroadCast : local::Unary<TypedPayload> {};
+struct Permute : local::Unary<ShufflePayload> {};
+struct Shuffle : local::Binary<ShufflePayload> {};
 
 //==============================================================================
 // Bit opcodes.
@@ -333,23 +371,23 @@ struct CountZerosPayload {
   uchar : 8;
   Type type;
 };
-struct BitTest : Local::Unary<BitTestPayload> {};
-struct Not : Local::Unary<TypedPayload> {};
-struct Logic : Local::Binary<LogicPayload> {};
+struct BitTest : local::Unary<BitTestPayload> {};
+struct Not : local::Unary<TypedPayload> {};
+struct Logic : local::Binary<LogicPayload> {};
 struct Logic3 : TypedStruct<Logic3Payload, 4>{
   Use arg0() const { return field<Use>(i + 1); }
   Use arg1() const { return field<Use>(i + 2); }
   Use arg2() const { return field<Use>(i + 3); }
 };
-struct Shift : Local::Binary<ShiftPayload> {};
-struct BitfieldExtract : Local::Unary<BitFieldPayload> {};
+struct Shift : local::Binary<ShiftPayload> {};
+struct BitfieldExtract : local::Unary<BitFieldPayload> {};
 struct BitfieldInsert : TypedStruct<BitFieldPayload, 3> {
   Use target() const { return field<Use>(i + 1); }
   Use source() const { return field<Use>(i + 2); }
 };
-struct BitfieldClear : Local::Unary<BitFieldPayload> {};
-struct CountZeros : Local::Unary<CountZerosPayload> {};
-struct PopCnt : Local::Unary<TypedPayload>{};
+struct BitfieldClear : local::Unary<BitFieldPayload> {};
+struct CountZeros : local::Unary<CountZerosPayload> {};
+struct PopCnt : local::Unary<TypedPayload>{};
 
 //==============================================================================
 // Math opcodes.
@@ -364,22 +402,22 @@ struct ComparePayload {
   uchar : 8;
   Type type;
 };
-struct Compare : Local::Binary<ComparePayload> {};
-struct Min : Local::Binary<TypedPayload> {};
-struct Max : Local::Binary<TypedPayload> {};
-struct Neg : Local::Unary<TypedPayload> {};
-struct Abs : Local::Unary<TypedPayload> {};
-struct Add : Local::Binary<TypedPayload> {};
-struct Sub : Local::Binary<TypedPayload> {};
-struct Mul : Local::Binary<TypedPayload> {};
-struct Div : Local::Binary<TypedPayload> {};
+struct Compare : local::Binary<ComparePayload> {};
+struct Min : local::Binary<TypedPayload> {};
+struct Max : local::Binary<TypedPayload> {};
+struct Neg : local::Unary<TypedPayload> {};
+struct Abs : local::Unary<TypedPayload> {};
+struct Add : local::Binary<TypedPayload> {};
+struct Sub : local::Binary<TypedPayload> {};
+struct Mul : local::Binary<TypedPayload> {};
+struct Div : local::Binary<TypedPayload> {};
 
 //==============================================================================
 // Integer math opcodes.
 //==============================================================================
 
-struct Mulhi : Local::Binary<TypedPayload> {};
-struct Mod : Local::Binary<TypedPayload> {};
+struct Mulhi : local::Binary<TypedPayload> {};
+struct Mod : local::Binary<TypedPayload> {};
 
 //==============================================================================
 // Floating point math operations.
@@ -391,12 +429,12 @@ struct RoundPayload {
   uchar : 8;
   Type type;
 };
-struct Rcp : Local::Unary<TypedPayload> {};
-struct Sqrt : Local::Unary<TypedPayload> {};
-struct Rsqrt : Local::Unary<TypedPayload> {};
-struct Exp2 : Local::Unary<TypedPayload> {};
-struct Round : Local::Unary<RoundPayload> {};
-struct Convert : Local::Unary<TypedPayload> {};
+struct Rcp : local::Unary<TypedPayload> {};
+struct Sqrt : local::Unary<TypedPayload> {};
+struct Rsqrt : local::Unary<TypedPayload> {};
+struct Exp2 : local::Unary<TypedPayload> {};
+struct Round : local::Unary<RoundPayload> {};
+struct Convert : local::Unary<TypedPayload> {};
 struct Fixup : TypedStruct<TypedPayload, 3> {
   Bytes control() const { return field<Bytes>(i + 1); }
   Use arg() const { return field<Use>(i + 2); }
@@ -408,13 +446,12 @@ struct Fixup : TypedStruct<TypedPayload, 3> {
 
 struct AtomicXchg : Store {};
 struct AtomicCompareXchg : TypedStruct<TypedPayload, 4> {
-  Local::Address address() const { return field<Local::Address>(i + 1); }
+  local::Address address() const { return field<local::Address>(i + 1); }
   Use value() const { return field<Use>(i + 2); }
   Use comparand() const { return field<Use>(i + 3); }
 };
 struct AtomicLogicXchg : Store {};
 struct AtomicAddXchg : Store {};
 struct AtomicSubXchg : Store {};
-
-}  // namespace Wax
-}  // namespace Jagger
+}  // namespace wax
+}  // namespace jagger

@@ -16,8 +16,12 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-namespace Jagger {
+namespace jagger {
 typedef unsigned int uint;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
@@ -32,6 +36,7 @@ struct TypedPtr {
   __forceinline uint& data(size_t i) const { return ((uint*)root)[i]; }
   __forceinline bool empty() const { return root == nullptr; }
   __forceinline struct TypedRef operator[](size_t i) const;
+  explicit operator bool() const { return root != nullptr; }
 
  private:
   friend struct TypedArray;
@@ -73,30 +78,96 @@ inline TypedRef TypedPtr::operator[](size_t i) const {
 }
 
 struct TypedArray {
-  explicit TypedArray(size_t size) : p(nullptr), size(size) {
+  TypedArray() : root(nullptr) {}
+  void init(size_t size) {
+    if (root) delete[](&root[0] + first / 4);
+    this->size = size;
     first = (size + 2) / 3;
     auto buffer = new uint[(first * 3 + 3) / 4 + size];
-    p = TypedPtr((char*)(buffer - first / 4));
+    root = TypedPtr((char*)(buffer - first / 4));
   }
   TypedArray(const TypedArray&) = delete;
   TypedArray& operator=(const TypedArray&) = delete;
-  ~TypedArray() { delete[](&p[0] + first / 4); }
+  ~TypedArray() { if (root) delete[](&root[0] + first / 4); }
   size_t bound() const { return first + size; }
 
-  TypedRef begin() const { return TypedRef(p, first); }
-  TypedRef end() const { return TypedRef(p, bound()); }
+  TypedRef begin() const { return TypedRef(root, first); }
+  TypedRef end() const { return TypedRef(root, bound()); }
 
-  TypedPtr p;
   size_t size;
   size_t first;
+  TypedPtr root;
 };
-} // namespace Jagger
 
-// struct Sort {
-//  uint key, value;
-//  bool operator <(const Sort& a) const { return key < a.key; }
-//};
-// unsigned prefixBuffer[NUM_OPCODES + 1];
-// unsigned* prefix;
-// Sort* offsets;
-// Sort* scratch;
+template <typename T>
+struct AddressRange {
+  AddressRange(T* first, T* bound) : first(first), bound(bound) {}
+  T* begin() const { return first; }
+  T* end() const { return bound; }
+
+private:
+  T* first;
+  T* bound;
+};
+
+template<typename T>
+struct ReverseIterator {
+  operator T() const { return i; }
+  void operator ++() { --i; }
+  T i;
+};
+
+struct Range {
+  Range() {}
+  Range(uint first, uint bound) : first(first), bound(bound) {}
+  uint size() const { return bound - first; }
+  template <typename T>
+  AddressRange<T> operator()(T* p) const {
+    return range(p, first, bound);
+  }
+  uint first;
+  uint bound;
+};
+
+template <typename T>
+struct Array {
+  T& operator[](size_t i) const { return root[i]; }
+  T* begin() const { return root + 1; }
+  T* end() const { return root + 1 + size_; }
+  T& last() const { return root[size_]; }
+  explicit operator bool() const { return root != nullptr; }
+  size_t size() const { return size_; }
+
+  Array() : root(nullptr), size_(0) {}
+  Array(size_t size) : root(new T[size + 1]), size_(size) {}
+  Array(const Array&) = delete;
+  Array& operator=(const Array&) = delete;
+  Array(Array&& a) : root(a.root), size_(a.size_) { a.root = nullptr; }
+  Array& operator=(Array&& a) {
+    if (this == &a) return *this;
+    if (root) delete[] root;
+    root = a.root;
+    size_ = a.size_;
+    a.root = nullptr;
+    return *this;
+  }
+  ~Array() { if (root) delete[] root; }
+  void swap(Array& a) {
+    swap(root, a.root);
+    swap(size_, a.size_);
+  }
+
+ private:
+  T* root;
+  size_t size_;
+};
+
+// TODO: move me to a cpp and remove the header requirement
+void error(const char* format, ...) {
+  va_list argList;
+  va_start(argList, format);
+  vprintf(format, argList);
+  va_end(argList);
+  exit(1);
+}
+}  // namespace jagger

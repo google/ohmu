@@ -16,8 +16,150 @@
 //===----------------------------------------------------------------------===//
 
 #include "types.h"
-#include <algorithm>
-#include <stdio.h>
+//#include <algorithm>
+//#include <stdio.h>
+
+namespace jagger {
+namespace wax {
+uint postTopologicalSort(Block* blocks, uint* neighbors, uint i, uint id) {
+  blocks[i].blockID = id;
+  if (blocks[i].dominator && !blocks[blocks[i].dominator].blockID)
+    id = postTopologicalSort(blocks, neighbors, blocks[i].dominator, id);
+  for (auto j : blocks[i].predecessors(neighbors))
+    if (!blocks[j].blockID)
+      id = postTopologicalSort(blocks, neighbors, j, id);
+  return blocks[i].blockID = ++id;
+}
+
+uint topologicalSort(Block* blocks, uint* neighbors, uint i, uint id) {
+  blocks[i].blockID = id;
+  if (blocks[i].postDominator && !blocks[blocks[i].postDominator].blockID)
+    id = topologicalSort(blocks, neighbors, blocks[i].postDominator, id);
+  for (auto j : blocks[i].successors(neighbors))
+    if (!blocks[j].blockID)
+      id = topologicalSort(blocks, neighbors, j, id);
+  return blocks[i].blockID = --id;
+}
+
+void sortBlocks(Block* target, Block* blocks, size_t size) {
+  for (size_t i = 0; i != size; ++i)
+    target[blocks[i].blockID] = blocks[i];
+}
+
+void updateNeighbors(uint* neighbors, Block* blocks, size_t numNeighbors) {
+  for (size_t i = 0; i != numNeighbors; ++i)
+    neighbors[i] = blocks[neighbors[i]].blockID - 1;
+}
+
+void computeDominator(Block* blocks, uint* neighbors, uint i) {
+  if (!blocks[i].predecessors.size()) return;
+  uint dominator = 0;
+  for (auto j : blocks[i].predecessors(neighbors)) {
+    if (blocks[j].blockID <= blocks[i].blockID) continue;
+    auto candidate = j;
+    if (!dominator) dominator = candidate;
+    while (dominator != candidate)
+      if (blocks[candidate].blockID > blocks[dominator].blockID)
+        candidate = blocks[candidate].dominator;
+      else
+        dominator = blocks[dominator].dominator;
+  }
+  blocks[i].domTreeSize = 1;
+  blocks[i].dominator = dominator;
+}
+
+void computePostDominator(Block* blocks, uint* neighbors, uint i) {
+  if (!blocks[i].successors.size()) return;
+  uint dominator = 0;
+  for (auto j : blocks[i].successors(neighbors)) {
+    if (blocks[j].blockID <= blocks[i].blockID) continue;
+    auto candidate = j;
+    if (!dominator) dominator = candidate;
+    while (dominator != candidate)
+      if (blocks[candidate].blockID < blocks[dominator].blockID)
+        candidate = blocks[candidate].dominator;
+      else
+        dominator = blocks[dominator].dominator;
+  }
+  blocks[i].postDomTreeSize = 1;
+  blocks[i].postDominator = dominator;
+}
+
+void computePostDomTreeSize(Block* blocks, Block& block) {
+  if (!block.postDominator) return;
+  block.postDomTreeID = blocks[block.postDominator].postDomTreeSize;
+  blocks[block.postDominator].postDomTreeSize += block.postDomTreeSize;
+}
+
+void computeDomTreeSize(Block* blocks, Block& block) {
+  if (!block.dominator) return;
+  block.domTreeID = blocks[block.dominator].domTreeSize;
+  blocks[block.dominator].domTreeSize += block.domTreeSize;
+}
+
+void computePostDomTreeID(Block* blocks, Block& block) {
+  if (!block.postDominator) return;
+  block.postDomTreeID += blocks[block.postDominator].postDomTreeID;
+}
+
+void computeDomTreeID(Block* blocks, Block& block) {
+  if (!block.dominator) return;
+  block.domTreeID += blocks[block.dominator].domTreeID;
+}
+
+void computeLoopDepth(Block* blocks, uint* neighbors, Block& block) {
+  if (!block.dominator) {
+    block.loopDepth = 0;
+    return;
+  }
+  block.loopDepth = blocks[block.dominator].loopDepth;
+  for (auto j : block.predecessors(neighbors))
+    if (block.dominates(blocks[j])) { // i < j
+      block.loopDepth++;
+      return;
+    }
+}
+
+void Module::computeDominators() {
+  Array<Block> blockSwapArray(blockArray.size());
+  uint blockID = 0;
+  // TODO: this is all kinds of buggy
+  auto blocks = blockArray.root() ;
+  auto neighbors = neighborArray.root();
+  size_t numBlocks = blockArray.size();
+
+  // TODO: remove unused blocks and update the block array size
+
+  // Compute post-dominators.
+  for (auto& fun : functionArray)
+    blockID = postTopologicalSort(blocks, neighbors, fun.blocks.first, blockID);
+  updateNeighbors(neighbors, blocks, neighborArray.size());
+  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size());
+  blocks = blockSwapArray.begin();
+  for (size_t i = numBlocks - 1; i < numBlocks; --i)
+    computePostDominator(blocks, neighbors, (uint)i);
+
+  // Compute dominators.
+  for (auto& fun : functionArray)
+    blockID = topologicalSort(blocks, neighbors, fun.blocks.first, ++blockID);
+  updateNeighbors(neighbors, blocks, neighborArray.size());
+  sortBlocks(blockArray.begin(), blockSwapArray.begin(), blockArray.size());
+  blocks = blockArray.begin();
+
+  // TODO: sort neighbor array to make it in order
+
+  for (size_t i = 0; i < numBlocks; ++i) {
+    computeDominator(blocks, neighbors, (uint)i);
+    computePostDomTreeSize(blocks, blocks[i]);
+  }
+  for (size_t i = numBlocks - 1; i < numBlocks; --i) {
+    computePostDomTreeID(blocks, blocks[i]);
+    computeDomTreeSize(blocks, blocks[i]);
+  }
+  for (auto& block : blockArray) computeDomTreeID(blocks, block);
+}
+}  // namespace wax
+}  // namespace jagger
 
 #if 0
 namespace Core {
