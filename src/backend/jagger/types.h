@@ -26,7 +26,7 @@ struct Block {
     return other.domTreeID - domTreeID < domTreeSize;
   }
   bool postDominates(const Block& other) const {
-    return other.postDomTreeID - domTreeID < domTreeSize;
+    return other.postDomTreeID - postDomTreeID < postDomTreeSize;
   }
   uint dominator;
   uint domTreeID;
@@ -50,6 +50,7 @@ struct Function {
 };
 
 struct Module {
+  Module() {}
   Module(const Module&) = delete;
   Module& operator=(const Module&) = delete;
   Array<Block> blockArray;

@@ -32,7 +32,10 @@ void printSExpr(SExpr* e) {
   TILDebugPrinter::print(e, std::cout);
 }
 
-
+namespace jagger {
+void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global);
+void print(const wax::Module& module);
+}
 
 int main(int argc, const char** argv) {
   if (argc == 1) {
@@ -65,7 +68,11 @@ int main(int argc, const char** argv) {
 
   //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
 
-  Core::emitEvents(global);
+  //Core::emitEvents(global);
+  jagger::wax::Module module;
+  jagger::buildModuleFromTIL(module, global);
+  module.computeDominators();
+  jagger::print(module);
 
   return 0;
 }

@@ -30,60 +30,54 @@ struct ModuleBuilder {
 
 void ModuleBuilder::walkTILGraph() {
   visitCFG.traverseAll(global.global());
-  if (visitCFG.cfgs().empty()) {
-    printf("Can't build a module without any input.");
-    exit(1);
-  }
+  if (visitCFG.cfgs().empty())
+    error("Can't build a module without any input.");
 }
 
 void ModuleBuilder::buildFunctionArray() {
   module.functionArray = Array<wax::Function>(visitCFG.cfgs().size());
   auto i = module.functionArray.begin();
-  i[-1].blocks.bound = 1;
   for (auto cfg : visitCFG.cfgs()) i++->blocks.bound = cfg->numBlocks();
-  for (auto& fun : module.functionArray)
+  module.functionArray[0].blocks.first = 0;
+  for (auto& fun : module.functionArray.slice(1, -1))
     fun.blocks.bound += fun.blocks.first = (&fun)[-1].blocks.bound;
 }
 
 void ModuleBuilder::buildBlockSidecarArray() {
   auto& functionArray = module.functionArray;
-  size_t numFunctions = functionArray.size();
-  size_t numBlocks = functionArray.last().blocks.bound;
-  blockSidecarArray = Array<BlockSidecar>(numBlocks);
+  blockSidecarArray = Array<BlockSidecar>(functionArray.last().blocks.bound);
   auto function = functionArray.begin();
-  auto first = blockSidecarArray.begin();
+  auto origin = blockSidecarArray.begin();
   for (auto cfg : visitCFG.cfgs()) {
     uint entryBlockID = function++->blocks.first;
     for (auto& sidecar : blockSidecarArray) {
-      auto basicBlock = cfg->blocks()[&sidecar - (first + entryBlockID)].get();
+      auto basicBlock = cfg->blocks()[&sidecar - (origin + entryBlockID)].get();
       sidecar.entryBlockID = entryBlockID;
       sidecar.basicBlock = basicBlock;
       sidecar.firstSuccessor = basicBlock->predecessors().size();
       sidecar.boundSuccessor = basicBlock->successors().size();
     }
   }
-  // This is legal because there's a block of padding in the block array.
-  blockSidecarArray[0].boundSuccessor = 0;
-  for (auto& sidecar : blockSidecarArray)
+  blockSidecarArray[0].firstPredecessor = 0;
+  blockSidecarArray[0].boundSuccessor += blockSidecarArray[0].firstSuccessor;
+  for (auto& sidecar : blockSidecarArray.slice(1, -1))
     sidecar.boundSuccessor += sidecar.firstSuccessor +=
         sidecar.firstPredecessor = (&sidecar)[-1].boundSuccessor;
 }
 
 void ModuleBuilder::buildBlockArray() {
-  module.blockArray = Array<wax::Block>(blockSidecarArray.size());
+  module.blockArray = Array<wax::Block>(blockSidecarArray.size);
   module.neighborArray =
-      Array<uint>(blockSidecarArray.end()[-1].boundSuccessor);
+      Array<uint>(blockSidecarArray.last().boundSuccessor);
   auto sidecar = blockSidecarArray.begin();
   auto blocks = module.blockArray.begin();
   auto neighbors = module.neighborArray.begin();
   for (auto& block : module.blockArray) {
-    block.successors.first = sidecar->firstSuccessor;
-    block.successors.bound = sidecar->boundSuccessor;
     block.predecessors.first = sidecar->firstPredecessor;
     block.predecessors.bound = sidecar->firstSuccessor;
-    block.blockID = 0;
-    block.dominator = 0;
-    block.postDominator = 0;
+    block.successors.first = sidecar->firstSuccessor;
+    block.successors.bound = sidecar->boundSuccessor;
+    block.blockID = INVALID_INDEX;
 
     auto entryBlockID = sidecar->entryBlockID;
     auto succs = block.successors.first;
@@ -93,7 +87,6 @@ void ModuleBuilder::buildBlockArray() {
     for (auto& tilPred : sidecar->basicBlock->predecessors())
       neighbors[preds++] = entryBlockID + tilPred->blockID();
 
-    // Compute the indices.
     for (auto& i : block.successors(neighbors))
       blocks[i].caseIndex = (uint)(&i - (neighbors + block.successors.first));
     for (auto& i : block.predecessors(neighbors))
@@ -107,6 +100,7 @@ void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global) {
   ModuleBuilder builder(module, global);
   builder.walkTILGraph();
   builder.buildFunctionArray();
+  builder.buildBlockSidecarArray();
   builder.buildBlockArray();
 }
 }  // namespace jagger

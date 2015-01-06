@@ -19,8 +19,72 @@
 #include "til/Global.h"
 #include "til/VisitCFG.h"
 #include "types.h"
+#include <stdarg.h>
 #include <stdio.h>
 
+namespace jagger {
+void error(const char* format, ...) {
+  va_list argList;
+  va_start(argList, format);
+  vprintf(format, argList);
+  va_end(argList);
+  exit(1);
+}
+
+//for (auto& block : blockArray) {
+//  printf("[%d :", block.blockID);
+//  for (auto& other : blockArray)
+//    if (block.dominates(other))
+//      printf(" %d", other.blockID);
+//  printf(" :");
+//  for (auto& other : blockArray)
+//    if (block.postDominates(other))
+//      printf(" %d", other.blockID);
+//  printf("]\n");
+//}
+
+void print(const wax::Module& module) {
+  auto neighbors = module.neighborArray.root;
+  for (auto& fun : module.functionArray) {
+    printf("function %d\n", &fun - module.functionArray.begin());
+    for (auto& block : module.blockArray.slice(fun.blocks)) {
+      printf(" block %d\n", &block - module.blockArray.begin());
+      printf("  dominator       = %d\n", block.dominator);
+      printf("  domTreeID       = %d\n", block.domTreeID);
+      printf("  domTreeSize     = %d\n", block.domTreeSize);
+      printf("  postDominator   = %d\n", block.postDominator);
+      printf("  postDomTreeID   = %d\n", block.postDomTreeID);
+      printf("  postDomTreeSize = %d\n", block.postDomTreeSize);
+      printf("  caseIndex       = %d\n", block.caseIndex);
+      printf("  phiIndex        = %d\n", block.phiIndex);
+      printf("  firstEvent      = %d\n", block.firstEvent);
+      printf("  boundEvent      = %d\n", block.boundEvent);
+      printf("  loopDepth       = %d\n", block.loopDepth);
+      printf("  blockID         = %d\n", block.blockID);
+      printf("  predecessors    = [");
+      if (block.predecessors.size()) {
+        printf("%d", neighbors[block.predecessors.first]);
+        for (auto i = block.predecessors.first + 1,
+                  e = block.predecessors.bound;
+             i != e; ++i)
+          printf(", %d", neighbors[i]);
+      }
+      printf("]\n");
+      printf("  successors      = [");
+      if (block.successors.size()) {
+        printf("%d", neighbors[block.successors.first]);
+        for (auto i = block.successors.first + 1, e = block.successors.bound;
+             i != e; ++i)
+          printf(", %d", neighbors[i]);
+      }
+      printf("]\n");
+      printf("\n");
+    }
+  }
+}
+}  // namespace jagger
+
+#if 0
 namespace Core {
 
 bool validateTIL(ohmu::til::BasicBlock* block) {
@@ -124,3 +188,4 @@ void printDebug(EventBuilder builder, size_t numEvents) {
 }
 
 }  // namespace Jagger {
+#endif

@@ -17,6 +17,7 @@
 
 #include "types.h"
 
+#if 0
 void allocate(Core::EventList in, size_t numEvents) {
   computeOffsets();
   prefixSumOffsets();
@@ -40,7 +41,7 @@ void allocate(Core::EventList in, size_t numEvents) {
   allocateInstrs();
   generateInstrs();
 }
-
+#endif
 
 #if 0
 

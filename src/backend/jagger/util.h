@@ -17,14 +17,22 @@
 
 #pragma once
 #include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 namespace jagger {
 typedef unsigned int uint;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
+
+template <typename T>
+T&& move(T& a) {
+  return (T && )a;
+}
+template <typename T>
+void swap(T&& a, T&& b) {
+  auto c = move(a);
+  a = b;
+  b = c;
+}
 
 struct TypedPtr {
   __forceinline size_t set(size_t i, uchar type, uint data) const {
@@ -100,21 +108,36 @@ struct TypedArray {
 };
 
 template <typename T>
-struct AddressRange {
-  AddressRange(T* first, T* bound) : first(first), bound(bound) {}
-  T* begin() const { return first; }
-  T* end() const { return bound; }
+struct ReverseAddressRange {
+  struct Iterator {
+    Iterator(T* p) : p(p) {}
+    T& operator*() const { return *p; }
+    bool operator!=(const Iterator& a) const { return p != a.p; }
+    void operator++() { --p; }
+    T* p;
+  };
+  ReverseAddressRange(T* first, T* bound)
+      : first(bound - 1), bound(first - 1) {}
+  Iterator begin() const { return first; }
+  Iterator end() const { return bound; }
 
-private:
+ private:
   T* first;
   T* bound;
 };
 
-template<typename T>
-struct ReverseIterator {
-  operator T() const { return i; }
-  void operator ++() { --i; }
-  T i;
+template <typename T>
+struct AddressRange {
+  AddressRange(T* first, T* bound) : first(first), bound(bound) {}
+  T* begin() const { return first; }
+  T* end() const { return bound; }
+  ReverseAddressRange<T> reverse() const {
+    return ReverseAddressRange<T>(first, bound);
+  }
+
+private:
+  T* first;
+  T* bound;
 };
 
 struct Range {
@@ -123,51 +146,55 @@ struct Range {
   uint size() const { return bound - first; }
   template <typename T>
   AddressRange<T> operator()(T* p) const {
-    return range(p, first, bound);
+    return AddressRange<T>(p + first, p + bound);
   }
   uint first;
   uint bound;
 };
 
+static const uint INVALID_INDEX = (uint)-1;
+
 template <typename T>
 struct Array {
   T& operator[](size_t i) const { return root[i]; }
-  T* begin() const { return root + 1; }
-  T* end() const { return root + 1 + size_; }
-  T& last() const { return root[size_]; }
+  T* begin() const { return root; }
+  T* end() const { return root + size; }
+  T& last() const { return root[size - 1]; }
   explicit operator bool() const { return root != nullptr; }
-  size_t size() const { return size_; }
 
-  Array() : root(nullptr), size_(0) {}
-  Array(size_t size) : root(new T[size + 1]), size_(size) {}
+  Array() : root(nullptr), size(0) {}
+  explicit Array(size_t size) : root(new T[size]), size(size) {}
   Array(const Array&) = delete;
   Array& operator=(const Array&) = delete;
-  Array(Array&& a) : root(a.root), size_(a.size_) { a.root = nullptr; }
+  Array(Array&& a) : root(a.root), size(a.size) { a.root = nullptr; }
   Array& operator=(Array&& a) {
     if (this == &a) return *this;
     if (root) delete[] root;
     root = a.root;
-    size_ = a.size_;
+    size = a.size;
     a.root = nullptr;
     return *this;
   }
   ~Array() { if (root) delete[] root; }
   void swap(Array& a) {
-    swap(root, a.root);
-    swap(size_, a.size_);
+    jagger::swap(root, a.root);
+    jagger::swap(size, a.size);
+  }
+  AddressRange<T> slice(size_t first, size_t bound) const {
+    if (bound > size) bound = size;
+    return AddressRange<T>(root + first, root + size);
+  }
+  AddressRange<T> slice(const Range& range) const {
+    return range(root);
+  }
+  ReverseAddressRange<T> reverse() const {
+    return ReverseAddressRange<T>(root, root + size);
   }
 
- private:
+  // don't modify these or you'll get what's coming to you.
   T* root;
-  size_t size_;
+  size_t size;
 };
 
-// TODO: move me to a cpp and remove the header requirement
-void error(const char* format, ...) {
-  va_list argList;
-  va_start(argList, format);
-  vprintf(format, argList);
-  va_end(argList);
-  exit(1);
-}
+void error(const char* format, ...);
 }  // namespace jagger

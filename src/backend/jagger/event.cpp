@@ -17,26 +17,24 @@
 
 #include "types.h"
 //#include <algorithm>
-//#include <stdio.h>
+#include <stdio.h>
 
 namespace jagger {
 namespace wax {
 uint postTopologicalSort(Block* blocks, uint* neighbors, uint i, uint id) {
   blocks[i].blockID = id;
-  if (blocks[i].dominator && !blocks[blocks[i].dominator].blockID)
+  if (blocks[blocks[i].dominator].blockID == INVALID_INDEX)
     id = postTopologicalSort(blocks, neighbors, blocks[i].dominator, id);
-  for (auto j : blocks[i].predecessors(neighbors))
-    if (!blocks[j].blockID)
+  for (auto j : blocks[i].predecessors(neighbors).reverse())
+    if (blocks[j].blockID == INVALID_INDEX)
       id = postTopologicalSort(blocks, neighbors, j, id);
-  return blocks[i].blockID = ++id;
+  return (blocks[i].blockID = id) + 1;
 }
 
 uint topologicalSort(Block* blocks, uint* neighbors, uint i, uint id) {
   blocks[i].blockID = id;
-  if (blocks[i].postDominator && !blocks[blocks[i].postDominator].blockID)
-    id = topologicalSort(blocks, neighbors, blocks[i].postDominator, id);
   for (auto j : blocks[i].successors(neighbors))
-    if (!blocks[j].blockID)
+    if (blocks[j].blockID == INVALID_INDEX)
       id = topologicalSort(blocks, neighbors, j, id);
   return blocks[i].blockID = --id;
 }
@@ -48,115 +46,128 @@ void sortBlocks(Block* target, Block* blocks, size_t size) {
 
 void updateNeighbors(uint* neighbors, Block* blocks, size_t numNeighbors) {
   for (size_t i = 0; i != numNeighbors; ++i)
-    neighbors[i] = blocks[neighbors[i]].blockID - 1;
+    neighbors[i] = blocks[neighbors[i]].blockID;
 }
 
-void computeDominator(Block* blocks, uint* neighbors, uint i) {
-  if (!blocks[i].predecessors.size()) return;
-  uint dominator = 0;
-  for (auto j : blocks[i].predecessors(neighbors)) {
-    if (blocks[j].blockID <= blocks[i].blockID) continue;
+void computeDominator(Block* blocks, uint* neighbors, Block& block) {
+  block.domTreeSize = 1;
+  if (!block.predecessors.size()) {
+    block.dominator = INVALID_INDEX;
+    return;
+  }
+  uint dominator = INVALID_INDEX;
+  for (auto j : block.predecessors(neighbors)) {
+    if (blocks[j].blockID >= block.blockID) continue;
     auto candidate = j;
-    if (!dominator) dominator = candidate;
+    if (dominator == INVALID_INDEX) dominator = candidate;
     while (dominator != candidate)
       if (blocks[candidate].blockID > blocks[dominator].blockID)
         candidate = blocks[candidate].dominator;
       else
         dominator = blocks[dominator].dominator;
   }
-  blocks[i].domTreeSize = 1;
-  blocks[i].dominator = dominator;
+  block.dominator = dominator;
 }
 
-void computePostDominator(Block* blocks, uint* neighbors, uint i) {
-  if (!blocks[i].successors.size()) return;
-  uint dominator = 0;
-  for (auto j : blocks[i].successors(neighbors)) {
-    if (blocks[j].blockID <= blocks[i].blockID) continue;
-    auto candidate = j;
-    if (!dominator) dominator = candidate;
-    while (dominator != candidate)
-      if (blocks[candidate].blockID < blocks[dominator].blockID)
-        candidate = blocks[candidate].dominator;
-      else
-        dominator = blocks[dominator].dominator;
+void computePostDominator(Block* blocks, uint* neighbors, Block& block) {
+  block.postDomTreeSize = 1;
+  if (!block.successors.size()) {
+    block.postDominator = INVALID_INDEX;
+    return;
   }
-  blocks[i].postDomTreeSize = 1;
-  blocks[i].postDominator = dominator;
+  uint postDominator = INVALID_INDEX;
+  for (auto j : block.successors(neighbors)) {
+    if (blocks[j].blockID <= block.blockID) continue;
+    auto candidate = j;
+    if (postDominator == INVALID_INDEX) postDominator = candidate;
+    while (postDominator != candidate)
+      if (blocks[candidate].blockID < blocks[postDominator].blockID)
+        candidate = blocks[candidate].postDominator;
+      else
+        postDominator = blocks[postDominator].postDominator;
+  }
+  block.postDominator = postDominator;
 }
 
 void computePostDomTreeSize(Block* blocks, Block& block) {
-  if (!block.postDominator) return;
+  if (block.postDominator == INVALID_INDEX) return;
   block.postDomTreeID = blocks[block.postDominator].postDomTreeSize;
   blocks[block.postDominator].postDomTreeSize += block.postDomTreeSize;
 }
 
 void computeDomTreeSize(Block* blocks, Block& block) {
-  if (!block.dominator) return;
+  if (block.dominator == INVALID_INDEX) return;
   block.domTreeID = blocks[block.dominator].domTreeSize;
   blocks[block.dominator].domTreeSize += block.domTreeSize;
 }
 
 void computePostDomTreeID(Block* blocks, Block& block) {
-  if (!block.postDominator) return;
-  block.postDomTreeID += blocks[block.postDominator].postDomTreeID;
+  if (block.postDominator == INVALID_INDEX)
+    block.postDomTreeID = 0;
+  else
+    block.postDomTreeID += blocks[block.postDominator].postDomTreeID;
 }
 
 void computeDomTreeID(Block* blocks, Block& block) {
-  if (!block.dominator) return;
-  block.domTreeID += blocks[block.dominator].domTreeID;
+  if (block.dominator == INVALID_INDEX)
+    block.domTreeID = 0;
+  else
+    block.domTreeID += blocks[block.dominator].domTreeID;
 }
 
 void computeLoopDepth(Block* blocks, uint* neighbors, Block& block) {
-  if (!block.dominator) {
+  if (block.dominator == INVALID_INDEX) {
     block.loopDepth = 0;
     return;
   }
   block.loopDepth = blocks[block.dominator].loopDepth;
   for (auto j : block.predecessors(neighbors))
-    if (block.dominates(blocks[j])) { // i < j
+    if (block.dominates(blocks[j])) {
       block.loopDepth++;
       return;
     }
 }
 
 void Module::computeDominators() {
-  Array<Block> blockSwapArray(blockArray.size());
-  uint blockID = 0;
+  Array<Block> blockSwapArray(blockArray.size);
+  uint blockID = blockArray.size;
   // TODO: this is all kinds of buggy
-  auto blocks = blockArray.root() ;
-  auto neighbors = neighborArray.root();
-  size_t numBlocks = blockArray.size();
+  auto blocks = blockArray.begin() ;
+  auto neighbors = neighborArray.begin();
+  size_t numBlocks = blockArray.size;
 
   // TODO: remove unused blocks and update the block array size
 
-  // Compute post-dominators.
-  for (auto& fun : functionArray)
-    blockID = postTopologicalSort(blocks, neighbors, fun.blocks.first, blockID);
-  updateNeighbors(neighbors, blocks, neighborArray.size());
-  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size());
-  blocks = blockSwapArray.begin();
-  for (size_t i = numBlocks - 1; i < numBlocks; --i)
-    computePostDominator(blocks, neighbors, (uint)i);
-
   // Compute dominators.
   for (auto& fun : functionArray)
-    blockID = topologicalSort(blocks, neighbors, fun.blocks.first, ++blockID);
-  updateNeighbors(neighbors, blocks, neighborArray.size());
-  sortBlocks(blockArray.begin(), blockSwapArray.begin(), blockArray.size());
+    blockID = topologicalSort(blocks, neighbors, fun.blocks.first, blockID);
+
+  updateNeighbors(neighbors, blocks, neighborArray.size);
+  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size);
+  blockArray.swap(blockSwapArray);
   blocks = blockArray.begin();
+  for (auto& block : blockArray)
+    computeDominator(blocks, neighbors, block);
+  for (auto& block : blockArray)
+    block.blockID = INVALID_INDEX;
 
-  // TODO: sort neighbor array to make it in order
-
-  for (size_t i = 0; i < numBlocks; ++i) {
-    computeDominator(blocks, neighbors, (uint)i);
-    computePostDomTreeSize(blocks, blocks[i]);
+  // Compute post-dominators.
+  for (auto& fun : functionArray)
+    blockID = postTopologicalSort(blocks, neighbors, fun.blocks.bound - 1, 0);
+  updateNeighbors(neighbors, blocks, neighborArray.size);
+  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size);
+  blockArray.swap(blockSwapArray);
+  blocks = blockArray.begin();
+  for (auto& block : blockArray.reverse()) {
+    computePostDominator(blocks, neighbors, block);
+    computeDomTreeSize(blocks, block);
   }
-  for (size_t i = numBlocks - 1; i < numBlocks; --i) {
-    computePostDomTreeID(blocks, blocks[i]);
-    computeDomTreeSize(blocks, blocks[i]);
+  for (auto& block : blockArray) {
+    computePostDomTreeSize(blocks, block);
+    computeDomTreeID(blocks, block);
   }
-  for (auto& block : blockArray) computeDomTreeID(blocks, block);
+  for (auto& block : blockArray.reverse())
+    computePostDomTreeID(blocks, block);
 }
 }  // namespace wax
 }  // namespace jagger

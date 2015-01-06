@@ -20,3 +20,4 @@
 
 // FIXME: Should take an allocator rather than a buffer.
 void encode(ohmu::til::SCFG* cfg, char* output);
+void testJagget()
