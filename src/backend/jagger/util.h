@@ -67,6 +67,7 @@ struct TypedRef {
 
 template <typename Payload, size_t SIZE>
 struct TypedStruct : TypedRef {
+  enum { SLOT_COUNT = SIZE };
   __forceinline Payload& operator*() const {
     static_assert(sizeof(Payload) <= sizeof(p.data(i)),
                   "Can't cast to object of larger size.");
@@ -78,7 +79,6 @@ struct TypedStruct : TypedRef {
   __forceinline T field(size_t j) const {
     return TypedRef(p, j).as<T>();
   }
-  __forceinline static size_t slotCount(size_t i = 0) { return SIZE + i; }
 };
 
 inline TypedRef TypedPtr::operator[](size_t i) const {

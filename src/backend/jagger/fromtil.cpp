@@ -3,6 +3,40 @@
 #include "til/Global.h"
 #include "til/VisitCFG.h"
 
+static_assert(ohmu::til::COP_VarDecl    ==  0, "til changed");
+static_assert(ohmu::til::COP_Function   ==  1, "til changed");
+static_assert(ohmu::til::COP_Code       ==  2, "til changed");
+static_assert(ohmu::til::COP_Field      ==  3, "til changed");
+static_assert(ohmu::til::COP_Slot       ==  4, "til changed");
+static_assert(ohmu::til::COP_Record     ==  5, "til changed");
+static_assert(ohmu::til::COP_ScalarType ==  6, "til changed");
+static_assert(ohmu::til::COP_SCFG       ==  7, "til changed");
+static_assert(ohmu::til::COP_BasicBlock ==  8, "til changed");
+static_assert(ohmu::til::COP_Literal    ==  9, "til changed");
+static_assert(ohmu::til::COP_Variable   == 10, "til changed");
+static_assert(ohmu::til::COP_Apply      == 11, "til changed");
+static_assert(ohmu::til::COP_Project    == 12, "til changed");
+static_assert(ohmu::til::COP_Call       == 13, "til changed");
+static_assert(ohmu::til::COP_Alloc      == 14, "til changed");
+static_assert(ohmu::til::COP_Load       == 15, "til changed");
+static_assert(ohmu::til::COP_Store      == 16, "til changed");
+static_assert(ohmu::til::COP_ArrayIndex == 17, "til changed");
+static_assert(ohmu::til::COP_ArrayAdd   == 18, "til changed");
+static_assert(ohmu::til::COP_UnaryOp    == 19, "til changed");
+static_assert(ohmu::til::COP_BinaryOp   == 20, "til changed");
+static_assert(ohmu::til::COP_Cast       == 21, "til changed");
+static_assert(ohmu::til::COP_Phi        == 22, "til changed");
+static_assert(ohmu::til::COP_Goto       == 23, "til changed");
+static_assert(ohmu::til::COP_Branch     == 24, "til changed");
+static_assert(ohmu::til::COP_Return     == 25, "til changed");
+static_assert(ohmu::til::COP_Future     == 26, "til changed");
+static_assert(ohmu::til::COP_Undefined  == 27, "til changed");
+static_assert(ohmu::til::COP_Wildcard   == 28, "til changed");
+static_assert(ohmu::til::COP_Identifier == 29, "til changed");
+static_assert(ohmu::til::COP_Let        == 30, "til changed");
+static_assert(ohmu::til::COP_Letrec     == 31, "til changed");
+static_assert(ohmu::til::COP_IfThenElse == 32, "til changed");
+
 namespace jagger {
 namespace {
 struct ModuleBuilder {
@@ -22,6 +56,8 @@ struct ModuleBuilder {
   void buildFunctionArray();
   void buildBlockSidecarArray();
   void buildBlockArray();
+  void countEvents();
+  void buildEventArray();
   wax::Module& module;
   ohmu::til::Global& global;
   ohmu::til::VisitCFG visitCFG;
@@ -80,20 +116,130 @@ void ModuleBuilder::buildBlockArray() {
     block.blockID = INVALID_INDEX;
 
     auto entryBlockID = sidecar->entryBlockID;
-    auto succs = block.successors.first;
+    auto succs = block.successors.bound;
     for (auto& tilSucc : sidecar->basicBlock->successors())
-      neighbors[succs++] = entryBlockID + tilSucc->blockID();
-    auto preds = block.predecessors.first;
+      neighbors[--succs] = entryBlockID + tilSucc->blockID();
+    auto preds = block.predecessors.bound;
     for (auto& tilPred : sidecar->basicBlock->predecessors())
-      neighbors[preds++] = entryBlockID + tilPred->blockID();
+      neighbors[--preds] = entryBlockID + tilPred->blockID();
 
+    if (!block.predecessors.size())
+      block.caseIndex = INVALID_INDEX;
+    if (!block.successors.size())
+      block.phiIndex = INVALID_INDEX;
     for (auto& i : block.successors(neighbors))
-      blocks[i].caseIndex = (uint)(&i - (neighbors + block.successors.first));
+      blocks[i].caseIndex = (uint)(&i - (neighbors + succs));
     for (auto& i : block.predecessors(neighbors))
-      blocks[i].phiIndex = (uint)(&i - (neighbors + block.predecessors.first));
+      blocks[i].phiIndex = (uint)(&i - (neighbors + preds));
 
     sidecar++;
   }
+}
+
+//size_t countLiteral(const ohmu::til::Instruction& instr) {
+//}
+//
+//size_t countLoad(const ohmu::til::Instruction& instr) {
+//}
+//
+//size_t countStore(const ohmu::til::Instruction& instr) {
+//}
+//
+#if 0
+size_t(*emitEventsTable[ohmu::til::COP_NumOpcodes])(
+  const ohmu::til::Instruction&) = {
+  /*COP_VarDecl    =*/ nullptr,
+  /*COP_Function   =*/ nullptr,
+  /*COP_Code       =*/ nullptr,
+  /*COP_Field      =*/ nullptr,
+  /*COP_Slot       =*/ nullptr,
+  /*COP_Record     =*/ nullptr,
+  /*COP_ScalarType =*/ nullptr,
+  /*COP_SCFG       =*/ nullptr,
+  /*COP_BasicBlock =*/ nullptr,
+  /*COP_Literal    =*/,
+  /*COP_Variable   =*/ nullptr,
+  /*COP_Apply      =*/ nullptr,
+  /*COP_Project    =*/ nullptr,
+  /*COP_Call       =*/ nullptr,
+  /*COP_Alloc      =*/ nullptr,
+  /*COP_Load       =*/,
+  /*COP_Store      =*/,
+  /*COP_ArrayIndex =*/ nullptr,
+  /*COP_ArrayAdd   =*/ nullptr,
+  /*COP_UnaryOp    =*/,
+  /*COP_BinaryOp   =*/,
+  /*COP_Cast       =*/ nullptr,
+  /*COP_Phi        =*/ nullptr,
+  /*COP_Goto       =*/,
+  /*COP_Branch     =*/,
+  /*COP_Return     =*/ nullptr,
+  /*COP_Future     =*/ nullptr,
+  /*COP_Undefined  =*/ nullptr,
+  /*COP_Wildcard   =*/ nullptr,
+  /*COP_Identifier =*/ nullptr,
+  /*COP_Let        =*/ nullptr,
+  /*COP_Letrec     =*/ nullptr,
+  /*COP_IfThenElse =*/ nullptr,
+};
+#endif
+
+void countEvents2(wax::Block& block, const ohmu::til::BasicBlock& basicBlock) {
+  static const size_t table[] = {
+    /*COP_VarDecl    =*/ 0,
+    /*COP_Function   =*/ 0,
+    /*COP_Code       =*/ 0,
+    /*COP_Field      =*/ 0,
+    /*COP_Slot       =*/ 0,
+    /*COP_Record     =*/ 0,
+    /*COP_ScalarType =*/ 0,
+    /*COP_SCFG       =*/ 0,
+    /*COP_BasicBlock =*/ 0,
+    /*COP_Literal    =*/ wax::Load::SLOT_COUNT,
+    /*COP_Variable   =*/ 0,
+    /*COP_Apply      =*/ 0,
+    /*COP_Project    =*/ 0,
+    /*COP_Call       =*/ 0,
+    /*COP_Alloc      =*/ 0,
+    /*COP_Load       =*/ wax::Load::SLOT_COUNT,
+    /*COP_Store      =*/ wax::Store::SLOT_COUNT,
+    /*COP_ArrayIndex =*/ 0,
+    /*COP_ArrayAdd   =*/ 0,
+    /*COP_UnaryOp    =*/ wax::local::Unary<uint>::SLOT_COUNT,
+    /*COP_BinaryOp   =*/ wax::local::Binary<uint>::SLOT_COUNT,
+    /*COP_Cast       =*/ 0,
+    /*COP_Phi        =*/ 0,
+    /*COP_Goto       =*/ wax::Jump::SLOT_COUNT,
+    /*COP_Branch     =*/ wax::Branch::SLOT_COUNT,
+    /*COP_Return     =*/ 0,
+    /*COP_Future     =*/ 0,
+    /*COP_Undefined  =*/ 0,
+    /*COP_Wildcard   =*/ 0,
+    /*COP_Identifier =*/ 0,
+    /*COP_Let        =*/ 0,
+    /*COP_Letrec     =*/ 0,
+    /*COP_IfThenElse =*/ 0,
+  };
+
+  static_assert(wax::CaseHeader::SLOT_COUNT == wax::JoinHeader::SLOT_COUNT,
+    "Simplifies logic here.");
+  size_t count = 0;
+  if (block.caseIndex != INVALID_INDEX) count += wax::CaseHeader::SLOT_COUNT;
+  count += block.predecessors.size() * wax::Phi::SLOT_COUNT;
+  for (auto instr : basicBlock.instructions()) count += table[instr->opcode()];
+  count += table[basicBlock.terminator()->opcode()];
+  if (block.phiIndex == INVALID_INDEX) count += wax::Return::SLOT_COUNT;
+  block.boundEvent = count;
+}
+
+void ModuleBuilder::countEvents() {
+  auto blocks = module.blockArray.begin();
+  auto sidecar = blockSidecarArray.begin();
+  for (size_t i = 0, e = module.blockArray.size; i != e; ++i)
+    countEvents2(blocks[i], *sidecar[i].basicBlock);
+  blocks[0].firstEvent = 0;
+  for (size_t i = 1, e = module.blockArray.size; i != e; ++i)
+    blocks[i].boundEvent += blocks[i].firstEvent = blocks[i - 1].boundEvent;
 }
 }  // namespace {
 void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global) {
@@ -102,6 +248,9 @@ void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global) {
   builder.buildFunctionArray();
   builder.buildBlockSidecarArray();
   builder.buildBlockArray();
+  //builder.buildEventArray();
+  builder.countEvents();
+
 }
 }  // namespace jagger
 

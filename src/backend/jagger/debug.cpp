@@ -48,36 +48,50 @@ void print(const wax::Module& module) {
   for (auto& fun : module.functionArray) {
     printf("function %d\n", &fun - module.functionArray.begin());
     for (auto& block : module.blockArray.slice(fun.blocks)) {
-      printf(" block %d\n", &block - module.blockArray.begin());
-      printf("  dominator       = %d\n", block.dominator);
-      printf("  domTreeID       = %d\n", block.domTreeID);
-      printf("  domTreeSize     = %d\n", block.domTreeSize);
-      printf("  postDominator   = %d\n", block.postDominator);
-      printf("  postDomTreeID   = %d\n", block.postDomTreeID);
-      printf("  postDomTreeSize = %d\n", block.postDomTreeSize);
+      printf(" block %d (%d)\n", &block - module.blockArray.begin(), block.blockID);
       printf("  caseIndex       = %d\n", block.caseIndex);
-      printf("  phiIndex        = %d\n", block.phiIndex);
-      printf("  firstEvent      = %d\n", block.firstEvent);
-      printf("  boundEvent      = %d\n", block.boundEvent);
-      printf("  loopDepth       = %d\n", block.loopDepth);
-      printf("  blockID         = %d\n", block.blockID);
-      printf("  predecessors    = [");
+      printf("  predecessors    = {");
       if (block.predecessors.size()) {
         printf("%d", neighbors[block.predecessors.first]);
         for (auto i = block.predecessors.first + 1,
-                  e = block.predecessors.bound;
-             i != e; ++i)
+          e = block.predecessors.bound;
+          i != e; ++i)
           printf(", %d", neighbors[i]);
       }
-      printf("]\n");
-      printf("  successors      = [");
+      printf("}\n");
+      printf("  phiIndex        = %d\n", block.phiIndex);
+      printf("  successors      = {");
       if (block.successors.size()) {
         printf("%d", neighbors[block.successors.first]);
         for (auto i = block.successors.first + 1, e = block.successors.bound;
-             i != e; ++i)
+          i != e; ++i)
           printf(", %d", neighbors[i]);
       }
-      printf("]\n");
+      printf("}\n");
+      printf("  loopDepth       = %d\n", block.loopDepth);
+      printf("  dominator       = %d\n", block.dominator);
+      printf("  dominates       = {");
+      bool first = true;
+      for (auto& other : module.blockArray.slice(fun.blocks))
+        if (&block != &other && block.dominates(other)) {
+          if (!first) printf(", ");
+          first = false;
+          printf("%d", &other - module.blockArray.begin());
+        }
+      printf("}\n");
+      printf("  postDominator   = %d\n", block.postDominator);
+      printf("  postDominates   = {");
+      first = true;
+      for (auto& other : module.blockArray.slice(fun.blocks))
+        if (&block != &other && block.postDominates(other)) {
+          if (!first) printf(", ");
+          first = false;
+          printf("%d", &other - module.blockArray.begin());
+        }
+      printf("}\n");
+      printf("  trees           = %d, %d; %d, %d\n", block.domTreeID,
+        block.domTreeSize, block.postDomTreeID, block.postDomTreeSize);
+      printf("  events          = [%d, %d)\n", block.firstEvent, block.boundEvent);
       printf("\n");
     }
   }

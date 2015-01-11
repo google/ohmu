@@ -16,8 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "types.h"
-//#include <algorithm>
-#include <stdio.h>
 
 namespace jagger {
 namespace wax {
@@ -25,7 +23,7 @@ uint postTopologicalSort(Block* blocks, uint* neighbors, uint i, uint id) {
   blocks[i].blockID = id;
   if (blocks[blocks[i].dominator].blockID == INVALID_INDEX)
     id = postTopologicalSort(blocks, neighbors, blocks[i].dominator, id);
-  for (auto j : blocks[i].predecessors(neighbors).reverse())
+  for (auto j : blocks[i].predecessors(neighbors))
     if (blocks[j].blockID == INVALID_INDEX)
       id = postTopologicalSort(blocks, neighbors, j, id);
   return (blocks[i].blockID = id) + 1;
@@ -148,6 +146,7 @@ void Module::computeDominators() {
   blocks = blockArray.begin();
   for (auto& block : blockArray)
     computeDominator(blocks, neighbors, block);
+  // TODO: Fold this somewhere.
   for (auto& block : blockArray)
     block.blockID = INVALID_INDEX;
 
@@ -165,9 +164,19 @@ void Module::computeDominators() {
   for (auto& block : blockArray) {
     computePostDomTreeSize(blocks, block);
     computeDomTreeID(blocks, block);
+    // Compute loop depth. TODO: make me more efficient
+    if (block.dominator == INVALID_INDEX) {
+      block.loopDepth = 0;
+      continue;
+    }
+    block.loopDepth = blocks[block.dominator].loopDepth;
+    for (auto i : block.predecessors(neighbors))
+      if (block.dominates(blocks[i])) {
+        block.loopDepth++;
+        break;
+      }
   }
-  for (auto& block : blockArray.reverse())
-    computePostDomTreeID(blocks, block);
+  for (auto& block : blockArray.reverse()) computePostDomTreeID(blocks, block);
 }
 }  // namespace wax
 }  // namespace jagger
