@@ -46,6 +46,7 @@ struct ModuleBuilder {
     uint firstPredecessor;
     uint firstSuccessor;
     uint boundSuccessor;
+    Range literals;
   };
   ModuleBuilder(wax::Module& module, ohmu::til::Global& global)
       : module(module), global(global) {
@@ -57,14 +58,15 @@ struct ModuleBuilder {
   void buildBlockSidecarArray();
   void buildBlockArray();
   void countLiterals();
-  void buildLiteralArray();
+  void buildLiteralsArray();
   void countEvents();
-  void buildEventArray();
+  void buildEventsArray();
   wax::Module& module;
   ohmu::til::Global& global;
   ohmu::til::VisitCFG visitCFG;
   Array<BlockSidecar> blockSidecarArray;
   Array<ohmu::til::Literal*> literals;
+  Array<int64> literalData;
 };
 
 void ModuleBuilder::walkTILGraph() {
@@ -105,7 +107,7 @@ void ModuleBuilder::buildBlockSidecarArray() {
 }
 
 void ModuleBuilder::buildBlockArray() {
-  module.blockArray = Array<wax::Block>(blockSidecarArray.size);
+  module.blockArray = Array<wax::Block>(blockSidecarArray.size());
   module.neighborArray =
       Array<uint>(blockSidecarArray.last().boundSuccessor);
   auto sidecar = blockSidecarArray.begin();
@@ -187,6 +189,10 @@ size_t(*emitEventsTable[ohmu::til::COP_NumOpcodes])(
 };
 #endif
 
+//==============================================================================
+// Counting Literals
+//==============================================================================
+
 size_t countLiteralsZero(const ohmu::til::Instruction&) {
   return 0;
 }
@@ -197,6 +203,9 @@ size_t countLiteralsUnaryOp(const ohmu::til::Instruction& instr) {
 }
 
 size_t countLiteralsBinaryOp(const ohmu::til::Instruction& instr) {
+  auto binaryOp = reinterpret_cast<const ohmu::til::BinaryOp&>(instr);
+  return (binaryOp.expr0()->opcode() == ohmu::til::COP_Literal ? 1 : 0) +
+         (binaryOp.expr1()->opcode() == ohmu::til::COP_Literal ? 1 : 0);
 }
 
 size_t countLiteralsBranch(const ohmu::til::Instruction& instr) {
@@ -209,87 +218,241 @@ size_t countLiteralsReturn(const ohmu::til::Instruction& instr) {
   return ret.returnValue()->opcode() == ohmu::til::COP_Literal ? 1 : 0;
 }
 
-size_t countLiterals(const ohmu::til::BasicBlock& basicBlock) {
-  static size_t(const *table[])(const ohmu::til::Instruction& instr) = {
-    /*COP_VarDecl    =*/ nullptr,
-    /*COP_Function   =*/ nullptr,
-    /*COP_Code       =*/ nullptr,
-    /*COP_Field      =*/ nullptr,
-    /*COP_Slot       =*/ nullptr,
-    /*COP_Record     =*/ nullptr,
-    /*COP_ScalarType =*/ nullptr,
-    /*COP_SCFG       =*/ nullptr,
-    /*COP_BasicBlock =*/ nullptr,
-    /*COP_Literal    =*/ nullptr,
-    /*COP_Variable   =*/ nullptr,
-    /*COP_Apply      =*/ nullptr,
-    /*COP_Project    =*/ nullptr,
-    /*COP_Call       =*/ nullptr,
-    /*COP_Alloc      =*/ nullptr,
-    /*COP_Load       =*/ countLiteralsZero,
-    /*COP_Store      =*/ nullptr,
-    /*COP_ArrayIndex =*/ nullptr,
-    /*COP_ArrayAdd   =*/ nullptr,
-    /*COP_UnaryOp    =*/ countLiteralsUnaryOp,
-    /*COP_BinaryOp   =*/ countLiteralsBinaryOp,
-    /*COP_Cast       =*/ nullptr,
-    /*COP_Phi        =*/ nullptr,
-    /*COP_Goto       =*/ countLiteralsZero,
-    /*COP_Branch     =*/ countLiteralsBranch,
-    /*COP_Return     =*/ countLiteralsReturn,
-    /*COP_Future     =*/ nullptr,
-    /*COP_Undefined  =*/ nullptr,
-    /*COP_Wildcard   =*/ nullptr,
-    /*COP_Identifier =*/ nullptr,
-    /*COP_Let        =*/ nullptr,
-    /*COP_Letrec     =*/ nullptr,
-    /*COP_IfThenElse =*/ nullptr,
+size_t countBlockLiterals(const ohmu::til::BasicBlock& basicBlock) {
+  static size_t (*const table[])(const ohmu::til::Instruction& instr) = {
+      /*COP_VarDecl    =*/nullptr,
+      /*COP_Function   =*/nullptr,
+      /*COP_Code       =*/nullptr,
+      /*COP_Field      =*/nullptr,
+      /*COP_Slot       =*/nullptr,
+      /*COP_Record     =*/nullptr,
+      /*COP_ScalarType =*/nullptr,
+      /*COP_SCFG       =*/nullptr,
+      /*COP_BasicBlock =*/nullptr,
+      /*COP_Literal    =*/nullptr,
+      /*COP_Variable   =*/nullptr,
+      /*COP_Apply      =*/nullptr,
+      /*COP_Project    =*/nullptr,
+      /*COP_Call       =*/nullptr,
+      /*COP_Alloc      =*/nullptr,
+      /*COP_Load       =*/countLiteralsZero,
+      /*COP_Store      =*/nullptr,
+      /*COP_ArrayIndex =*/nullptr,
+      /*COP_ArrayAdd   =*/nullptr,
+      /*COP_UnaryOp    =*/countLiteralsUnaryOp,
+      /*COP_BinaryOp   =*/countLiteralsBinaryOp,
+      /*COP_Cast       =*/nullptr,
+      /*COP_Phi        =*/nullptr,
+      /*COP_Goto       =*/countLiteralsZero,
+      /*COP_Branch     =*/countLiteralsBranch,
+      /*COP_Return     =*/countLiteralsReturn,
+      /*COP_Future     =*/nullptr,
+      /*COP_Undefined  =*/nullptr,
+      /*COP_Wildcard   =*/nullptr,
+      /*COP_Identifier =*/nullptr,
+      /*COP_Let        =*/nullptr,
+      /*COP_Letrec     =*/nullptr,
+      /*COP_IfThenElse =*/nullptr,
   };
-
   size_t count = 0;
-  for (auto instr : basicBlock.instructions()) count += table[instr->opcode()](*instr);
+  for (auto instr : basicBlock.instructions())
+    count += table[instr->opcode()](*instr);
   count += table[basicBlock.terminator()->opcode()](*basicBlock.terminator());
   return count;
 }
+
 void ModuleBuilder::countLiterals() {
+  for (auto& sidecar : blockSidecarArray)
+    sidecar.literals.bound = countBlockLiterals(*sidecar.basicBlock);
+  blockSidecarArray[0].literals.first = 0;
+  for (auto& sidecar : blockSidecarArray.slice(1, -1))
+    sidecar.literals.bound += sidecar.literals.first =
+        (&sidecar)[-1].literals.bound;
+  //for (auto& sidecar : blockSidecarArray)
+  //  printf("count = [%d, %d)\n", sidecar.literals.first, sidecar.literals.bound);
 }
+
+//==============================================================================
+// Building literalsArray
+//==============================================================================
+
+ohmu::til::Literal** buildLiteralsZero(const ohmu::til::Instruction&,
+  ohmu::til::Literal** literal) {
+  return literal;
+}
+
+ohmu::til::Literal** buildLiteralsUnaryOp(const ohmu::til::Instruction& instr,
+  ohmu::til::Literal** literal) {
+  auto unaryOp = reinterpret_cast<const ohmu::til::UnaryOp&>(instr);
+  if (unaryOp.expr()->opcode() == ohmu::til::COP_Literal)
+    *literal++ = ohmu::cast<ohmu::til::Literal>(unaryOp.expr());
+  return literal;
+}
+
+ohmu::til::Literal** buildLiteralsBinaryOp(const ohmu::til::Instruction& instr,
+  ohmu::til::Literal** literal) {
+  auto binaryOp = reinterpret_cast<const ohmu::til::BinaryOp&>(instr);
+  if (binaryOp.expr0()->opcode() == ohmu::til::COP_Literal)
+    *literal++ = ohmu::cast<ohmu::til::Literal>(binaryOp.expr0());
+  if (binaryOp.expr1()->opcode() == ohmu::til::COP_Literal)
+    *literal++ = ohmu::cast<ohmu::til::Literal>(binaryOp.expr1());
+  return literal;
+}
+
+ohmu::til::Literal** buildLiteralsBranch(const ohmu::til::Instruction& instr,
+  ohmu::til::Literal** literal) {
+  auto branch = reinterpret_cast<const ohmu::til::Branch&>(instr);
+  if (branch.condition()->opcode() == ohmu::til::COP_Literal)
+    *literal++ = ohmu::cast<ohmu::til::Literal>(branch.condition());
+  return literal;
+}
+
+ohmu::til::Literal** buildLiteralsReturn(const ohmu::til::Instruction& instr,
+  ohmu::til::Literal** literal) {
+  auto ret = reinterpret_cast<const ohmu::til::Return&>(instr);
+  if (ret.returnValue()->opcode() == ohmu::til::COP_Literal)
+    *literal++ = ohmu::cast<ohmu::til::Literal>(ret.returnValue());
+  return literal;
+}
+
+ohmu::til::Literal** buildBlockLiteralsArray(
+    const ohmu::til::BasicBlock& basicBlock, ohmu::til::Literal** literal) {
+  static ohmu::til::Literal** (*const table[])(const ohmu::til::Instruction&,
+                                               ohmu::til::Literal**) = {
+      /*COP_VarDecl    =*/nullptr,
+      /*COP_Function   =*/nullptr,
+      /*COP_Code       =*/nullptr,
+      /*COP_Field      =*/nullptr,
+      /*COP_Slot       =*/nullptr,
+      /*COP_Record     =*/nullptr,
+      /*COP_ScalarType =*/nullptr,
+      /*COP_SCFG       =*/nullptr,
+      /*COP_BasicBlock =*/nullptr,
+      /*COP_Literal    =*/nullptr,
+      /*COP_Variable   =*/nullptr,
+      /*COP_Apply      =*/nullptr,
+      /*COP_Project    =*/nullptr,
+      /*COP_Call       =*/nullptr,
+      /*COP_Alloc      =*/nullptr,
+      /*COP_Load       =*/buildLiteralsZero,
+      /*COP_Store      =*/nullptr,
+      /*COP_ArrayIndex =*/nullptr,
+      /*COP_ArrayAdd   =*/nullptr,
+      /*COP_UnaryOp    =*/buildLiteralsUnaryOp,
+      /*COP_BinaryOp   =*/buildLiteralsBinaryOp,
+      /*COP_Cast       =*/nullptr,
+      /*COP_Phi        =*/nullptr,
+      /*COP_Goto       =*/buildLiteralsZero,
+      /*COP_Branch     =*/buildLiteralsBranch,
+      /*COP_Return     =*/buildLiteralsReturn,
+      /*COP_Future     =*/nullptr,
+      /*COP_Undefined  =*/nullptr,
+      /*COP_Wildcard   =*/nullptr,
+      /*COP_Identifier =*/nullptr,
+      /*COP_Let        =*/nullptr,
+      /*COP_Letrec     =*/nullptr,
+      /*COP_IfThenElse =*/nullptr,
+  };
+  for (auto instr : basicBlock.instructions())
+    literal = table[instr->opcode()](*instr, literal);
+  return table[basicBlock.terminator()->opcode()](*basicBlock.terminator(),
+                                                  literal);
+}
+
+void ModuleBuilder::buildLiteralsArray() {
+  literals =
+      Array<ohmu::til::Literal*>(blockSidecarArray.last().literals.bound);
+  auto p = literals.begin();
+  for (auto& sidecar : blockSidecarArray)
+    p = buildBlockLiteralsArray(*sidecar.basicBlock, p);
+  assert(p == this->literals.end() && "We didn't find them all.");
+  std::sort(literals.begin(), literals.end());
+  size_t uniqueSize = 1;
+  for (size_t i = 1, e = literals.size(); i != e; ++i)
+    if (literals[i] != literals[i - 1])
+      uniqueSize++;
+  Array<ohmu::til::Literal*> swap(uniqueSize);
+  swap[0] = literals[0];
+  for (size_t i = 1, j = 1, e = literals.size(); i != e; ++i)
+    if (literals[i] != literals[i - 1])
+      swap[j++] = literals[i];
+  literals = move(swap);
+  literalData = Array<int64>(blockSidecarArray.last().literals.bound);
+  auto data = literalData.begin();
+  for (auto literal : literals) {
+    if (literal->baseType().VectSize > 1) error("Don't handle this yet.");
+    switch (literal->baseType().Base) {
+      // BT_Void = 0,
+      // BT_Bool,
+      case ohmu::til::BaseType::BT_Int:
+        switch (literal->baseType().Size) {
+          case ohmu::til::BaseType::ST_8:
+            *data++ = literal->as<char>().value();
+            break;
+          case ohmu::til::BaseType::ST_16:
+            *data++ = literal->as<short>().value();
+            break;
+          case ohmu::til::BaseType::ST_32:
+            *data++ = literal->as<int>().value();
+            break;
+          case ohmu::til::BaseType::ST_64:
+            *data++ = literal->as<int64>().value();
+            break;
+          default:
+            error("Invalid int size.");
+        }
+        break;
+      // BT_UnsignedInt,
+      // BT_Float,
+      // BT_String,    // String literals
+      // BT_Pointer    // Base type for all pointers
+      default:
+        error("Unknown literal type!");
+    }
+    printf(">> (%d) %d\n", literal->baseType(), data[-1]);
+  }
+}
+
+//==============================================================================
+// Event counting
+//==============================================================================
 
 void countBlockEvents(wax::Block& block,
                       const ohmu::til::BasicBlock& basicBlock) {
   static const size_t table[] = {
-    /*COP_VarDecl    =*/ 0,
-    /*COP_Function   =*/ 0,
-    /*COP_Code       =*/ 0,
-    /*COP_Field      =*/ 0,
-    /*COP_Slot       =*/ 0,
-    /*COP_Record     =*/ 0,
-    /*COP_ScalarType =*/ 0,
-    /*COP_SCFG       =*/ 0,
-    /*COP_BasicBlock =*/ 0,
-    /*COP_Literal    =*/ wax::Load::SLOT_COUNT,
-    /*COP_Variable   =*/ 0,
-    /*COP_Apply      =*/ 0,
-    /*COP_Project    =*/ 0,
-    /*COP_Call       =*/ 0,
-    /*COP_Alloc      =*/ 0,
-    /*COP_Load       =*/ wax::Load::SLOT_COUNT,
-    /*COP_Store      =*/ wax::Store::SLOT_COUNT,
-    /*COP_ArrayIndex =*/ 0,
-    /*COP_ArrayAdd   =*/ 0,
-    /*COP_UnaryOp    =*/ wax::local::Unary<uint>::SLOT_COUNT,
-    /*COP_BinaryOp   =*/ wax::local::Binary<uint>::SLOT_COUNT,
-    /*COP_Cast       =*/ 0,
-    /*COP_Phi        =*/ 0,
-    /*COP_Goto       =*/ wax::Jump::SLOT_COUNT,
-    /*COP_Branch     =*/ wax::Branch::SLOT_COUNT,
-    /*COP_Return     =*/ 0,
-    /*COP_Future     =*/ 0,
-    /*COP_Undefined  =*/ 0,
-    /*COP_Wildcard   =*/ 0,
-    /*COP_Identifier =*/ 0,
-    /*COP_Let        =*/ 0,
-    /*COP_Letrec     =*/ 0,
-    /*COP_IfThenElse =*/ 0,
+      /*COP_VarDecl    =*/0,
+      /*COP_Function   =*/0,
+      /*COP_Code       =*/0,
+      /*COP_Field      =*/0,
+      /*COP_Slot       =*/0,
+      /*COP_Record     =*/0,
+      /*COP_ScalarType =*/0,
+      /*COP_SCFG       =*/0,
+      /*COP_BasicBlock =*/0,
+      /*COP_Literal    =*/wax::Load::SLOT_COUNT,
+      /*COP_Variable   =*/0,
+      /*COP_Apply      =*/0,
+      /*COP_Project    =*/0,
+      /*COP_Call       =*/0,
+      /*COP_Alloc      =*/0,
+      /*COP_Load       =*/wax::Load::SLOT_COUNT,
+      /*COP_Store      =*/wax::Store::SLOT_COUNT,
+      /*COP_ArrayIndex =*/0,
+      /*COP_ArrayAdd   =*/0,
+      /*COP_UnaryOp    =*/wax::local::Unary<uint>::SLOT_COUNT,
+      /*COP_BinaryOp   =*/wax::local::Binary<uint>::SLOT_COUNT,
+      /*COP_Cast       =*/0,
+      /*COP_Phi        =*/0,
+      /*COP_Goto       =*/wax::Jump::SLOT_COUNT,
+      /*COP_Branch     =*/wax::Branch::SLOT_COUNT,
+      /*COP_Return     =*/0,
+      /*COP_Future     =*/0,
+      /*COP_Undefined  =*/0,
+      /*COP_Wildcard   =*/0,
+      /*COP_Identifier =*/0,
+      /*COP_Let        =*/0,
+      /*COP_Letrec     =*/0,
+      /*COP_IfThenElse =*/0,
   };
 
   static_assert(wax::CaseHeader::SLOT_COUNT == wax::JoinHeader::SLOT_COUNT,
@@ -300,28 +463,35 @@ void countBlockEvents(wax::Block& block,
   for (auto instr : basicBlock.instructions()) count += table[instr->opcode()];
   count += table[basicBlock.terminator()->opcode()];
   if (block.phiIndex == INVALID_INDEX) count += wax::Return::SLOT_COUNT;
-  block.boundEvent = count;
+  block.events.bound = count;
 }
 
 void ModuleBuilder::countEvents() {
   auto blocks = module.blockArray.begin();
   auto sidecar = blockSidecarArray.begin();
-  for (size_t i = 0, e = module.blockArray.size; i != e; ++i)
+  for (size_t i = 0, e = module.blockArray.size(); i != e; ++i)
     countBlockEvents(blocks[i], *sidecar[i].basicBlock);
-  blocks[0].firstEvent = 0;
-  for (size_t i = 1, e = module.blockArray.size; i != e; ++i)
-    blocks[i].boundEvent += blocks[i].firstEvent = blocks[i - 1].boundEvent;
+  blocks[0].events.first = 0;
+  for (size_t i = 1, e = module.blockArray.size(); i != e; ++i)
+    blocks[i].events.bound += blocks[i].events.first = blocks[i - 1].events.bound;
+  module.instrArray.init(module.blockArray.last().events.first);
 }
 }  // namespace {
+
+//==============================================================================
+// Externally Visible Functions
+//==============================================================================
+
 void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global) {
   ModuleBuilder builder(module, global);
   builder.walkTILGraph();
   builder.buildFunctionArray();
   builder.buildBlockSidecarArray();
   builder.buildBlockArray();
+  //builder.countEvents();
   //builder.buildEventArray();
-  builder.countEvents();
-
+  builder.countLiterals();
+  builder.buildLiteralsArray();
 }
 }  // namespace jagger
 

@@ -36,10 +36,9 @@ struct Block {
   uint postDomTreeSize;
   uint caseIndex;
   uint phiIndex;
-  uint firstEvent;
-  uint boundEvent;
   uint loopDepth;
   uint blockID;
+  Range events;
   Range successors;
   Range predecessors;
 };
@@ -47,6 +46,7 @@ struct Block {
 struct Function {
   Range blocks;
   // calling convension.
+  uint stackSpace;
 };
 
 struct Module {

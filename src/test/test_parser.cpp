@@ -63,16 +63,17 @@ int main(int argc, const char** argv) {
   //return 0;
 
   // Find all of the CFGs.
-  //VisitCFG visitCFG;
-  //visitCFG.traverseAll(global.global());
+  VisitCFG visitCFG;
+  visitCFG.traverseAll(global.global());
 
   //std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
 
-  //Core::emitEvents(global);
+#if 1
   jagger::wax::Module module;
   jagger::buildModuleFromTIL(module, global);
   module.computeDominators();
   jagger::print(module);
+#endif
 
   return 0;
 }

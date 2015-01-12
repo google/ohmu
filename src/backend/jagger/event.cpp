@@ -127,12 +127,12 @@ void computeLoopDepth(Block* blocks, uint* neighbors, Block& block) {
 }
 
 void Module::computeDominators() {
-  Array<Block> blockSwapArray(blockArray.size);
-  uint blockID = blockArray.size;
+  Array<Block> blockSwapArray(blockArray.size());
+  uint blockID = blockArray.size();
   // TODO: this is all kinds of buggy
   auto blocks = blockArray.begin() ;
   auto neighbors = neighborArray.begin();
-  size_t numBlocks = blockArray.size;
+  size_t numBlocks = blockArray.size();
 
   // TODO: remove unused blocks and update the block array size
 
@@ -140,8 +140,8 @@ void Module::computeDominators() {
   for (auto& fun : functionArray)
     blockID = topologicalSort(blocks, neighbors, fun.blocks.first, blockID);
 
-  updateNeighbors(neighbors, blocks, neighborArray.size);
-  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size);
+  updateNeighbors(neighbors, blocks, neighborArray.size());
+  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size());
   blockArray.swap(blockSwapArray);
   blocks = blockArray.begin();
   for (auto& block : blockArray)
@@ -153,8 +153,8 @@ void Module::computeDominators() {
   // Compute post-dominators.
   for (auto& fun : functionArray)
     blockID = postTopologicalSort(blocks, neighbors, fun.blocks.bound - 1, 0);
-  updateNeighbors(neighbors, blocks, neighborArray.size);
-  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size);
+  updateNeighbors(neighbors, blocks, neighborArray.size());
+  sortBlocks(blockSwapArray.begin(), blockArray.begin(), blockArray.size());
   blockArray.swap(blockSwapArray);
   blocks = blockArray.begin();
   for (auto& block : blockArray.reverse()) {

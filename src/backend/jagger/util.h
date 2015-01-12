@@ -19,6 +19,8 @@
 #include <assert.h>
 
 namespace jagger {
+typedef long long int64;
+typedef unsigned long long uint64;
 typedef unsigned int uint;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
@@ -158,42 +160,43 @@ template <typename T>
 struct Array {
   T& operator[](size_t i) const { return root[i]; }
   T* begin() const { return root; }
-  T* end() const { return root + size; }
-  T& last() const { return root[size - 1]; }
+  T* end() const { return root + size_; }
+  T& last() const { return root[size_ - 1]; }
   explicit operator bool() const { return root != nullptr; }
+  size_t size() const { return size_; }
 
-  Array() : root(nullptr), size(0) {}
-  explicit Array(size_t size) : root(new T[size]), size(size) {}
+  Array() : root(nullptr), size_(0) {}
+  explicit Array(size_t size) : root(new T[size]), size_(size) {}
   Array(const Array&) = delete;
   Array& operator=(const Array&) = delete;
-  Array(Array&& a) : root(a.root), size(a.size) { a.root = nullptr; }
+  Array(Array&& a) : root(a.root), size_(a.size_) { a.root = nullptr; }
   Array& operator=(Array&& a) {
     if (this == &a) return *this;
     if (root) delete[] root;
     root = a.root;
-    size = a.size;
+    size_ = a.size_;
     a.root = nullptr;
     return *this;
   }
   ~Array() { if (root) delete[] root; }
   void swap(Array& a) {
     jagger::swap(root, a.root);
-    jagger::swap(size, a.size);
+    jagger::swap(size_, a.size_);
   }
   AddressRange<T> slice(size_t first, size_t bound) const {
-    if (bound > size) bound = size;
-    return AddressRange<T>(root + first, root + size);
+    if (bound > size_) bound = size_;
+    return AddressRange<T>(root + first, root + size_);
   }
   AddressRange<T> slice(const Range& range) const {
     return range(root);
   }
   ReverseAddressRange<T> reverse() const {
-    return ReverseAddressRange<T>(root, root + size);
+    return ReverseAddressRange<T>(root, root + size_);
   }
 
-  // don't modify these or you'll get what's coming to you.
+private:
   T* root;
-  size_t size;
+  size_t size_;
 };
 
 void error(const char* format, ...);

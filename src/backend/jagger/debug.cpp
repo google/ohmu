@@ -44,7 +44,7 @@ void error(const char* format, ...) {
 //}
 
 void print(const wax::Module& module) {
-  auto neighbors = module.neighborArray.root;
+  auto neighbors = module.neighborArray.begin();
   for (auto& fun : module.functionArray) {
     printf("function %d\n", &fun - module.functionArray.begin());
     for (auto& block : module.blockArray.slice(fun.blocks)) {
@@ -91,7 +91,7 @@ void print(const wax::Module& module) {
       printf("}\n");
       printf("  trees           = %d, %d; %d, %d\n", block.domTreeID,
         block.domTreeSize, block.postDomTreeID, block.postDomTreeSize);
-      printf("  events          = [%d, %d)\n", block.firstEvent, block.boundEvent);
+      printf("  events          = [%d, %d)\n", block.events.first, block.events.bound);
       printf("\n");
     }
   }
