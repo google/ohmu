@@ -37,16 +37,19 @@ void swap(T&& a, T&& b) {
 }
 
 struct TypedPtr {
-  __forceinline size_t set(size_t i, uchar type, uint data) const {
-    this->type(i) = type;
-    this->data(i) = data;
-    return i + 1;
-  }
+  //__forceinline size_t set(size_t i, uchar type, uint data) const {
+  //  this->type(i) = type;
+  //  this->data(i) = data;
+  //  return i + 1;
+  //}
   __forceinline uchar& type(size_t i) const { return ((uchar*)root)[i]; }
   __forceinline uint& data(size_t i) const { return ((uint*)root)[i]; }
   __forceinline bool empty() const { return root == nullptr; }
   __forceinline struct TypedRef operator[](size_t i) const;
   explicit operator bool() const { return root != nullptr; }
+
+  bool operator==(const TypedPtr& a) const { return root == a.root; }
+  bool operator!=(const TypedPtr& a) const { return root != a.root; }
 
  private:
   friend struct TypedArray;
@@ -59,33 +62,44 @@ struct TypedRef {
   __forceinline T as() const {
     return *(const T*)this;
   }
-  bool operator ==(const TypedRef& a) const { return i == a.i; }
-  bool operator !=(const TypedRef& a) const { return i != a.i; }
-  TypedRef& operator ++() { ++i; return *this; }
-  TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
+  bool operator==(const TypedRef& a) const { return p == a.p && i == a.i; }
+  bool operator!=(const TypedRef& a) const { return p != a.p || i != a.i; }
+  void operator++() { ++i; }
+  uchar& type() const { return p.type(i); }
+  uint& data() const { return p.data(i); }
+
+  __forceinline void set(uchar type, uint data) const {
+    p.type(i) = type;
+    p.data(i) = data;
+  }
+
+ protected:
+  friend TypedPtr;
+  __forceinline TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
   TypedPtr p;
   size_t i;
-};
-
-template <typename Payload, size_t SIZE>
-struct TypedStruct : TypedRef {
-  enum { SLOT_COUNT = SIZE };
-  __forceinline Payload& operator*() const {
-    static_assert(sizeof(Payload) <= sizeof(p.data(i)),
-                  "Can't cast to object of larger size.");
-    return *(Payload*)&p.data(i);
-  }
-  __forceinline Payload* operator->() const { return (Payload*)&p.data(i); }
-  __forceinline TypedRef pointee() const { return TypedRef(p, p.data(i)); }
-  template <typename T>
-  __forceinline T field(size_t j) const {
-    return TypedRef(p, j).as<T>();
-  }
 };
 
 inline TypedRef TypedPtr::operator[](size_t i) const {
   return TypedRef(*this, i);
 }
+
+template <typename Payload, size_t SIZE>
+struct TypedStruct : TypedRef {
+  enum { SLOT_COUNT = SIZE };
+  typedef Payload Payload;
+  __forceinline T field(size_t j) const {
+    return TypedRef(p, j).as<T>();
+  }
+protected:
+ __forceinline TypedRef init_(uchar type, Payload data) const {
+   static_assert(sizeof(Payload) <= sizeof(p.data(i)),
+                 "Can't cast to object of larger size.");
+   p.type(i) = type;
+   *(Payload*)&p.data(i) = data;
+   return p[i + SLOT_COUNT];
+ }
+};
 
 struct TypedArray {
   TypedArray() : root(nullptr) {}
@@ -101,8 +115,8 @@ struct TypedArray {
   ~TypedArray() { if (root) delete[](&root[0] + first / 4); }
   size_t bound() const { return first + size; }
 
-  TypedRef begin() const { return TypedRef(root, first); }
-  TypedRef end() const { return TypedRef(root, bound()); }
+  TypedRef begin() const { return root[first]; }
+  TypedRef end() const { return root[bound()]; }
 
   size_t size;
   size_t first;

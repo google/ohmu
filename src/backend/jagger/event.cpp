@@ -177,6 +177,17 @@ void Module::computeDominators() {
       }
   }
   for (auto& block : blockArray.reverse()) computePostDomTreeID(blocks, block);
+
+  // TODO: fuse blocks with trivial connectivity
+  // TODO: validate that each block is either a case block, a join block or an
+  // entry block.  The exit block may be the entry block in a function with no
+  // control flow.  Case blocks can never have phi nodes.  Join blocks must
+  // always have phi nodes and must always post-dominate their dominator.  If
+  // they do not post-dominate their dominator an empty node must be inserted
+  // into the cfg that fulfills this property.
+  // for (auto& block : blockArray) {
+  //  if (block.)
+  //}
 }
 }  // namespace wax
 }  // namespace jagger

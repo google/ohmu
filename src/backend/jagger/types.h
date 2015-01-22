@@ -49,6 +49,11 @@ struct Function {
   uint stackSpace;
 };
 
+struct StaticData {
+  Range bytes;
+  uint alignment;
+};
+
 struct Module {
   Module() {}
   Module(const Module&) = delete;
@@ -57,6 +62,11 @@ struct Module {
   Array<Function> functionArray;
   Array<uint> neighborArray;
   TypedArray instrArray;
+  Array<StaticData> zeroDataEntries;
+  Array<StaticData> constDataEntries;
+  Array<StaticData> mutableDataEntries;
+  Array<char> constData;
+  Array<char> mutableData;
 
   void computeDominators();
 };
@@ -104,10 +114,10 @@ struct Type {
 
 enum Code : uchar {
   INVALID,
-  CASE_HEADER,
-  JOIN_HEADER,
+  NOP,
+  BLOCK_HEADER,
+  DATA_HEADER,
   BYTES,
-  ALIGNED_BYTES,
   ZERO,
   UNDEFINED_VALUE,
   STATIC_ADDRESS,
@@ -179,44 +189,102 @@ enum Code : uchar {
 //==============================================================================
 
 namespace local {
-struct Address : TypedStruct<Address, 1> {
-  bool isStatic() const { return p.type(i) == STATIC_ADDRESS; }
+struct Reference : TypedStruct<uint, 1> {
+  TypedRef target() const { return p[p.data(i)]; }
 };
 }  // namespace local
 
-struct Invalid : TypedStruct<uint, 1> {};
-struct CaseHeader : TypedStruct<uint, 1> {};
-struct JoinHeader : TypedStruct<uint, 1> {};
-struct AlignedBytes : TypedStruct<uint, 1> {};
-struct Bytes : TypedStruct<uint, 1>{};
-struct Zero : TypedStruct<uint, 1> {};
-struct UndefinedValue : TypedStruct<uint, 1>{};
-struct StaticAddress : TypedStruct<StaticAddress, 1> {};
-struct Use : TypedStruct<uint, 1> {};
-struct Phi : TypedStruct<uint, 1> {};
+struct Invalid : TypedStruct<uint, 1> {
+  TypedRef init() const { return init_(INVALID, 0); }
+};
+struct Nop : TypedStruct<uint, 1> {
+  TypedRef init() const { return init_(NOP, 0); }
+};
+struct BlockHeader : local::Reference {
+  TypedRef init(Block* blocks, Block& block) const {
+    return init_(BLOCK_HEADER, blocks[block.dominator].events.bound);
+  }
+};
+struct DataHeaderPayload {
+  uint logElementSize : 4;
+  uint numElements : 28;
+};
+struct DataHeader : TypedStruct<DataHeaderPayload, 1> {
+  TypedRef init(DataHeaderPayload payload) const {
+    return init_(DATA_HEADER, payload);
+  }
+};
+struct Bytes : TypedStruct<uint, 1>{
+  TypedRef init(uint bytes) const { return init_(BYTES, bytes); }
+};
+struct Zero : TypedStruct<uint, 1> {
+  TypedRef init() const { return init_(ZERO, 0); }
+};
+struct UndefinedValue : TypedStruct<uint, 1>{
+  TypedRef init() const { return init_(UNDEFINED_VALUE, 0); }
+};
+struct StaticAddress : TypedStruct<uint, 1> {
+  TypedRef init(uint label) const {
+    return init_(STATIC_ADDRESS, label);
+  }
+};
+struct Use : local::Reference {
+  TypedRef init(uint target) const { return init_(USE, target); }
+};
+struct Phi : local::Reference {
+  TypedRef init() const { return init_(PHI, (uint)i); }
+};
 struct PhiArgument : TypedStruct<uint, 2> {
-  Use arg() const { return field<Use>(i + 1); }
-  Phi phi() const { return pointee().as<Phi>(); }
+  Use arg() const { return p[i + 1].as<Use>(); }
+  Phi phi() const { return p[p.data(i)].as<Phi>(); }
+  TypedRef init(uint source, uint phi) const {
+    arg().init(source);
+    return init_(PHI_ARGUMENT, phi);
+  }
 };
 struct Call : TypedStruct<uint, 2> {
-  uint& numArgs() const { return **this; }
-  local::Address callee() const { return field<local::Address>(i + 1); }
+  uint& numArgs() const { return p.data(i); }
+  TypedStruct callee() const { return p[i + i]; }
   Use arg(size_t j) const { return field<Use>(i + 2 + j); }
+  TypedRef init(Code targetCode, uint target, uint numArgs) const {
+    callee().type(targetCode).data(target);
+    return type(CALL).data(numArgs).next();
+  }
 };
 struct CallSPMD : TypedStruct<uint, 3> {
-  uint& numArgs() const { return **this; }
-  local::Address callee() const { return field<local::Address>(i + 1); }
-  uint& workCount() const { return *field<Bytes>(i + 2); }
+  uint& numArgs() const { return p.data(i); }
+  TypedStruct callee() const { return p[i + i]; }
+  uint& workCount() const { return p.data(i + 2); }
   Use arg(size_t j) const { return field<Use>(i + 3 + j); }
+  TypedRef init(Code targetCode, uint target, uint numArgs,
+                uint workCount) const {
+    callee().type(targetCode).data(target);
+    p[i + 2].as<TypedStruct>().type(BYTES).data(workCount);
+    return type(CALL).data(numArgs).next();
+  }
 };
-struct Return : TypedStruct<uint, 1> {};
+struct Return : local::Reference {
+  // The return target is the base? pointer.
+  TypedRef init(uint target) const { return type(RETURN).data(target).next(); }
+};
 struct Jump : TypedStruct<uint, 2> {
-  local::Address target() const { return field<local::Address>(i + 1); }
+  TypedStruct target() const { return field<TypedStruct>(i + 1); }
+  TypedRef init(Code targetCode, uint target) const {
+    this->target().type(targetCode).data(target);
+    // jump data is unused.
+    return type(JUMP).data(0).next(); }
 };
 struct Branch : TypedStruct<uint, 4> {
   Use arg() const { return field<Use>(i + 1); }
   StaticAddress target0() const { return field<StaticAddress>(i + 2); }
   StaticAddress target1() const { return field<StaticAddress>(i + 3); }
+  TypedRef init(uint arg, uint target0, uint target1) const {
+    this->arg().init(arg);
+    this->target0().init(target0);
+    this->target1().init(target1);
+    // branch data is unused.
+    return type(BRANCH).data(0).next();
+  }
 };
 struct Switch : TypedStruct<uint, 2> {
   StaticAddress target(size_t j) const {
@@ -238,6 +306,13 @@ template <typename Payload>
 struct Binary : TypedStruct<Payload, 3> {
   Use arg0() const { return field<Use>(i + 1); }
   Use arg1() const { return field<Use>(i + 2); }
+};
+
+struct TypedUnary : Unary<TypedPayload> {
+  TypedRef init(Code code, TypedPayload payload, uint value) const {
+    arg().init(value);
+    return data(payload).type(code).next();
+  }
 };
 }  // namespace local
 
