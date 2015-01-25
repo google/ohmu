@@ -68,16 +68,11 @@ struct TypedRef {
   uchar& type() const { return p.type(i); }
   uint& data() const { return p.data(i); }
 
-  __forceinline void set(uchar type, uint data) const {
-    p.type(i) = type;
-    p.data(i) = data;
-  }
-
  protected:
-  friend TypedPtr;
   __forceinline TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
   TypedPtr p;
   size_t i;
+  friend TypedPtr;
 };
 
 inline TypedRef TypedPtr::operator[](size_t i) const {
@@ -88,17 +83,19 @@ template <typename Payload, size_t SIZE>
 struct TypedStruct : TypedRef {
   enum { SLOT_COUNT = SIZE };
   typedef Payload Payload;
+  template <typename T>
   __forceinline T field(size_t j) const {
-    return TypedRef(p, j).as<T>();
+    return p[i + j].as<T>();
   }
-protected:
- __forceinline TypedRef init_(uchar type, Payload data) const {
-   static_assert(sizeof(Payload) <= sizeof(p.data(i)),
-                 "Can't cast to object of larger size.");
-   p.type(i) = type;
-   *(Payload*)&p.data(i) = data;
-   return p[i + SLOT_COUNT];
- }
+
+ protected:
+  __forceinline TypedRef init_(uchar type, Payload data) const {
+    static_assert(sizeof(Payload) <= sizeof(p.data(i)),
+                  "Can't cast to object of larger size.");
+    p.type(i) = type;
+    *(Payload*)&p.data(i) = data;
+    return p[i + SIZE];
+  }
 };
 
 struct TypedArray {

@@ -108,6 +108,16 @@ struct Type {
   uchar data;
 };
 
+struct Label {
+  enum Kind : uint { ZERO, INITIALIZED, CONSTANT, CODE, TLS_ZERO, TLS_INITIALIZED };
+  Label(Kind kind, uint size) : data((size << 3) + kind) {}
+  Kind kind() const { return (Kind)(data & 0x7); }
+  uint size() const { return data >> 3; }
+
+private:
+  uint data;
+};
+
 //==============================================================================
 // Code: The type codes.
 //==============================================================================
@@ -214,7 +224,7 @@ struct DataHeader : TypedStruct<DataHeaderPayload, 1> {
     return init_(DATA_HEADER, payload);
   }
 };
-struct Bytes : TypedStruct<uint, 1>{
+struct Bytes : TypedStruct<uint, 1> {
   TypedRef init(uint bytes) const { return init_(BYTES, bytes); }
 };
 struct Zero : TypedStruct<uint, 1> {
@@ -223,8 +233,8 @@ struct Zero : TypedStruct<uint, 1> {
 struct UndefinedValue : TypedStruct<uint, 1>{
   TypedRef init() const { return init_(UNDEFINED_VALUE, 0); }
 };
-struct StaticAddress : TypedStruct<uint, 1> {
-  TypedRef init(uint label) const {
+struct StaticAddress : TypedStruct<Label, 1> {
+  TypedRef init(Label label) const {
     return init_(STATIC_ADDRESS, label);
   }
 };
@@ -235,7 +245,7 @@ struct Phi : local::Reference {
   TypedRef init() const { return init_(PHI, (uint)i); }
 };
 struct PhiArgument : TypedStruct<uint, 2> {
-  Use arg() const { return p[i + 1].as<Use>(); }
+  Use arg() const { return field<Use>(1); }
   Phi phi() const { return p[p.data(i)].as<Phi>(); }
   TypedRef init(uint source, uint phi) const {
     arg().init(source);
@@ -244,53 +254,55 @@ struct PhiArgument : TypedStruct<uint, 2> {
 };
 struct Call : TypedStruct<uint, 2> {
   uint& numArgs() const { return p.data(i); }
-  TypedStruct callee() const { return p[i + i]; }
-  Use arg(size_t j) const { return field<Use>(i + 2 + j); }
-  TypedRef init(Code targetCode, uint target, uint numArgs) const {
-    callee().type(targetCode).data(target);
-    return type(CALL).data(numArgs).next();
+  Use callee() const { return field<Use>(1); }
+  Use arg(size_t j) const { return field<Use>(2 + j); }
+  TypedRef init(uint target, uint numArgs) const {
+    callee().init(target);
+    return init_(CALL, numArgs);
   }
 };
 struct CallSPMD : TypedStruct<uint, 3> {
   uint& numArgs() const { return p.data(i); }
-  TypedStruct callee() const { return p[i + i]; }
+  Use callee() const { return field<Use>(1); }
   uint& workCount() const { return p.data(i + 2); }
-  Use arg(size_t j) const { return field<Use>(i + 3 + j); }
-  TypedRef init(Code targetCode, uint target, uint numArgs,
-                uint workCount) const {
-    callee().type(targetCode).data(target);
-    p[i + 2].as<TypedStruct>().type(BYTES).data(workCount);
-    return type(CALL).data(numArgs).next();
+  Use arg(size_t j) const { return field<Use>(3 + j); }
+  TypedRef init(uint target, uint numArgs, uint workCount) const {
+    callee().init(target);
+    p.type(i + 1) = BYTES;
+    p.data(i + 1) = workCount;
+    return init_(CALL, numArgs);
   }
 };
 struct Return : local::Reference {
-  // The return target is the base? pointer.
-  TypedRef init(uint target) const { return type(RETURN).data(target).next(); }
+  // TODO: X64 ret takes ESP/EBP in
+  TypedRef init() const { return init_(RETURN, 0); }
 };
 struct Jump : TypedStruct<uint, 2> {
-  TypedStruct target() const { return field<TypedStruct>(i + 1); }
-  TypedRef init(Code targetCode, uint target) const {
-    this->target().type(targetCode).data(target);
-    // jump data is unused.
-    return type(JUMP).data(0).next(); }
+  Use target() const { return field<Use>(1); }
+  TypedRef init(uint target) const {
+    this->target().init(target);
+    return init_(JUMP, 0);
+  }
 };
 struct Branch : TypedStruct<uint, 4> {
-  Use arg() const { return field<Use>(i + 1); }
-  StaticAddress target0() const { return field<StaticAddress>(i + 2); }
-  StaticAddress target1() const { return field<StaticAddress>(i + 3); }
+  Use arg() const { return field<Use>(1); }
+  Use target0() const { return field<Use>(2); }
+  Use target1() const { return field<Use>(3); }
   TypedRef init(uint arg, uint target0, uint target1) const {
     this->arg().init(arg);
     this->target0().init(target0);
     this->target1().init(target1);
-    // branch data is unused.
-    return type(BRANCH).data(0).next();
+    return init_(BRANCH, 0);
   }
 };
 struct Switch : TypedStruct<uint, 2> {
-  StaticAddress target(size_t j) const {
-    return field<StaticAddress>(i + 2 + j);
+  uint& numTargets() const { return p.data(i); }
+  Use arg() const { return field<Use>(1); }
+  Use target(size_t j) const { return field<Use>(2 + j); }
+  TypedRef init(uint arg, uint numTargets) const {
+    this->arg().init(arg);
+    return init_(SWITCH, numTargets);
   }
-  uint& numTargets() const { return **this; }
 };
 
 //==============================================================================
@@ -298,20 +310,22 @@ struct Switch : TypedStruct<uint, 2> {
 //==============================================================================
 
 namespace local {
-template <typename Payload>
+template <Code code, typename Payload>
 struct Unary : TypedStruct<Payload, 2> {
-  Use arg() const { return field<Use>(i + 1); }
+  Use arg() const { return field<Use>(1); }
+  TypedRef init(Payload payload, uint arg) const {
+    this->arg().init(arg);
+    return init_(code, payload);
+  }
 };
-template <typename Payload>
+template <Code code, typename Payload>
 struct Binary : TypedStruct<Payload, 3> {
-  Use arg0() const { return field<Use>(i + 1); }
-  Use arg1() const { return field<Use>(i + 2); }
-};
-
-struct TypedUnary : Unary<TypedPayload> {
-  TypedRef init(Code code, TypedPayload payload, uint value) const {
-    arg().init(value);
-    return data(payload).type(code).next();
+  Use arg0() const { return field<Use>(1); }
+  Use arg1() const { return field<Use>(2); }
+  TypedRef init(Payload payload, uint arg0, uint arg1) const {
+    this->arg0().init(arg0);
+    this->arg1().init(arg1);
+    return init_(code, payload);
   }
 };
 }  // namespace local
@@ -322,8 +336,10 @@ struct TypedUnary : Unary<TypedPayload> {
 
 struct ComputeAddressPayload {
   uchar scale;
-  uchar : 8;
-  uchar : 8;
+uchar:
+  8;
+uchar:
+  8;
   Type type;
 };
 struct PrefetchPayload {
@@ -331,8 +347,10 @@ struct PrefetchPayload {
 };
 struct LoadStorePayload {
   enum Flags : uchar { NON_TEMPORAL = 0x01, UNALIGNED = 0x02 } flags;
-  uchar : 8;
-  uchar : 8;
+uchar:
+  8;
+uchar:
+  8;
   Type type;
 };
 struct MemOpPayload {
@@ -345,24 +363,51 @@ struct ComputeAddress : TypedStruct<ComputeAddressPayload, 4> {
   Use index() const { return field<Use>(i + 3); }
 };
 struct Prefetch : TypedStruct<PrefetchPayload, 2> {
-  local::Address address() const { return field<local::Address>(i + 1); }
+  Use target() const { return field<Use>(1); }
+  TypedRef init(PrefetchPayload payload, uint target) const {
+    this->target().init(target);
+    return init_(PREFETCH, payload);
+  }
 };
 struct Load : TypedStruct<LoadStorePayload, 2> {
-  local::Address address() const { return field<local::Address>(i + 1); }
+  Use target() const { return field<Use>(1); }
+  TypedRef init(LoadStorePayload payload, uint target) const {
+    this->target().init(target);
+    return init_(LOAD, payload);
+  }
 };
 struct Store : TypedStruct<LoadStorePayload, 3> {
-  local::Address address() const { return field<local::Address>(i + 1); }
-  Use arg() const { return field<Use>(i + 2); }
+  Use target() const { return field<Use>(1); }
+  Use arg() const { return field<Use>(2); }
+  TypedRef init(LoadStorePayload payload, uint target, uint arg) const {
+    this->target().init(target);
+    this->arg().init(arg);
+    return init_(STORE, payload);
+  }
 };
 struct MemSet : TypedStruct<MemOpPayload, 4> {
-  local::Address address() const { return field<local::Address>(i + 1); }
-  Use value() const { return field<Use>(i + 2); }
-  Use size() const { return field<Use>(i + 3); }
+  Use target() const { return field<Use>(1); }
+  Use value() const { return field<Use>(2); }
+  Use numElements() const { return field<Use>(3); }
+  TypedRef init(MemOpPayload payload, uint target, uint value,
+                uint numElements) const {
+    this->target().init(target);
+    this->value().init(value);
+    this->numElements().init(numElements);
+    return init_(MEM_SET, payload);
+  }
 };
 struct MemCopy : TypedStruct<MemOpPayload, 4> {
-  local::Address dst() const { return field<local::Address>(i + 1); }
-  local::Address src() const { return field<local::Address>(i + 2); }
-  Use size() const { return field<Use>(i + 3); }
+  Use target() const { return field<Use>(1); }
+  Use source() const { return field<Use>(2); }
+  Use numElements() const { return field<Use>(3); }
+  TypedRef init(MemOpPayload payload, uint target, uint source,
+                uint numElements) const {
+    this->target().init(target);
+    this->source().init(source);
+    this->numElements().init(numElements);
+    return init_(MEM_SET, payload);
+  }
 };
 
 //==============================================================================
@@ -389,14 +434,20 @@ struct ShufflePayload {
   uchar : 8;
   Type type;
 };
-struct Extract : local::Unary<ExtractInsertPayload> {};
+struct Extract : local::Unary<EXTRACT, ExtractInsertPayload> {};
 struct Insert : TypedStruct<ExtractInsertPayload, 3> {
   Use scalarArg() const { return field<Use>(i + 1); }
   Use vectorArg() const { return field<Use>(i + 2); }
+  TypedRef init(ExtractInsertPayload payload, uint scalarArg,
+                uint vectorArg) const {
+    this->scalarArg().init(scalarArg);
+    this->vectorArg().init(vectorArg);
+    return init_(INSERT, payload);
+  }
 };
-struct BroadCast : local::Unary<TypedPayload> {};
-struct Permute : local::Unary<ShufflePayload> {};
-struct Shuffle : local::Binary<ShufflePayload> {};
+struct BroadCast : local::Unary<BROADCAST, TypedPayload> {};
+struct Permute : local::Unary<PERMUTE, ShufflePayload> {};
+struct Shuffle : local::Binary<SHUFFLE, ShufflePayload> {};
 
 //==============================================================================
 // Bit opcodes.
@@ -447,23 +498,34 @@ struct CountZerosPayload {
   uchar : 8;
   Type type;
 };
-struct BitTest : local::Unary<BitTestPayload> {};
-struct Not : local::Unary<TypedPayload> {};
-struct Logic : local::Binary<LogicPayload> {};
+struct BitTest : local::Unary<BIT_TEST, BitTestPayload> {};
+struct Not : local::Unary<NOT, TypedPayload> {};
+struct Logic : local::Binary<LOGIC, LogicPayload> {};
 struct Logic3 : TypedStruct<Logic3Payload, 4>{
-  Use arg0() const { return field<Use>(i + 1); }
-  Use arg1() const { return field<Use>(i + 2); }
-  Use arg2() const { return field<Use>(i + 3); }
+  Use arg0() const { return field<Use>(1); }
+  Use arg1() const { return field<Use>(2); }
+  Use arg2() const { return field<Use>(3); }
+  TypedRef init(Logic3Payload payload, uint arg0, uint arg1, uint arg2) const {
+    this->arg0().init(arg0);
+    this->arg1().init(arg1);
+    this->arg2().init(arg2);
+    return init_(LOGIC3, payload);
+  }
 };
-struct Shift : local::Binary<ShiftPayload> {};
-struct BitfieldExtract : local::Unary<BitFieldPayload> {};
+struct Shift : local::Binary<SHIFT, ShiftPayload> {};
+struct BitfieldExtract : local::Unary<BITFIELD_EXTRACT, BitFieldPayload> {};
 struct BitfieldInsert : TypedStruct<BitFieldPayload, 3> {
   Use target() const { return field<Use>(i + 1); }
   Use source() const { return field<Use>(i + 2); }
+  TypedRef init(BitFieldPayload payload, uint target, uint source) const {
+    this->target().init(target);
+    this->source().init(source);
+    return init_(BITFIELD_INSERT, payload);
+  }
 };
-struct BitfieldClear : local::Unary<BitFieldPayload> {};
-struct CountZeros : local::Unary<CountZerosPayload> {};
-struct PopCnt : local::Unary<TypedPayload>{};
+struct BitfieldClear : local::Unary<BITFIELD_CLEAR, BitFieldPayload> {};
+struct CountZeros : local::Unary<COUNT_ZEROS, CountZerosPayload> {};
+struct PopCnt : local::Unary<POPCNT, TypedPayload>{};
 
 //==============================================================================
 // Math opcodes.
@@ -478,22 +540,22 @@ struct ComparePayload {
   uchar : 8;
   Type type;
 };
-struct Compare : local::Binary<ComparePayload> {};
-struct Min : local::Binary<TypedPayload> {};
-struct Max : local::Binary<TypedPayload> {};
-struct Neg : local::Unary<TypedPayload> {};
-struct Abs : local::Unary<TypedPayload> {};
-struct Add : local::Binary<TypedPayload> {};
-struct Sub : local::Binary<TypedPayload> {};
-struct Mul : local::Binary<TypedPayload> {};
-struct Div : local::Binary<TypedPayload> {};
+struct Compare : local::Binary<COMPARE, ComparePayload> {};
+struct Min : local::Binary<MIN, TypedPayload> {};
+struct Max : local::Binary<MAX, TypedPayload> {};
+struct Neg : local::Unary<NEG, TypedPayload> {};
+struct Abs : local::Unary<ABS, TypedPayload> {};
+struct Add : local::Binary<ADD, TypedPayload> {};
+struct Sub : local::Binary<SUB, TypedPayload> {};
+struct Mul : local::Binary<MUL, TypedPayload> {};
+struct Div : local::Binary<DIV, TypedPayload> {};
 
 //==============================================================================
 // Integer math opcodes.
 //==============================================================================
 
-struct Mulhi : local::Binary<TypedPayload> {};
-struct Mod : local::Binary<TypedPayload> {};
+struct Mulhi : local::Binary<MULHI, TypedPayload> {};
+struct Mod : local::Binary<MOD, TypedPayload> {};
 
 //==============================================================================
 // Floating point math operations.
@@ -505,15 +567,20 @@ struct RoundPayload {
   uchar : 8;
   Type type;
 };
-struct Rcp : local::Unary<TypedPayload> {};
-struct Sqrt : local::Unary<TypedPayload> {};
-struct Rsqrt : local::Unary<TypedPayload> {};
-struct Exp2 : local::Unary<TypedPayload> {};
-struct Round : local::Unary<RoundPayload> {};
-struct Convert : local::Unary<TypedPayload> {};
+struct Rcp : local::Unary<RCP, TypedPayload> {};
+struct Sqrt : local::Unary<SQRT, TypedPayload> {};
+struct Rsqrt : local::Unary<RSQRT, TypedPayload> {};
+struct Exp2 : local::Unary<EXP2, TypedPayload> {};
+struct Round : local::Unary<ROUND, RoundPayload> {};
+struct Convert : local::Unary<CONVERT, TypedPayload> {};
 struct Fixup : TypedStruct<TypedPayload, 3> {
-  Bytes control() const { return field<Bytes>(i + 1); }
-  Use arg() const { return field<Use>(i + 2); }
+  Bytes control() const { return field<Bytes>(1); }
+  Use arg() const { return field<Use>(2); }
+  TypedRef init(TypedPayload payload, uint control, uint arg) const {
+    this->control().init(control);
+    this->arg().init(arg);
+    return init_(FIXUP, payload);
+  }
 };
 
 //==============================================================================
@@ -522,9 +589,15 @@ struct Fixup : TypedStruct<TypedPayload, 3> {
 
 struct AtomicXchg : Store {};
 struct AtomicCompareXchg : TypedStruct<TypedPayload, 4> {
-  local::Address address() const { return field<local::Address>(i + 1); }
-  Use value() const { return field<Use>(i + 2); }
-  Use comparand() const { return field<Use>(i + 3); }
+  Use target() const { return field<Use>(1); }
+  Use value() const { return field<Use>(2); }
+  Use comparand() const { return field<Use>(3); }
+  TypedRef init(TypedPayload payload, uint target, uint value, uint comparand) {
+    this->target().init(target);
+    this->value().init(value);
+    this->comparand().init(comparand);
+    return init_(ATOMIC_COMPARE_XCHG, payload);
+  }
 };
 struct AtomicLogicXchg : Store {};
 struct AtomicAddXchg : Store {};
