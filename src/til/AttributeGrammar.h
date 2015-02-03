@@ -40,7 +40,8 @@ namespace til {
 /// When doing rewriting, there are actually two contexts.
 /// The source context holds information about the term that is being
 /// traversed, and the destination context holds information about the
-/// term that is being produced.
+/// term that is being produced.  This class maintains the source context;
+/// the destination context is maintained by CFGBuilder.
 template <class Context>
 class ContextReducerBase {
 public:
@@ -58,34 +59,43 @@ protected:
 /// This class is a base class for handling synthesized attributes in
 /// attribute grammars.  When used with AGTraversal, which is depth-first,
 /// it maintains a stack of attributes that correspond to the call stack.
-/// The reduceX methods can use attr() and resultAttr() to read and set
-/// synthesized attributes.
+/// The reduceX methods can use attr(i) to read the attributes associated
+/// with the i^th argument, and it can store the sythesized attribute for the
+/// result in resultAttr().
 ///
 /// Attr is a type that holds synthesized attributes.
 template <class Attr>
 class AGReducerBase {
 public:
-  /// Get the attribute for the i^th argument.
+  /// Get the attribute for the i^th argument.  i < numAttrs().
   /// Should only be called from reduceX().
-  Attr& attr(unsigned i) { return Attrs[AttrFrame + i]; }
+  Attr& attr(unsigned i) {
+    assert(i < numAttrs() && "Array index out of bounds.");
+    return Attrs[AttrFrame + i];
+  }
+
+  /// Returns the number of argument attrs.
+  unsigned numAttrs() const { return Attr.size() - AttrFrame; }
 
   /// Get the attribute for the result.
   /// Should only be called from reduceX().
   Attr& resultAttr() { return Attrs[AttrFrame - 1]; }
 
-  /// Push a new attribute onto the attribute stack, and set it to be
-  /// the current result attribute.
-  unsigned pushResultAttr() {
+  /// Create a new attribute frame, which consists of a new result attribute,
+  /// and an empty list of arguments.  The old frame is saved, to be restored
+  /// later.  Returns an index that can be passed to restoreAttrFrame.
+  unsigned pushAttrFrame() {
     unsigned N = AttrFrame;
     Attrs.push_back(Attr());
     AttrFrame = Attrs.size();
     return N;
   }
 
-  /// Pop any extra attributes off the stack, leaving only the current result.
-  /// Then restore the previous result attribute.
-  /// N should be the value returned from the prior pushResultAttr().
-  void restoreResultAttr(unsigned N) {
+  /// Restore the previous attribute frame.  The current arguments are
+  /// discarded, and the current result is pushed onto the argument list of
+  /// the previous frame.  N should be the value returned from the prior
+  /// pushAttrFrame().
+  void restoreAttrFrame(unsigned N) {
     while (Attrs.size() > AttrFrame)
       Attrs.pop_back();
     AttrFrame = N;
@@ -109,13 +119,13 @@ public:
 
   template<class T>
   T* traverse(T* E, TraversalKind K) {
-    unsigned Af = self()->pushResultAttr();
+    unsigned Af = self()->pushAttrFrame();
     auto Cstate = self()->Ctx->enterSubExpr(K);
 
     T* Res = SuperTv::traverse(E, K);
 
     self()->Ctx->exitSubExpr(K, Cstate);
-    self()->restoreResultAttr(Af);
+    self()->restoreAttrFrame(Af);
 
     return Res;
   }
