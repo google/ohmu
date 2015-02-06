@@ -617,7 +617,7 @@ SExpr* CFGReducer::traverseLet(Let* e, TraversalKind k) {
 SExpr* CFGReducer::traverseIfThenElse(IfThenElse *e, TraversalKind k) {
   if (!currentBB()) {
     // Just do a normal traversal if we're not currently rewriting in a CFG.
-    return e->traverse(*this->self());
+    return SuperTv::traverseIfThenElse(e, k);
   }
 
   // End current block with a branch

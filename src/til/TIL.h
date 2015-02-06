@@ -173,9 +173,6 @@ TIL_CastOpcode typeConvertable(BaseType Vt1, BaseType Vt2);
 #define MAPTYPE(R, X) typename R::template TypeMap<X>::Ty
 
 #define DECLARE_TRAVERSE_AND_COMPARE(X)                       \
-  template <class V>                                          \
-  MAPTYPE(V::RMap, X) traverse(V &Vs);                        \
-                                                              \
   template <class C>                                          \
   typename C::CType compare(const X* E, C& Cmp) const;
 

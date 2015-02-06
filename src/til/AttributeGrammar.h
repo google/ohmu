@@ -37,7 +37,7 @@ namespace til {
 ///   * The typing context, e.g. the names and types of local variables
 ///   * The current continuation, for the CPS transform.
 ///
-/// When doing rewriting, there are actually two contexts.
+/// Note that when doing rewriting, there are actually two contexts.
 /// The source context holds information about the term that is being
 /// traversed, and the destination context holds information about the
 /// term that is being produced.  This class maintains the source context;
@@ -75,7 +75,7 @@ public:
   }
 
   /// Returns the number of argument attrs.
-  unsigned numAttrs() const { return Attr.size() - AttrFrame; }
+  unsigned numAttrs() const { return Attrs.size() - AttrFrame; }
 
   /// Get the attribute for the result.
   /// Should only be called from reduceX().

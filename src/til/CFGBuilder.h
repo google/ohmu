@@ -25,8 +25,8 @@
 #include <vector>
 
 
-#ifndef OHMU_TIL_CFGBUILDER_H_
-#define OHMU_TIL_CFGBUILDER_H_
+#ifndef OHMU_TIL_CFGBUILDER_H
+#define OHMU_TIL_CFGBUILDER_H
 
 namespace ohmu {
 namespace til  {

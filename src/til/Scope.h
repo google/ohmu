@@ -15,8 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef OHMU_TIL_SCOPEHANDLER_H
-#define OHMU_TIL_SCOPEHANDLER_H
+#ifndef OHMU_TIL_SCOPE_H
+#define OHMU_TIL_SCOPE_H
 
 #include "TIL.h"
 
@@ -43,17 +43,6 @@ public:
     SExpr*   Subst;
   };
 
-  /// Return the variable substitution for Orig.
-  SExpr* lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
-
-  /// Return the number of variables (VarDecls) in the current scope.
-  unsigned numVars() { return VarMap.size()-1; }
-
-  /// Return the VarDecl->SExpr map entry for the i^th variable.
-  SubstitutionEntry& entry(unsigned i) {
-    return VarMap[VarMap.size()-i-1];
-  }
-
   /// Return the binding for the i^th variable (VarDecl) from the top of the
   /// current scope.
   SExpr* var(unsigned i) const {
@@ -64,6 +53,17 @@ public:
   /// Set the binding for the i^th variable (VarDecl) from top of scope.
   void setVar(unsigned i, SExpr *E) {
     VarMap[VarMap.size()-i-1].Subst = E;
+  }
+
+  /// Return the variable substitution for Orig.
+  SExpr* lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
+
+  /// Return the number of variables (VarDecls) in the current scope.
+  unsigned numVars() { return VarMap.size()-1; }
+
+  /// Return the VarDecl->SExpr map entry for the i^th variable.
+  SubstitutionEntry& entry(unsigned i) {
+    return VarMap[VarMap.size()-i-1];
   }
 
   /// Return whatever the given instruction maps to during CFG rewriting.
@@ -85,7 +85,6 @@ public:
   void freeVarIndex() { --DeBruin; }
 
   /// Enter a function scope (or apply a function), by mapping Orig -> E.
-  /// IncDeBruin should be true if E is a new
   void enterScope(VarDecl *Orig, SExpr *E) {
     // Assign indices to variables if they haven't been assigned yet.
     if (Orig->varIndex() == 0)

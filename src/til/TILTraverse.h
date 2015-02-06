@@ -26,7 +26,7 @@ namespace til  {
 enum TraversalKind {
   TRV_Weak,  ///< un-owned (weak) reference to subexpression
   TRV_Arg,   ///< owned subexpr in argument position  e.g. a in  f(a), a+b
-  TRV_Instr, ///< owned subexpr in basic block
+  TRV_Instr, ///< owned subexpr as basic block instr
   TRV_Path,  ///< owned subexpr on spine of path      e.g. f in  f(a)
   TRV_Tail,  ///< owned subexpr in tail position      e.g. u in  let x=t; u
   TRV_Decl,  ///< owned subexpr in a declaration      e.g. function body
@@ -82,13 +82,13 @@ public:
   Self *self() { return static_cast<Self *>(this); }
 
   /// Initial starting point, to be called by external routines.
-  MAPTYPE(RMap, SExpr) traverseAll(SExpr* E) {
+  MAPTYPE(RMap, SExpr) traverseAll(SExpr *E) {
     return self()->traverse(E, TRV_Tail);
   }
 
   /// Invoked by SExpr classes to traverse possibly weak members.
   /// Do not override.
-  MAPTYPE(RMap, SExpr) traverseArg(SExpr* E) {
+  MAPTYPE(RMap, SExpr) traverseArg(SExpr *E) {
     // Detect weak references to other instructions in the CFG.
     if (Instruction *I = E->asCFGInstruction())
       return self()->reduceWeak(I);
@@ -98,29 +98,27 @@ public:
   /// Invoked by SExpr classes to traverse weak data members.
   /// Do not override.
   template <class T>
-  MAPTYPE(RMap, T) traverseWeak(T* E) {
+  MAPTYPE(RMap, T) traverseWeak(T *E) {
     return self()->reduceWeak(E);
   }
 
   /// Starting point for a traversal.
   /// Override this method to traverse SExprs of arbitrary type.
   template <class T>
-  MAPTYPE(RMap, T) traverse(T* E, TraversalKind K) {
+  MAPTYPE(RMap, T) traverse(T *E, TraversalKind K) {
     return traverseByType(E, K);
   }
 
   /// Override these methods to traverse a particular type of SExpr.
 #define TIL_OPCODE_DEF(X)                                                 \
-  MAPTYPE(RMap,X) traverse##X(X *e, TraversalKind K) {                    \
-    return e->traverse(*self());                                          \
-  }
+  MAPTYPE(RMap, X) traverse##X(X *E, TraversalKind K);
 #include "TILOps.def"
 #undef TIL_OPCODE_DEF
 
 
 protected:
   /// For generic SExprs, do dynamic dispatch by type.
-  MAPTYPE(RMap, SExpr) traverseByType(SExpr* E, TraversalKind K) {
+  MAPTYPE(RMap, SExpr) traverseByType(SExpr *E, TraversalKind K) {
     switch (E->opcode()) {
 #define TIL_OPCODE_DEF(X)                                                 \
     case COP_##X:                                                         \
@@ -133,7 +131,7 @@ protected:
 
   /// For SExprs of known type, do static dispatch by type.
 #define TIL_OPCODE_DEF(X)                                                 \
-  MAPTYPE(RMap, X) traverseByType(X* E, TraversalKind K) {                \
+  MAPTYPE(RMap, X) traverseByType(X *E, TraversalKind K) {                \
     return self()->traverse##X(E, K);                                     \
   }
 #include "TILOps.def"
@@ -327,323 +325,344 @@ public:
 // traverse methods for all TIL classes.
 ////////////////////////////////////////
 
-template <class V>
-MAPTYPE(V::RMap, VarDecl) VarDecl::traverse(V &Vs) {
-  switch (kind()) {
-    case VK_Fun: {
-      auto D = Vs.traverse(Definition.get(), TRV_Type);
-      return Vs.reduceVarDecl(*this, D);
+template <class S, class R>
+MAPTYPE(R, VarDecl)
+Traversal<S, R>::traverseVarDecl(VarDecl *E, TraversalKind K) {
+  switch (E->kind()) {
+    case VarDecl::VK_Fun: {
+      auto D = self()->traverse(E->definition(), TRV_Type);
+      return self()->reduceVarDecl(*E, D);
     }
-    case VK_SFun: {
+    case VarDecl::VK_SFun: {
       // Don't traverse the definition, since it cyclicly points back to self.
       // Just create a new (dummy) definition.
-      return Vs.reduceVarDecl(*this, V::RMap::reduceNull());
+      return self()->reduceVarDecl(*E, RMap::reduceNull());
     }
-    case VK_Let: {
-      auto D = Vs.traverse(Definition.get(), TRV_Decl);
-      return Vs.reduceVarDecl(*this, D);
+    case VarDecl::VK_Let: {
+      auto D = self()->traverse(E->definition(), TRV_Decl);
+      return self()->reduceVarDecl(*E, D);
     }
-    case VK_Letrec: {
+    case VarDecl::VK_Letrec: {
       // Create a new (empty) definition.
-      auto Nvd = Vs.reduceVarDecl(*this, V::RMap::reduceNull());
+      auto Nvd = self()->reduceVarDecl(*E, RMap::reduceNull());
       // Enter the scope of the empty definition.
-      Vs.enterScope(this, Nvd);
+      self()->enterScope(E, Nvd);
       // Traverse the definition, and hope recursive references are lazy.
-      auto D = Vs.traverse(Definition.get(), TRV_Decl);
-      Vs.exitScope(this);
-      return Vs.reduceVarDeclLetrec(Nvd, D);
+      auto D = self()->traverse(E->definition(), TRV_Decl);
+      self()->exitScope(E);
+      return self()->reduceVarDeclLetrec(Nvd, D);
     }
   }
 }
 
-template <class V>
-MAPTYPE(V::RMap, Function) Function::traverse(V &Vs) {
-  // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
+template <class S, class R>
+MAPTYPE(R, Function)
+Traversal<S, R>::traverseFunction(Function *E, TraversalKind K) {
+  // E is a variable declaration, so traverse the definition.
+  auto E0 = self()->traverse(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the function.
-  Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_Decl);
-  Vs.exitScope(VDecl.get());
-  return Vs.reduceFunction(*this, E0, E1);
+  self()->enterScope(E->variableDecl(), E0);
+  auto E1 = self()->traverse(E->body(), TRV_Decl);
+  self()->exitScope(E->variableDecl());
+  return self()->reduceFunction(*E, E0, E1);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Code) Code::traverse(V &Vs) {
-  auto Nt = Vs.traverse(ReturnType.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(),       TRV_Lazy);
-  return Vs.reduceCode(*this, Nt, Nb);
+template <class S, class R>
+MAPTYPE(R, Code)
+Traversal<S, R>::traverseCode(Code *E, TraversalKind K) {
+  auto Nt = self()->traverse(E->returnType(), TRV_Type);
+  auto Nb = self()->traverse(E->body(),       TRV_Lazy);
+  return self()->reduceCode(*E, Nt, Nb);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Field) Field::traverse(V &Vs) {
-  auto Nr = Vs.traverse(Range.get(), TRV_Type);
-  auto Nb = Vs.traverse(Body.get(),  TRV_Lazy);
-  return Vs.reduceField(*this, Nr, Nb);
+template <class S, class R>
+MAPTYPE(R, Field)
+Traversal<S, R>::traverseField(Field *E, TraversalKind K) {
+  auto Nr = self()->traverse(E->range(), TRV_Type);
+  auto Nb = self()->traverse(E->body(),  TRV_Lazy);
+  return self()->reduceField(*E, Nr, Nb);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Slot) Slot::traverse(V &Vs) {
-  auto Nd = Vs.traverse(Definition.get(), TRV_Decl);
-  return Vs.reduceSlot(*this, Nd);
+template <class S, class R>
+MAPTYPE(R, Slot)
+Traversal<S, R>::traverseSlot(Slot *E, TraversalKind K) {
+  auto Nd = self()->traverse(E->definition(), TRV_Decl);
+  return self()->reduceSlot(*E, Nd);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Record) Record::traverse(V &Vs) {
-  auto Nr = Vs.reduceRecordBegin(*this);
-  for (auto &Slt : Slots) {
-    Vs.handleRecordSlot(Nr, Vs.traverse(Slt.get(), TRV_Decl));
+template <class S, class R>
+MAPTYPE(R, Record)
+Traversal<S, R>::traverseRecord(Record *E, TraversalKind K) {
+  auto Nr = self()->reduceRecordBegin(*E);
+  for (auto &Slt : E->slots()) {
+    self()->handleRecordSlot(Nr, self()->traverse(Slt.get(), TRV_Decl));
   }
-  return Vs.reduceRecordEnd(Nr);
+  return self()->reduceRecordEnd(Nr);
 }
 
-template<class V>
-MAPTYPE(V::RMap, ScalarType) ScalarType::traverse(V &Vs) {
-  return Vs.reduceScalarType(*this);
+template <class S, class R>
+MAPTYPE(R, ScalarType)
+Traversal<S, R>::traverseScalarType(ScalarType *E, TraversalKind K) {
+  return self()->reduceScalarType(*E);
 }
 
 
-template <class V>
-MAPTYPE(V::RMap, Literal) Literal::traverse(V &Vs) {
-  switch (BType.Base) {
+template <class S, class R>
+MAPTYPE(R, Literal)
+Traversal<S, R>::traverseLiteral(Literal *E, TraversalKind K) {
+  switch (E->baseType().Base) {
   case BaseType::BT_Void:
     break;
   case BaseType::BT_Bool:
-    return Vs.reduceLiteralT(as<bool>());
+    return self()->reduceLiteralT(E->as<bool>());
   case BaseType::BT_Int: {
-    switch (BType.Size) {
+    switch (E->baseType().Size) {
     case BaseType::ST_8:
-      return Vs.reduceLiteralT(as<int8_t>());
+      return self()->reduceLiteralT(E->as<int8_t>());
     case BaseType::ST_16:
-      return Vs.reduceLiteralT(as<int16_t>());
+      return self()->reduceLiteralT(E->as<int16_t>());
     case BaseType::ST_32:
-      return Vs.reduceLiteralT(as<int32_t>());
+      return self()->reduceLiteralT(E->as<int32_t>());
     case BaseType::ST_64:
-      return Vs.reduceLiteralT(as<int64_t>());
+      return self()->reduceLiteralT(E->as<int64_t>());
     default:
       break;
     }
     break;
   }
   case BaseType::BT_UnsignedInt: {
-    switch (BType.Size) {
+    switch (E->baseType().Size) {
     case BaseType::ST_8:
-      return Vs.reduceLiteralT(as<uint8_t>());
+      return self()->reduceLiteralT(E->as<uint8_t>());
     case BaseType::ST_16:
-      return Vs.reduceLiteralT(as<uint16_t>());
+      return self()->reduceLiteralT(E->as<uint16_t>());
     case BaseType::ST_32:
-      return Vs.reduceLiteralT(as<uint32_t>());
+      return self()->reduceLiteralT(E->as<uint32_t>());
     case BaseType::ST_64:
-      return Vs.reduceLiteralT(as<uint64_t>());
+      return self()->reduceLiteralT(E->as<uint64_t>());
     default:
       break;
     }
     break;
   }
   case BaseType::BT_Float: {
-    switch (BType.Size) {
+    switch (E->baseType().Size) {
     case BaseType::ST_32:
-      return Vs.reduceLiteralT(as<float>());
+      return self()->reduceLiteralT(E->as<float>());
     case BaseType::ST_64:
-      return Vs.reduceLiteralT(as<double>());
+      return self()->reduceLiteralT(E->as<double>());
     default:
       break;
     }
     break;
   }
   case BaseType::BT_String:
-    return Vs.reduceLiteralT(as<StringRef>());
+    return self()->reduceLiteralT(E->as<StringRef>());
   case BaseType::BT_Pointer:
-    return Vs.reduceLiteralT(as<void*>());
+    return self()->reduceLiteralT(E->as<void*>());
   }
-  return Vs.reduceLiteral(*this);
+  return self()->reduceLiteral(*E);
 }
 
-template<class V>
-MAPTYPE(V::RMap, Variable) Variable::traverse(V &Vs) {
-  return Vs.reduceVariable(*this, Vs.traverseWeak(VDecl.get()));
+template <class S, class R>
+MAPTYPE(R, Variable)
+Traversal<S, R>::traverseVariable(Variable *E, TraversalKind K) {
+  auto D = self()->traverseWeak(E->variableDecl());
+  return self()->reduceVariable(*E, D);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Apply) Apply::traverse(V &Vs) {
-  auto Nf = Vs.traverse(Fun.get(), TRV_Path);
-  auto Na = Arg.get() ? Vs.traverseArg(Arg.get())
-                      : V::RMap::reduceNull();
-  return Vs.reduceApply(*this, Nf, Na);
+template <class S, class R>
+MAPTYPE(R, Apply) Traversal<S, R>::traverseApply(Apply *E, TraversalKind K) {
+  auto Nf = self()->traverse(E->fun(), TRV_Path);
+  auto Na = E->arg() ? self()->traverseArg(E->arg())
+                     : RMap::reduceNull();
+  return self()->reduceApply(*E, Nf, Na);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Project) Project::traverse(V &Vs) {
-  auto Nr = Vs.traverse(Rec.get(), TRV_Path);
-  return Vs.reduceProject(*this, Nr);
+template <class S, class R>
+MAPTYPE(R, Project)
+Traversal<S, R>::traverseProject(Project *E, TraversalKind K) {
+  auto Nr = self()->traverse(E->record(), TRV_Path);
+  return self()->reduceProject(*E, Nr);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Call) Call::traverse(V &Vs) {
-  auto Nt = Vs.traverse(Target.get(), TRV_Path);
-  return Vs.reduceCall(*this, Nt);
+template <class S, class R>
+MAPTYPE(R, Call) Traversal<S, R>::traverseCall(Call *E, TraversalKind K) {
+  auto Nt = self()->traverse(E->target(), TRV_Path);
+  return self()->reduceCall(*E, Nt);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Alloc) Alloc::traverse(V &Vs) {
-  auto Nd = Vs.traverseArg(InitExpr.get());
-  return Vs.reduceAlloc(*this, Nd);
+template <class S, class R>
+MAPTYPE(R, Alloc) Traversal<S, R>::traverseAlloc(Alloc *E, TraversalKind K) {
+  auto Nd = self()->traverseArg(E->initializer());
+  return self()->reduceAlloc(*E, Nd);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Load) Load::traverse(V &Vs) {
-  auto Np = Vs.traverseArg(Ptr.get());
-  return Vs.reduceLoad(*this, Np);
+template <class S, class R>
+MAPTYPE(R, Load) Traversal<S, R>::traverseLoad(Load *E, TraversalKind K) {
+  auto Np = self()->traverseArg(E->pointer());
+  return self()->reduceLoad(*E, Np);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Store) Store::traverse(V &Vs) {
-  auto Np = Vs.traverseArg(Dest.get());
-  auto Nv = Vs.traverseArg(Source.get());
-  return Vs.reduceStore(*this, Np, Nv);
+template <class S, class R>
+MAPTYPE(R, Store) Traversal<S, R>::traverseStore(Store *E, TraversalKind K) {
+  auto Np = self()->traverseArg(E->destination());
+  auto Nv = self()->traverseArg(E->source());
+  return self()->reduceStore(*E, Np, Nv);
 }
 
-template <class V>
-MAPTYPE(V::RMap, ArrayIndex) ArrayIndex::traverse(V &Vs) {
-  auto Na = Vs.traverseArg(Array.get());
-  auto Ni = Vs.traverseArg(Index.get());
-  return Vs.reduceArrayIndex(*this, Na, Ni);
+template <class S, class R>
+MAPTYPE(R, ArrayIndex)
+Traversal<S, R>::traverseArrayIndex(ArrayIndex *E, TraversalKind K) {
+  auto Na = self()->traverseArg(E->array());
+  auto Ni = self()->traverseArg(E->index());
+  return self()->reduceArrayIndex(*E, Na, Ni);
 }
 
-template <class V>
-MAPTYPE(V::RMap, ArrayAdd) ArrayAdd::traverse(V &Vs) {
-  auto Na = Vs.traverseArg(Array.get());
-  auto Ni = Vs.traverseArg(Index.get());
-  return Vs.reduceArrayAdd(*this, Na, Ni);
+template <class S, class R>
+MAPTYPE(R, ArrayAdd)
+Traversal<S, R>::traverseArrayAdd(ArrayAdd *E, TraversalKind K) {
+  auto Na = self()->traverseArg(E->array());
+  auto Ni = self()->traverseArg(E->index());
+  return self()->reduceArrayAdd(*E, Na, Ni);
 }
 
-template <class V>
-MAPTYPE(V::RMap, UnaryOp) UnaryOp::traverse(V &Vs) {
-  auto Ne = Vs.traverseArg(Expr0.get());
-  return Vs.reduceUnaryOp(*this, Ne);
+template <class S, class R>
+MAPTYPE(R, UnaryOp)
+Traversal<S, R>::traverseUnaryOp(UnaryOp *E, TraversalKind K) {
+  auto Ne = self()->traverseArg(E->expr());
+  return self()->reduceUnaryOp(*E, Ne);
 }
 
-template <class V>
-MAPTYPE(V::RMap, BinaryOp) BinaryOp::traverse(V &Vs) {
-  auto Ne0 = Vs.traverseArg(Expr0.get());
-  auto Ne1 = Vs.traverseArg(Expr1.get());
-  return Vs.reduceBinaryOp(*this, Ne0, Ne1);
+template <class S, class R>
+MAPTYPE(R, BinaryOp)
+Traversal<S, R>::traverseBinaryOp(BinaryOp *E, TraversalKind K) {
+  auto Ne0 = self()->traverseArg(E->expr0());
+  auto Ne1 = self()->traverseArg(E->expr1());
+  return self()->reduceBinaryOp(*E, Ne0, Ne1);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Cast) Cast::traverse(V &Vs) {
-  auto Ne = Vs.traverseArg(Expr0.get());
-  return Vs.reduceCast(*this, Ne);
+template <class S, class R>
+MAPTYPE(R, Cast)
+Traversal<S, R>::traverseCast(Cast *E, TraversalKind K) {
+  auto Ne = self()->traverseArg(E->expr());
+  return self()->reduceCast(*E, Ne);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Phi) Phi::traverse(V &Vs) {
+template <class S, class R>
+MAPTYPE(R, Phi) Traversal<S, R>::traversePhi(Phi *E, TraversalKind K) {
   // Note: traversing a Phi does not traverse it's arguments.
   // The arguments are traversed by the Goto.
-  return Vs.reducePhi(*this);
+  return self()->reducePhi(*E);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Goto) Goto::traverse(V &Vs) {
-  auto Ntb = Vs.traverseWeak(TargetBlock.get());
-  auto Ng  = Vs.reduceGotoBegin(*this, Ntb);
-  for (Phi *Ph : TargetBlock->arguments()) {
+template <class S, class R>
+MAPTYPE(R, Goto) Traversal<S, R>::traverseGoto(Goto *E, TraversalKind K) {
+  auto Ntb = self()->traverseWeak(E->targetBlock());
+  auto Ng  = self()->reduceGotoBegin(*E, Ntb);
+  for (Phi *Ph : E->targetBlock()->arguments()) {
     if (Ph && Ph->instrID() > 0) {
       // Ignore any newly-added Phi nodes (e.g. from an in-place SSA pass.)
-      Vs.handlePhiArg(*Ph, Ng,
-        Vs.traverseArg( Ph->values()[phiIndex()].get() ));
+      auto A = self()->traverseArg( Ph->values()[E->phiIndex()].get() );
+      self()->handlePhiArg(*Ph, Ng, A);
     }
   }
-  return Vs.reduceGotoEnd(Ng);
+  return self()->reduceGotoEnd(Ng);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Branch) Branch::traverse(V &Vs) {
-  auto Nc  = Vs.traverseArg(Condition.get());
-  auto Ntb = Vs.traverseWeak(Branches[0].get());
-  auto Nte = Vs.traverseWeak(Branches[1].get());
-  return Vs.reduceBranch(*this, Nc, Ntb, Nte);
+template <class S, class R>
+MAPTYPE(R, Branch) Traversal<S, R>::traverseBranch(Branch *E, TraversalKind K) {
+  auto Nc  = self()->traverseArg(E->condition());
+  auto Ntb = self()->traverseWeak(E->thenBlock());
+  auto Nte = self()->traverseWeak(E->elseBlock());
+  return self()->reduceBranch(*E, Nc, Ntb, Nte);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Return) Return::traverse(V &Vs) {
-  auto Ne = Vs.traverseArg(Retval.get());
-  return Vs.reduceReturn(*this, Ne);
+template <class S, class R>
+MAPTYPE(R, Return) Traversal<S, R>::traverseReturn(Return *E, TraversalKind K) {
+  auto Ne = self()->traverseArg(E->returnValue());
+  return self()->reduceReturn(*E, Ne);
 }
 
-template <class V>
-MAPTYPE(V::RMap, BasicBlock) BasicBlock::traverse(V &Vs) {
-  auto Nb = Vs.reduceBasicBlockBegin(*this);
-  for (Phi *A : Args) {
+template <class S, class R>
+MAPTYPE(R, BasicBlock)
+Traversal<S, R>::traverseBasicBlock(BasicBlock *E, TraversalKind K) {
+  auto Nb = self()->reduceBasicBlockBegin(*E);
+  for (Phi *A : E->arguments()) {
     // Use TRV_SubExpr to force traversal of arguments
-    Vs.handleBBArg(*A, Vs.traverse(A, TRV_Instr));
+    self()->handleBBArg(*A, self()->traverse(A, TRV_Instr));
   }
-  for (Instruction *I : Instrs) {
+  for (Instruction *I : E->instructions()) {
     // Use TRV_SubExpr to force traversal of instructions
-    Vs.handleBBInstr(*I, Vs.traverse(I, TRV_Instr));
+    self()->handleBBInstr(*I, self()->traverse(I, TRV_Instr));
   }
-  auto Nt = Vs.traverse(TermInstr, TRV_Instr);
-  return Vs.reduceBasicBlockEnd(Nb, Nt);
+  auto Nt = self()->traverse(E->terminator(), TRV_Instr);
+  return self()->reduceBasicBlockEnd(Nb, Nt);
 }
 
-template <class V>
-MAPTYPE(V::RMap, SCFG) SCFG::traverse(V &Vs) {
-  auto Ns = Vs.reduceSCFG_Begin(*this);
-  for (auto &B : Blocks) {
-    Vs.handleCFGBlock(*B, Vs.traverse(B.get(), TRV_Decl));
+template <class S, class R>
+MAPTYPE(R, SCFG) Traversal<S, R>::traverseSCFG(SCFG *E, TraversalKind K) {
+  auto Ns = self()->reduceSCFG_Begin(*E);
+  for (auto &B : E->blocks()) {
+    self()->handleCFGBlock(*B, self()->traverse(B.get(), TRV_Decl));
   }
-  return Vs.reduceSCFG_End(Ns);
+  return self()->reduceSCFG_End(Ns);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Future) Future::traverse(V &Vs) {
-  assert(Result && "Cannot traverse Future that has not been forced.");
-  return Vs.traverseArg(Result);
+template <class S, class R>
+MAPTYPE(R, Future) Traversal<S, R>::traverseFuture(Future *E, TraversalKind K) {
+  auto *Res = E->maybeGetResult();
+  assert(Res && "Cannot traverse Future that has not been forced.");
+  return self()->traverseArg(Res);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Undefined) Undefined::traverse(V &Vs) {
-  return Vs.reduceUndefined(*this);
+template <class S, class R>
+MAPTYPE(R, Undefined)
+Traversal<S, R>::traverseUndefined(Undefined *E, TraversalKind K) {
+  return self()->reduceUndefined(*E);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Wildcard) Wildcard::traverse(V &Vs) {
-  return Vs.reduceWildcard(*this);
+template <class S, class R>
+MAPTYPE(R, Wildcard)
+Traversal<S, R>::traverseWildcard(Wildcard *E, TraversalKind K) {
+  return self()->reduceWildcard(*E);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Identifier)
-Identifier::traverse(V &Vs) {
-  return Vs.reduceIdentifier(*this);
+template <class S, class R>
+MAPTYPE(R, Identifier)
+Traversal<S, R>::traverseIdentifier(Identifier *E, TraversalKind K) {
+  return self()->reduceIdentifier(*E);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Let) Let::traverse(V &Vs) {
-  // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
+template <class S, class R>
+MAPTYPE(R, Let) Traversal<S, R>::traverseLet(Let *E, TraversalKind K) {
+  // E is a variable declaration, so traverse the definition.
+  auto E0 = self()->traverse(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
-  Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_Tail);
-  Vs.exitScope(VDecl.get());
-  return Vs.reduceLet(*this, E0, E1);
+  self()->enterScope(E->variableDecl(), E0);
+  auto E1 = self()->traverse(E->body(), TRV_Tail);
+  self()->exitScope(E->variableDecl());
+  return self()->reduceLet(*E, E0, E1);
 }
 
-template <class V>
-MAPTYPE(V::RMap, Letrec) Letrec::traverse(V &Vs) {
-  // This is a variable declaration, so traverse the definition.
-  auto E0 = Vs.traverse(VDecl.get(), TRV_Decl);
+template <class S, class R>
+MAPTYPE(R, Letrec) Traversal<S, R>::traverseLetrec(Letrec *E, TraversalKind K) {
+  // E is a variable declaration, so traverse the definition.
+  auto E0 = self()->traverse(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
-  Vs.enterScope(VDecl.get(), E0);
-  auto E1 = Vs.traverse(Body.get(), TRV_Tail);
-  Vs.exitScope(VDecl.get());
-  return Vs.reduceLetrec(*this, E0, E1);
+  self()->enterScope(E->variableDecl(), E0);
+  auto E1 = self()->traverse(E->body(), TRV_Tail);
+  self()->exitScope(E->variableDecl());
+  return self()->reduceLetrec(*E, E0, E1);
 }
 
-template <class V>
-MAPTYPE(V::RMap, IfThenElse) IfThenElse::traverse(V &Vs) {
-  auto Nc = Vs.traverseArg(Condition.get());
-  auto Nt = Vs.traverse(ThenExpr.get(), TRV_Tail);
-  auto Ne = Vs.traverse(ElseExpr.get(), TRV_Tail);
-  return Vs.reduceIfThenElse(*this, Nc, Nt, Ne);
+template <class S, class R>
+MAPTYPE(R, IfThenElse)
+Traversal<S, R>::traverseIfThenElse(IfThenElse *E, TraversalKind K) {
+  auto Nc = self()->traverseArg(E->condition());
+  auto Nt = self()->traverse(E->thenExpr(), TRV_Tail);
+  auto Ne = self()->traverse(E->elseExpr(), TRV_Tail);
+  return self()->reduceIfThenElse(*E, Nc, Nt, Ne);
 }
 
 
