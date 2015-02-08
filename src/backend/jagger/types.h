@@ -91,6 +91,7 @@ struct Type {
   enum Count : uchar { SCALAR = 0x00, VEC2 = 0x20, VEC4 = 0x40 };
   enum Variance : uchar { VARYING = 0x00, UNIFORM = 0x80 };
 
+  Type() {}
   Type(Kind kind, Size size, Count count = SCALAR, Variance variance = VARYING)
     : data(kind | size | count | variance) {}
   static Type Void() { return Type(VOID); }
@@ -335,22 +336,23 @@ struct Binary : TypedStruct<Payload, 3> {
 //==============================================================================
 
 struct ComputeAddressPayload {
+  ComputeAddressPayload() {}
+  ComputeAddressPayload(Type type, uchar scale) : scale(scale), type(type) {}
   uchar scale;
-uchar:
-  8;
-uchar:
-  8;
+  uchar : 8;
+  uchar : 8;
   Type type;
 };
 struct PrefetchPayload {
   enum Kind : uint { NT, L1, L2, L3 } kind;
 };
 struct LoadStorePayload {
-  enum Flags : uchar { NON_TEMPORAL = 0x01, UNALIGNED = 0x02 } flags;
-uchar:
-  8;
-uchar:
-  8;
+  LoadStorePayload() {}
+  LoadStorePayload(Type type, uchar flags = 0) : flags(flags), type(type) {}
+  enum Flags : uchar { NON_TEMPORAL = 0x01, UNALIGNED = 0x02 };
+  uchar flags;
+  uchar : 8;
+  uchar : 8;
   Type type;
 };
 struct MemOpPayload {
@@ -415,18 +417,25 @@ struct MemCopy : TypedStruct<MemOpPayload, 4> {
 //==============================================================================
 
 struct TypedPayload {
+  TypedPayload() {}
+  TypedPayload(Type type) : type(type) {}
   uchar : 8;
   uchar : 8;
   uchar : 8;
   Type type;
 };
 struct ExtractInsertPayload {
+  ExtractInsertPayload() {}
+  ExtractInsertPayload(Type type, uchar lane) : lane(lane), type(type) {}
   uchar lane;
   uchar : 8;
   uchar : 8;
   Type type;
 };
 struct ShufflePayload {
+  ShufflePayload() {}
+  ShufflePayload(Type type, uchar lane0, uchar lane1, uchar lane2, uchar lane3)
+      : lane0(lane0), lane1(lane1), lane2(lane2), lane3(lane3), type(type) {}
   uchar lane0 : 4;
   uchar lane1 : 4;
   uchar lane2 : 4;
@@ -454,7 +463,10 @@ struct Shuffle : local::Binary<SHUFFLE, ShufflePayload> {};
 //==============================================================================
 
 struct BitTestPayload {
-  enum Kind : uchar { READ, CLEAR, SET, TOGGLE } kind;
+  enum Kind : uchar { READ, CLEAR, SET, TOGGLE };
+  BitTestPayload() {}
+  BitTestPayload(Type type, Kind kind) : type(type), kind(kind) {}
+  Kind kind;
   uchar : 8;
   uchar : 8;
   Type type;
@@ -463,30 +475,41 @@ struct LogicPayload {
   enum Kind : uchar {
     FALSE, NOR, GT, NOTB, LT, NOTA, XOR, NAND,
     AND, EQ, A, GE, B, LE, OR, TRUE,
-  } kind;
+  };
+  LogicPayload() {}
+  LogicPayload(Type type, Kind kind) : type(type), kind(kind) {}
+  Kind kind;
   uchar : 8;
   uchar : 8;
   Type type;
 };
 struct Logic3Payload {
+  Logic3Payload() {}
+  Logic3Payload(Type type, uchar kind) : type(type), kind(kind) {}
   uchar kind;
   uchar : 8;
   uchar : 8;
   Type type;
 };
 struct ShiftPayload {
+  ShiftPayload() {}
+  ShiftPayload(Type type, uchar flags = 0) : type(type), flags(flags) {}
   enum Flags : uchar {
     SHIFT = 0x00,
     RIGHT = 0x00,
     LEFT = 0x01,
     ROTATE = 0x02,
     ARITHMETIC = 0x04
-  } flags;
+  };
+  uint flags;
   uchar : 8;
   uchar : 8;
   Type type;
 };
 struct BitFieldPayload {
+  BitFieldPayload() {}
+  BitFieldPayload(Type type, uchar begin, uchar end)
+      : type(type), begin(begin), end(end) {}
   uchar begin;
   uchar end;
   uchar : 8;
@@ -494,6 +517,9 @@ struct BitFieldPayload {
 };
 struct CountZerosPayload {
   enum Kind : uchar { TRAILING, LEADING };
+  CountZerosPayload() {}
+  CountZerosPayload(Type type, Kind kind) : type(type), kind(kind) {}
+  Kind kind;
   uchar : 8;
   uchar : 8;
   Type type;
@@ -535,7 +561,10 @@ struct ComparePayload {
   enum Kind : uchar {
     FALSE, LT, EQ, LE, GT, NEQ, GE, ORD,
     UNORD, LTU, EQU, LEU, GTU, NEQU, GEU, TRUE,
-  } kind;
+  };
+  ComparePayload() {}
+  ComparePayload(Type type, Kind kind) : type(type), kind(kind) {}
+  Kind kind;
   uchar : 8;
   uchar : 8;
   Type type;
@@ -562,7 +591,10 @@ struct Mod : local::Binary<MOD, TypedPayload> {};
 //==============================================================================
 
 struct RoundPayload {
-  enum Mode { EVEN, UP, DOWN, TRUNC, CURRENT } mode;
+  enum Mode { EVEN, UP, DOWN, TRUNC, CURRENT };
+  RoundPayload() {}
+  RoundPayload(Type type, Mode mode) : type(type), mode(mode) {}
+  Mode mode;
   uchar : 8;
   uchar : 8;
   Type type;

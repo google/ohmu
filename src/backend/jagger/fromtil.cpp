@@ -274,28 +274,28 @@ void countBlockEvents(wax::Block& block,
   if (block.dominator != INVALID_INDEX) count += wax::BlockHeader::SLOT_COUNT;
   count += block.predecessors.size() * wax::Phi::SLOT_COUNT;
   for (auto instr : basicBlock.instructions()) switch (instr->opcode()) {
-      case ohmu::til::COP_Load: {
-        count += wax::Load::SLOT_COUNT;
-      } break;
-      case ohmu::til::COP_Store: {
-        auto store = ohmu::cast<ohmu::til::Store>(instr);
-        if (store->source()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::Store::SLOT_COUNT;
-      } break;
+      //case ohmu::til::COP_Load: {
+      //  count += wax::Load::SLOT_COUNT;
+      //} break;
+      //case ohmu::til::COP_Store: {
+      //  auto store = ohmu::cast<ohmu::til::Store>(instr);
+      //  if (store->source()->opcode() == ohmu::til::COP_Literal)
+      //    count += wax::Load::SLOT_COUNT;
+      //  count += wax::Store::SLOT_COUNT;
+      //} break;
       case ohmu::til::COP_UnaryOp: {
         auto unaryOp = ohmu::cast<ohmu::til::UnaryOp>(instr);
         if (unaryOp->expr()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::local::Unary<uint>::SLOT_COUNT;
+          count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
+        count += wax::local::Unary<wax::NOP, uint>::SLOT_COUNT;
       } break;
       case ohmu::til::COP_BinaryOp: {
         auto binaryOp = ohmu::cast<ohmu::til::BinaryOp>(instr);
         if (binaryOp->expr0()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
+          count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
         if (binaryOp->expr1()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::local::Binary<uint>::SLOT_COUNT;
+          count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
+        count += wax::local::Binary<wax::NOP, uint>::SLOT_COUNT;
       } break;
       default:
         error("Unknown instruction type while building literals.");
@@ -308,13 +308,13 @@ void countBlockEvents(wax::Block& block,
     case ohmu::til::COP_Branch: {
       auto branch = ohmu::cast<ohmu::til::Branch>(instr);
       if (branch->condition()->opcode() == ohmu::til::COP_Literal)
-        count += wax::Load::SLOT_COUNT;
+        count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
       count += wax::Branch::SLOT_COUNT;
     } break;
     case ohmu::til::COP_Return: {
       auto ret = ohmu::cast<ohmu::til::Return>(instr);
       if (ret->returnValue()->opcode() == ohmu::til::COP_Literal)
-        count += wax::Load::SLOT_COUNT;
+        count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
     } break;
     default:
       error("Unknown terminator type while building literals.");
@@ -334,6 +334,19 @@ void ModuleBuilder::countEvents() {
   module.instrArray.init(module.blockArray.last().events.bound);
 }
 
+wax::Type translateType(const ohmu::til::BaseType& type) {
+
+}
+
+TypedRef emitImmediateLoad(TypedRef event, ohmu::til::Literal* literal) {
+  auto staticAddress = event.index();
+  event = event.as<wax::StaticAddress>().init(
+      wax::Label(wax::Label::CONSTANT, literal->stackID()));
+  event = event.as<wax::Load>().init(
+      wax::LoadStorePayload(translateType(literal->baseType())), staticAddress);
+  return event;
+}
+
 void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
                       const ohmu::til::BasicBlock& basicBlock) {
   TypedRef event = events[block.events.first];
@@ -342,37 +355,134 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
   for (size_t j = 0, e = block.predecessors.size(); j != e; ++j)
     event = event.as<wax::Phi>().init();
   for (auto instr : basicBlock.instructions()) switch (instr->opcode()) {
-      case ohmu::til::COP_Load: {
-        error("unsupported");
-        auto load = ohmu::cast<ohmu::til::Load>(instr);
-        //load->pointer
-        events.type(i + 0) = wax::LOAD;
-        events.type(i + 1) = wax::USE; // TODO: or static address.
-        events.data(i + 0) = 0; // TODO: LoadStorePayload
-        events.data(i + 1) = 0; // TODO: either address or label 
-      } break;
-      case ohmu::til::COP_Store: {
-        error("unsupported");
-#if 0
-        auto store = ohmu::cast<ohmu::til::Store>(instr);
-        if (store->source()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::Store::SLOT_COUNT;
-#endif
-      } break;
+      //case ohmu::til::COP_Load: {
+      //  error("unsupported");
+      //  auto load = ohmu::cast<ohmu::til::Load>(instr);
+      //  //load->pointer
+      //  events.type(i + 0) = wax::LOAD;
+      //  events.type(i + 1) = wax::USE; // TODO: or static address.
+      //  events.data(i + 0) = 0; // TODO: LoadStorePayload
+      //  events.data(i + 1) = 0; // TODO: either address or label 
+      //} break;
+      //case ohmu::til::COP_Store: {
+      //  error("unsupported");
+      //  auto store = ohmu::cast<ohmu::til::Store>(instr);
+      //  if (store->source()->opcode() == ohmu::til::COP_Literal)
+      //    count += wax::Load::SLOT_COUNT;
+      //  count += wax::Store::SLOT_COUNT;
+      //} break;
       case ohmu::til::COP_UnaryOp: {
         auto unaryOp = ohmu::cast<ohmu::til::UnaryOp>(instr);
-        if (unaryOp->expr()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::local::Unary<uint>::SLOT_COUNT;
+        uint arg;
+        wax::Type type;
+        if (unaryOp->expr()->opcode() == ohmu::til::COP_Literal) {
+          auto literal = ohmu::cast<ohmu::til::Literal>(unaryOp->expr());
+          event = emitImmediateLoad(event, literal);
+          arg = event.index() - wax::Load::SLOT_COUNT;
+          type = translateType(literal->baseType());
+        } else {
+          auto instr = ohmu::cast<ohmu::til::Instruction>(unaryOp->expr());
+          arg = instr->stackID();
+          type = translateType(instr->baseType());
+        }
+        auto payload = wax::TypedPayload(translateType(unaryOp->baseType()));
+        switch (unaryOp->unaryOpcode()) {
+          case ohmu::til::UOP_BitNot:
+            event = event.as<wax::Not>().init(payload, arg);
+            break;
+          case ohmu::til::UOP_LogicNot:
+            event = event.as<wax::Not>().init(payload, arg);
+            break;
+          case ohmu::til::UOP_Minus:
+            event = event.as<wax::Neg>().init(payload, arg);
+            break;
+          default:
+            error("Unknown unary op.");
+        }
       } break;
       case ohmu::til::COP_BinaryOp: {
         auto binaryOp = ohmu::cast<ohmu::til::BinaryOp>(instr);
-        if (binaryOp->expr0()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        if (binaryOp->expr1()->opcode() == ohmu::til::COP_Literal)
-          count += wax::Load::SLOT_COUNT;
-        count += wax::local::Binary<uint>::SLOT_COUNT;
+        uint arg0, arg1;
+        wax::Type type;
+        if (binaryOp->expr0()->opcode() == ohmu::til::COP_Literal) {
+          auto literal = ohmu::cast<ohmu::til::Literal>(binaryOp->expr0());
+          event = emitImmediateLoad(event, literal);
+          arg0 = event.index() - wax::Load::SLOT_COUNT;
+          type = translateType(literal->baseType());
+        } else {
+          auto instr = ohmu::cast<ohmu::til::Instruction>(binaryOp->expr0());
+          arg0 = instr->stackID();
+          type = translateType(instr->baseType());
+        }
+        if (binaryOp->expr1()->opcode() == ohmu::til::COP_Literal) {
+          auto literal = ohmu::cast<ohmu::til::Literal>(binaryOp->expr1());
+          event = emitImmediateLoad(event, literal);
+          arg1 = event.index() - wax::Load::SLOT_COUNT;
+        } else {
+          auto instr = ohmu::cast<ohmu::til::Instruction>(binaryOp->expr1());
+          arg1 = instr->stackID();
+        }
+        auto payload = wax::TypedPayload(type);
+        switch (binaryOp->binaryOpcode()) {
+        case ohmu::til::BOP_Add:
+          event = event.as<wax::Add>().init(payload, arg0, arg1);
+          break;
+        case ohmu::til::BOP_Sub:
+          event = event.as<wax::Sub>().init(payload, arg0, arg1);
+          break;
+        case ohmu::til::BOP_Mul:
+          event = event.as<wax::Mul>().init(payload, arg0, arg1);
+          break;
+        case ohmu::til::BOP_Div:
+          event = event.as<wax::Div>().init(payload, arg0, arg1);
+          break;
+        case ohmu::til::BOP_Rem:
+          event = event.as<wax::Mod>().init(payload, arg0, arg1);
+          break;
+        case ohmu::til::BOP_Shl:
+          event = event.as<wax::Shift>().init(
+              wax::ShiftPayload(payload.type, wax::ShiftPayload::LEFT), arg0,
+              arg1);
+          break;
+        case ohmu::til::BOP_Shr:
+          event = event.as<wax::Shift>().init(
+            wax::ShiftPayload(payload.type, wax::ShiftPayload::RIGHT), arg0,
+            arg1);
+          break;
+        case ohmu::til::BOP_BitAnd:
+          event = event.as<wax::Logic>().init(
+              wax::LogicPayload(payload.type, wax::LogicPayload::AND), arg0,
+              arg1);
+          break;
+        case ohmu::til::BOP_BitXor:
+          event = event.as<wax::Logic>().init(
+            wax::LogicPayload(payload.type, wax::LogicPayload::XOR), arg0,
+            arg1);
+          break;
+        case ohmu::til::BOP_BitOr:
+          event = event.as<wax::Logic>().init(
+            wax::LogicPayload(payload.type, wax::LogicPayload::OR), arg0,
+            arg1);
+          break;
+        case ohmu::til::BOP_Eq:
+          event = event.as<wax::Compare>().init(
+              wax::ComparePayload(type, wax::ComparePayload::EQ), arg0, arg1);
+          break;
+        case ohmu::til::BOP_Neq:
+          event = event.as<wax::Compare>().init(
+            wax::ComparePayload(type, wax::ComparePayload::NEQ), arg0, arg1);
+          break;
+        case ohmu::til::BOP_Lt:
+          event = event.as<wax::Compare>().init(
+            wax::ComparePayload(type, wax::ComparePayload::LT), arg0, arg1);
+          break;
+        case ohmu::til::BOP_Leq:
+          event = event.as<wax::Compare>().init(
+            wax::ComparePayload(type, wax::ComparePayload::LE), arg0, arg1);
+          break;
+        default:
+          error("Unknown binary op.");
+        }
       } break;
       default:
         error("Unknown instruction type while building literals.");
@@ -380,7 +490,7 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
   auto instr = basicBlock.terminator();
   switch (instr->opcode()) {
     case ohmu::til::COP_Goto:
-      count += wax::Jump::SLOT_COUNT;
+      event = event.as<wax::Jump>().init(/*TODO: need sidecar*/ + ohmu::cast<ohmu::til::Goto>(instr)->targetBlock()->blockID());
       break;
     case ohmu::til::COP_Branch: {
       auto branch = ohmu::cast<ohmu::til::Branch>(instr);

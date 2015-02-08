@@ -67,6 +67,7 @@ struct TypedRef {
   void operator++() { ++i; }
   uchar& type() const { return p.type(i); }
   uint& data() const { return p.data(i); }
+  uint index() const { return (uint)i; }
 
  protected:
   __forceinline TypedRef(TypedPtr p, size_t i) : p(p), i(i) {}
