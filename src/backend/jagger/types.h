@@ -79,20 +79,20 @@ struct Type {
   enum : uchar { SIZE = 0x03, KIND = 0x1c, COUNT = 0x60, VARIANCE = 0x80 };
   enum Size : uchar { BYTE = 0x00, SHORT = 0x01, WORD = 0x02, LONG = 0x03 };
   enum Kind : uchar {
-    BINARY_DATA = 0x00,
-    UNSIGNED_INTEGER = 0x04,
-    SIGNED_INTEGER = 0x08,
+    BINARY = 0x00,
+    UNSIGNED = 0x04,
+    INTEGER = 0x08,
     FLOAT = 0x0c,
     VOID = 0x10,
     BOOLEAN = 0x14,
     ADDRESS = 0x18,
     STACK = 0x1c,
   };
-  enum Count : uchar { SCALAR = 0x00, VEC2 = 0x20, VEC4 = 0x40 };
+  enum Count : uchar { SCALAR = 0x00, VEC2 = 0x20, VEC3 = 0x30, VEC4 = 0x40 };
   enum Variance : uchar { VARYING = 0x00, UNIFORM = 0x80 };
 
   Type() {}
-  Type(Kind kind, Size size, Count count = SCALAR, Variance variance = VARYING)
+  Type(Kind kind, Size size = BYTE, Count count = SCALAR, Variance variance = VARYING)
     : data(kind | size | count | variance) {}
   static Type Void() { return Type(VOID); }
 
@@ -253,30 +253,36 @@ struct PhiArgument : TypedStruct<uint, 2> {
     return init_(PHI_ARGUMENT, phi);
   }
 };
-struct Call : TypedStruct<uint, 2> {
+struct Call : TypedStruct<uint, 3> {
   uint& numArgs() const { return p.data(i); }
   Use callee() const { return field<Use>(1); }
-  Use arg(size_t j) const { return field<Use>(2 + j); }
-  TypedRef init(uint target, uint numArgs) const {
-    callee().init(target);
-    return init_(CALL, numArgs);
-  }
-};
-struct CallSPMD : TypedStruct<uint, 3> {
-  uint& numArgs() const { return p.data(i); }
-  Use callee() const { return field<Use>(1); }
-  uint& workCount() const { return p.data(i + 2); }
+  Use stackPointer() const { return field<Use>(2); }
   Use arg(size_t j) const { return field<Use>(3 + j); }
-  TypedRef init(uint target, uint numArgs, uint workCount) const {
+  TypedRef init(uint target, uint numArgs, uint stackPointer) const {
+    this->stackPointer().init(stackPointer);
     callee().init(target);
-    p.type(i + 1) = BYTES;
-    p.data(i + 1) = workCount;
     return init_(CALL, numArgs);
   }
 };
-struct Return : local::Reference {
+struct CallSPMD : TypedStruct<uint, 4> {
+  uint& numArgs() const { return p.data(i); }
+  Use callee() const { return field<Use>(1); }
+  Use stackPointer() const { return field<Use>(2); }
+  uint& workCount() const { return p.data(i + 3); }
+  Use arg(size_t j) const { return field<Use>(4 + j); }
+  TypedRef init(uint target, uint numArgs, uint stackPointer,
+                uint workCount) const {
+    p.type(i + 3) = BYTES;
+    p.data(i + 3) = workCount;
+    this->stackPointer().init(stackPointer);
+    callee().init(target);
+    return init_(CALL, numArgs);
+  }
+};
+struct Return : TypedStruct<uint, 1> {
   // TODO: X64 ret takes ESP/EBP in
-  TypedRef init() const { return init_(RETURN, 0); }
+  uint& numArgs() const { return p.data(i); }
+  TypedRef init(uint numArgs) const { return init_(RETURN, numArgs); }
 };
 struct Jump : TypedStruct<uint, 2> {
   Use target() const { return field<Use>(1); }
@@ -501,7 +507,7 @@ struct ShiftPayload {
     ROTATE = 0x02,
     ARITHMETIC = 0x04
   };
-  uint flags;
+  uchar flags;
   uchar : 8;
   uchar : 8;
   Type type;

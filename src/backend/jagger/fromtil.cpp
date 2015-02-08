@@ -315,6 +315,7 @@ void countBlockEvents(wax::Block& block,
       auto ret = ohmu::cast<ohmu::til::Return>(instr);
       if (ret->returnValue()->opcode() == ohmu::til::COP_Literal)
         count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
+      count += wax::Return::SLOT_COUNT + 1; // 1 for the argument
     } break;
     default:
       error("Unknown terminator type while building literals.");
@@ -335,10 +336,81 @@ void ModuleBuilder::countEvents() {
 }
 
 wax::Type translateType(const ohmu::til::BaseType& type) {
-
+  wax::Type::Kind kind;
+  switch (type.Base) {
+    case ohmu::til::BaseType::BT_Void:
+      kind = wax::Type::VOID;
+      assert(type.Size == ohmu::til::BaseType::ST_0);
+      break;
+    case ohmu::til::BaseType::BT_Bool:
+      kind = wax::Type::BOOLEAN;
+      assert(type.Size == ohmu::til::BaseType::ST_1);
+      break;
+    case ohmu::til::BaseType::BT_Int:
+      kind = wax::Type::INTEGER;
+      break;
+    case ohmu::til::BaseType::BT_UnsignedInt:
+      kind = wax::Type::UNSIGNED;
+      break;
+    case ohmu::til::BaseType::BT_Float:
+      kind = wax::Type::FLOAT;
+      break;
+    case ohmu::til::BaseType::BT_String:
+      kind = wax::Type::ADDRESS;
+      break;
+    case ohmu::til::BaseType::BT_Pointer:
+      kind = wax::Type::ADDRESS;
+      break;
+  }
+  wax::Type::Size size;
+  switch (type.Size) {
+    case ohmu::til::BaseType::ST_0:
+      size = wax::Type::BYTE;
+      assert(type.Base == ohmu::til::BaseType::BT_Void);
+      break;
+    case ohmu::til::BaseType::ST_1:
+      size = wax::Type::BYTE;
+      assert(type.Base == ohmu::til::BaseType::BT_Bool);
+      break;
+    case ohmu::til::BaseType::ST_8:
+      size = wax::Type::BYTE;
+      break;
+    case ohmu::til::BaseType::ST_16:
+      size = wax::Type::SHORT;
+      break;
+    case ohmu::til::BaseType::ST_32:
+      size = wax::Type::WORD;
+      break;
+    case ohmu::til::BaseType::ST_64:
+      size = wax::Type::LONG;
+      break;
+    case ohmu::til::BaseType::ST_128:
+      size = wax::Type::BYTE;
+      error("Back-end doesn't support 128-bit types.");
+      break;
+  }
+  wax::Type::Count count;
+  switch (type.VectSize) {
+    case 0:
+    case 1:
+      count = wax::Type::SCALAR;
+      break;
+    case 2:
+      count = wax::Type::VEC2;
+      break;
+    case 3:
+      count = wax::Type::VEC3;
+      break;
+    case 4:
+      count = wax::Type::VEC4;
+      break;
+    default:
+      error("Unsupported vector size.");
+  }
+  return wax::Type(kind, size, count);
 }
 
-TypedRef emitImmediateLoad(TypedRef event, ohmu::til::Literal* literal) {
+TypedRef emitImmediateLoad(TypedRef event, const ohmu::til::Literal* literal) {
   auto staticAddress = event.index();
   event = event.as<wax::StaticAddress>().init(
       wax::Label(wax::Label::CONSTANT, literal->stackID()));
@@ -348,13 +420,14 @@ TypedRef emitImmediateLoad(TypedRef event, ohmu::til::Literal* literal) {
 }
 
 void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
-                      const ohmu::til::BasicBlock& basicBlock) {
+                      const ModuleBuilder::BlockSidecar& sidecar) {
   TypedRef event = events[block.events.first];
   if (block.dominator != INVALID_INDEX)
     event = event.as<wax::BlockHeader>().init(blocks, block);
   for (size_t j = 0, e = block.predecessors.size(); j != e; ++j)
     event = event.as<wax::Phi>().init();
-  for (auto instr : basicBlock.instructions()) switch (instr->opcode()) {
+  for (auto instr : sidecar.basicBlock->instructions())
+    switch (instr->opcode()) {
       //case ohmu::til::COP_Load: {
       //  error("unsupported");
       //  auto load = ohmu::cast<ohmu::til::Load>(instr);
@@ -487,35 +560,61 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
       default:
         error("Unknown instruction type while building literals.");
     }
-  auto instr = basicBlock.terminator();
+  auto instr = sidecar.basicBlock->terminator();
   switch (instr->opcode()) {
     case ohmu::til::COP_Goto:
-      event = event.as<wax::Jump>().init(/*TODO: need sidecar*/ + ohmu::cast<ohmu::til::Goto>(instr)->targetBlock()->blockID());
+      event = event.as<wax::Jump>().init(
+          sidecar.entryBlockID +
+          ohmu::cast<ohmu::til::Goto>(instr)->targetBlock()->blockID());
       break;
     case ohmu::til::COP_Branch: {
       auto branch = ohmu::cast<ohmu::til::Branch>(instr);
-      if (branch->condition()->opcode() == ohmu::til::COP_Literal)
-        count += wax::Load::SLOT_COUNT;
-      count += wax::Branch::SLOT_COUNT;
+      uint arg;
+      if (branch->condition()->opcode() == ohmu::til::COP_Literal) {
+        assert(false && "This shouldn't happen.");
+        auto literal = ohmu::cast<ohmu::til::Literal>(branch->condition());
+        event = emitImmediateLoad(event, literal);
+        arg = event.index() - wax::Load::SLOT_COUNT;
+      }
+      else {
+        auto instr = ohmu::cast<ohmu::til::Instruction>(branch->condition());
+        arg = instr->stackID();
+      }
+      event = event.as<wax::Branch>().init(arg,
+          sidecar.entryBlockID + branch->thenBlock()->blockID(),
+          sidecar.entryBlockID + branch->elseBlock()->blockID());
     } break;
     case ohmu::til::COP_Return: {
-      auto ret = ohmu::cast<ohmu::til::Return>(instr);
-      if (ret->returnValue()->opcode() == ohmu::til::COP_Literal)
-        count += wax::Load::SLOT_COUNT;
+      auto ret= ohmu::cast<ohmu::til::Return>(instr);
+      uint arg;
+      if (ret->returnValue()->opcode() == ohmu::til::COP_Literal) {
+        assert(false && "This shouldn't happen.");
+        auto literal = ohmu::cast<ohmu::til::Literal>(ret->returnValue());
+        event = emitImmediateLoad(event, literal);
+        arg = event.index() - wax::Load::SLOT_COUNT;
+      }
+      else {
+        auto instr = ohmu::cast<ohmu::til::Instruction>(ret->returnValue());
+        arg = instr->stackID();
+      }
+      event = event.as<wax::Use>().init(arg);
+      event = event.as<wax::Return>().init(1);
     } break;
     default:
       error("Unknown terminator type while building literals.");
   }
-  if (block.phiIndex == INVALID_INDEX) count += wax::Return::SLOT_COUNT;
-  block.events.bound = count;
 }
 
 void ModuleBuilder::buildEventsArray() {
   auto blocks = module.blockArray.begin();
   auto sidecar = blockSidecarArray.begin();
+  auto events = module.instrArray.root;
   for (size_t i = 0, e = module.blockArray.size(); i != e; ++i)
-    buildBlockEvents(blocks[i], *sidecar[i].basicBlock);
-}
+    buildBlockEvents(blocks, events, blocks[i], sidecar[i]);
+  //void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
+  //  const ModuleBuilder::BlockSidecar& sidecar,
+  //  const ohmu::til::BasicBlock& basicBlock) {
+  }
 }  // namespace {
 
 //==============================================================================
