@@ -16,7 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Global.h"
-#include "CFGReducer.h"
+#include "TypedEvaluator.h"
 
 namespace ohmu {
 namespace til  {
@@ -75,7 +75,8 @@ void Global::addDefinitions(std::vector<SExpr*>& Defs) {
 
 
 void Global::lower() {
-  SExpr* E = CFGReducer::lower(GlobalSFun, DefArena);
+  TypedEvaluator eval(DefArena);
+  SExpr* E = eval.traverseAll(GlobalSFun);
 
   // Replace the global definitions with lowered versions.
   GlobalSFun = dyn_cast<Function>(E);

@@ -88,7 +88,6 @@ protected:
 
       case COP_Identifier: return Prec_Atom;
       case COP_Let:        return Prec_Atom;
-      case COP_Letrec:     return Prec_Atom;
       case COP_IfThenElse: return Prec_Decl;
     }
     return Prec_MAX;
@@ -168,7 +167,7 @@ protected:
       return;
     }
     case BaseType::BT_Bool: {
-      if (E->as<bool>().value())
+      if (E->as<bool>()->value())
         SS << "true";
       else
         SS << "false";
@@ -177,16 +176,16 @@ protected:
     case BaseType::BT_Int: {
       switch (VT.Size) {
       case BaseType::ST_8:
-        printLiteralT(&E->as<int8_t>(), SS);
+        printLiteralT(E->as<int8_t>(), SS);
         return;
       case BaseType::ST_16:
-        printLiteralT(&E->as<int16_t>(), SS);
+        printLiteralT(E->as<int16_t>(), SS);
         return;
       case BaseType::ST_32:
-        printLiteralT(&E->as<int32_t>(), SS);
+        printLiteralT(E->as<int32_t>(), SS);
         return;
       case BaseType::ST_64:
-        printLiteralT(&E->as<int64_t>(), SS);
+        printLiteralT(E->as<int64_t>(), SS);
         return;
       default:
         break;
@@ -196,16 +195,16 @@ protected:
     case BaseType::BT_UnsignedInt: {
       switch (VT.Size) {
       case BaseType::ST_8:
-        printLiteralT(&E->as<uint8_t>(), SS);
+        printLiteralT(E->as<uint8_t>(), SS);
         return;
       case BaseType::ST_16:
-        printLiteralT(&E->as<uint16_t>(), SS);
+        printLiteralT(E->as<uint16_t>(), SS);
         return;
       case BaseType::ST_32:
-        printLiteralT(&E->as<uint32_t>(), SS);
+        printLiteralT(E->as<uint32_t>(), SS);
         return;
       case BaseType::ST_64:
-        printLiteralT(&E->as<uint64_t>(), SS);
+        printLiteralT(E->as<uint64_t>(), SS);
         return;
       default:
         break;
@@ -215,10 +214,10 @@ protected:
     case BaseType::BT_Float: {
       switch (VT.Size) {
       case BaseType::ST_32:
-        printLiteralT(&E->as<float>(), SS);
+        printLiteralT(E->as<float>(), SS);
         return;
       case BaseType::ST_64:
-        printLiteralT(&E->as<double>(), SS);
+        printLiteralT(E->as<double>(), SS);
         return;
       default:
         break;
@@ -227,7 +226,7 @@ protected:
     }
     case BaseType::BT_String: {
       SS << "\"";
-      printLiteralT(&E->as<StringRef>(), SS);
+      printLiteralT(E->as<StringRef>(), SS);
       SS << "\"";
       return;
     }
@@ -258,7 +257,6 @@ protected:
     case VarDecl::VK_SFun:
       return;
     case VarDecl::VK_Let:
-    case VarDecl::VK_Letrec:
       SS << " = ";
       break;
     }
@@ -293,14 +291,20 @@ protected:
     SS << ": ";
     self()->printSExpr(E->returnType(), SS, Prec_Decl-1);
     SS << " -> ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
+    if (E->body())
+      self()->printSExpr(E->body(), SS, Prec_Decl);
+    else
+      SS << "_";
   }
 
   void printField(const Field *E, StreamType &SS) {
     SS << ": ";
     self()->printSExpr(E->range(), SS, Prec_Decl-1);
     SS << " = ";
-    self()->printSExpr(E->body(), SS, Prec_Decl);
+    if (E->body())
+      self()->printSExpr(E->body(), SS, Prec_Decl);
+    else
+      SS << "_";
   }
 
   void printSlot(const Slot *E, StreamType &SS) {
@@ -583,39 +587,6 @@ protected:
 
     if (auto *L = dyn_cast<Let>(E->body())) {
       printLet(L, SS, true);
-    }
-    else if (auto *Lr = dyn_cast<Letrec>(E->body())) {
-      printLetrec(Lr, SS, true);
-    }
-    else {
-      self()->newline(SS);
-      printSExpr(E->body(), SS, Prec_Decl);
-      SS << ";";
-    }
-
-    if (!Nested) {
-      self()->unindent();
-      self()->newline(SS);
-      SS << "}";
-    }
-  }
-
-  void printLetrec(const Letrec *E, StreamType &SS, bool Nested=false) {
-    if (!Nested) {
-      SS << "{";
-      self()->indent();
-    }
-
-    self()->newline(SS);
-    SS << "letrec ";
-    printVarDecl(E->variableDecl(), SS);
-    SS << ";";
-
-    if (auto *L = dyn_cast<Let>(E->body())) {
-      printLet(L, SS, true);
-    }
-    else if (auto *Lr = dyn_cast<Letrec>(E->body())) {
-      printLetrec(Lr, SS, true);
     }
     else {
       self()->newline(SS);

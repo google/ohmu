@@ -289,17 +289,6 @@ typename C::CType Let::compare(const Let* E, C& Cmp) const {
 }
 
 template <class C>
-typename C::CType Letrec::compare(const Letrec* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(variableDecl(), E->variableDecl());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  Cmp.enterScope(variableDecl(), E->variableDecl());
-  Ct = Cmp.compare(body(), E->body());
-  Cmp.exitScope();
-  return Ct;
-}
-
-template <class C>
 typename C::CType IfThenElse::compare(const IfThenElse* E, C& Cmp) const {
   typename C::CType Ct = Cmp.compare(condition(), E->condition());
   if (Cmp.notTrue(Ct))

@@ -219,9 +219,14 @@ void Future::setResult(SExpr *Res) {
 
 
 SExpr* Future::force() {
-  if (Status == Future::FS_done)
+  if (Status == Future::FS_done) {
     return Result;
-  assert(status() == Future::FS_pending && "Infinite loop!");
+  }
+  if (Status == Future::FS_evaluating) {
+    // TODO: print a useful diagnostic here.
+    assert(false && "Infinite loop!");
+    return nullptr;
+  }
 
   Status = FS_evaluating;
   auto *Res = evaluate();

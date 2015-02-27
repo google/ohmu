@@ -29,6 +29,7 @@ public:
   CFGFuture(SExpr* e, CFGReducer* r, ScopeFrame* s)
       : LazyCopyFuture(e, r, s)
   { }
+  ~CFGFuture() { }
 
   virtual SExpr* evaluate() override {
     auto* S = Reducer->switchScope(Scope);

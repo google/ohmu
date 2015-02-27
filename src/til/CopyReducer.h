@@ -15,19 +15,19 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// CopyReducer implements the reducer interface to build a new SExpr;
-// it makes a deep copy of a term.
+// CopyReducer extends AttributeGrammar, and implements the reducer interface
+// to make a deep copy of a term.
 //
-// It is useful as a base class for more complex non-destructive rewrites.
+// It is also useful as a base class for more complex non-destructive term
+// rewriting operations.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef OHMU_TIL_COPYREDUCER_H
 #define OHMU_TIL_COPYREDUCER_H
 
-#include "CFGBuilder.h"
-#include "Scope.h"
 #include "AttributeGrammar.h"
+#include "CFGBuilder.h"
 
 #include <cstddef>
 #include <memory>
@@ -39,247 +39,404 @@ namespace ohmu {
 namespace til  {
 
 
+/// Synthesized attribute used for term rewriting.
+class CopyAttr {
+public:
+  CopyAttr() : Exp(nullptr) { }
+  explicit CopyAttr(SExpr* E) : Exp(E) { }
+
+  CopyAttr(const CopyAttr &A) = default;
+  CopyAttr(CopyAttr &&A)      = default;
+
+  CopyAttr& operator=(const CopyAttr &A) = default;
+  CopyAttr& operator=(CopyAttr &&A)      = default;
+
+  SExpr* Exp;    // This is the rewritten term.
+};
+
+
+
+/// A CopyScope maintains a map from blocks to rewritten blocks in
+/// addition to the variable maps maintained by ScopeFrame.
+template<class Attr, typename ExprStateT=int>
+class CopyScope : public ScopeFrame<Attr, ExprStateT> {
+public:
+  typedef ScopeFrame<Attr, ExprStateT> Super;
+
+  /// Return the block that Orig maps to in CFG rewriting.
+  BasicBlock* lookupBlock(BasicBlock *Orig) {
+    return BlockMap[Orig->blockID()];
+  }
+
+  /// Enter a new CFG, mapping blocks from Orig to blocks in S.
+  void enterCFG(SCFG *Orig, SCFG *S) {
+    Super::enterCFG(Orig);
+
+    BlockMap.resize(Orig->numBlocks(), nullptr);
+    insertBlockMap(Orig->entry(), S->entry());
+    insertBlockMap(Orig->exit(),  S->exit());
+  }
+
+  void exitCFG() {
+    Super::exitCFG();
+    BlockMap.clear();
+  }
+
+  // Add B to BlockMap, and add its arguments to InstructionMap
+  void insertBlockMap(BasicBlock *Orig, BasicBlock *B) {
+    this->BlockMap[Orig->blockID()] = B;
+
+    // Map the arguments of Orig to the arguments of B.
+    unsigned Nargs = Orig->arguments().size();
+    assert(Nargs == B->arguments().size() && "Block arguments don't match.");
+
+    for (unsigned i = 0; i < Nargs; ++i) {
+      Phi *Ph = Orig->arguments()[i];
+      if (Ph && Ph->instrID() > 0)
+        this->InstructionMap[Ph->instrID()] = Attr(B->arguments()[i]);
+    }
+  }
+
+  /// Create a copy of this scope.  (Used for lazy rewriting)
+  CopyScope* clone() { return new CopyScope(*this); }
+
+  CopyScope() { }
+
+protected:
+  CopyScope(const CopyScope& S) = default;
+
+  std::vector<BasicBlock*> BlockMap;    // map blocks to rewritten blocks.
+};
+
+
+
 /// CopyReducer implements the reducer interface to build a new SExpr.
 /// In other words, it makes a deep copy of a term.
 /// It also useful as a base class for non-destructive rewrites.
 /// It automatically performs variable substitution during the copy.
-
-class CopyReducer : public CFGBuilder {
+template<class Attr = CopyAttr, class ScopeT = CopyScope<Attr>>
+class CopyReducer : public AttributeGrammar<Attr, ScopeT> {
 public:
-  ScopeFrame& scope() { return *Scope; }
+  MemRegionRef& arena() { return Builder.arena(); }
 
-  /// Switch to a new scope, and return pointer to old scope.
-  ScopeFrame* switchScope(ScopeFrame* NewScope) {
-    auto* S = Scope; Scope = NewScope; return S;
-  }
+  void enterScope(VarDecl *Vd) {
+    // enterScope must be called after reduceVarDecl()
+    auto* Nvd = cast<VarDecl>( this->lastAttr().Exp );
+    auto* Nv  = Builder.newVariable(Nvd);
 
-  /// Restore the previous scope.
-  void restoreScope(ScopeFrame* OldScope) { Scope = OldScope; }
-
-
-  void enterScope(VarDecl *Orig, VarDecl *Nvd) {
-    assert(Scope && "Cannot rewrite in output scope.");
-    // Rewrite old variable to the new variable.
-    // reduceVariable does the actual replacement.
-    Nvd->setVarIndex(Scope->allocVarIndex());
-    Scope->enterScope(Orig, newVariable(Nvd));
-  }
-  void exitScope(VarDecl *Orig) {
-    assert(Scope && "Cannot rewrite in output scope.");
-    Scope->freeVarIndex();
-    Scope->exitScope(Orig);
+    // Variables that point to Orig will be replaced with Nv.
+    this->scope()->enterScope(Vd, Attr(Nv));
+    Builder.enterScope(Nvd);
   }
 
-  SExpr* reduceWeak(Instruction* E) {
-    return Scope->lookupInstr(E);
-  }
-  VarDecl* reduceWeak(VarDecl *E) {
-    // Ignored, since we override reduceVar.
-    return nullptr;
-  }
-  inline BasicBlock* reduceWeak(BasicBlock *E);
-
-
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    return newVarDecl(Orig.kind(), Orig.varName(), E);
-  }
-  VarDecl* reduceVarDeclLetrec(VarDecl* VD, SExpr* E) {
-    VD->setDefinition(E);
-    return VD;
-  }
-  Function* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
-    return newFunction(Nvd, E0);
-  }
-  Code* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    auto* Res = newCode(E0, E1);
-    Res->setCallingConvention(Orig.callingConvention());
-    return Res;
-  }
-  Field* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    return newField(E0, E1);
-  }
-  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
-    auto* Res = newSlot(Orig.slotName(), E0);
-    Res->setModifiers(Orig.modifiers());
-    return Res;
-  }
-  Record* reduceRecordBegin(Record &Orig) {
-    return newRecord(Orig.slots().size());
-  }
-  void handleRecordSlot(Record *R, Slot *S) {
-    R->slots().emplace_back(Arena, S);
-  }
-  Record* reduceRecordEnd(Record *R) { return R; }
-
-  SExpr*  reduceScalarType(ScalarType &Orig) {
-    return &Orig;  // Scalar types are globally defined; we share pointers.
+  void exitScope(VarDecl *Vd) {
+    Builder.exitScope();
+    this->scope()->exitScope();
   }
 
-  Literal* reduceLiteral(Literal &Orig) {
-    return new (Arena) Literal(Orig);
+  void enterCFG(SCFG *Cfg) {
+    Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
+    this->scope()->enterCFG(Cfg, Builder.currentCFG());
   }
+
+  void exitCFG(SCFG *Cfg) {
+    Builder.currentCFG()->renumber();
+    Builder.endCFG();
+    this->scope()->exitCFG();
+  }
+
+  void enterBlock(BasicBlock *B) {
+    Builder.beginBlock( getBasicBlock(B) );
+  }
+
+  void exitBlock(BasicBlock *B) {
+    // Sanity check; the terminator should end the block.
+    if (Builder.currentBB())
+      Builder.endBlock(nullptr);
+  }
+
+  /// Find the basic block that Orig maps to, or create a new one.
+  BasicBlock* getBasicBlock(BasicBlock *Orig) {
+    auto *B2 = this->scope()->lookupBlock(Orig);
+    if (!B2) {
+      // Create new block, and add all of its Phi nodes to InstructionMap.
+      // This has to be done before we process a Goto.
+      unsigned Nargs = Orig->arguments().size();
+      B2 = Builder.newBlock(Nargs, Orig->numPredecessors());
+      this->scope()->insertBlockMap(Orig, B2);
+    }
+    return B2;
+  }
+
+  /*--- Reduce Methods ---*/
+
+  /// Reduce a null pointer.
+  void reduceNull() {
+    this->resultAttr().Exp = nullptr;
+  }
+
+  void reduceWeak(Instruction *Orig) {
+    this->resultAttr().Exp = this->scope()->lookupInstr(Orig).Exp;
+  }
+
+  void reduceVarDecl(VarDecl *Orig) {
+    auto *E = this->attr(0).Exp;
+    VarDecl *Nvd = Builder.newVarDecl(Orig->kind(), Orig->varName(), E);
+    this->resultAttr().Exp = Nvd;
+  }
+
+  void reduceFunction(Function *Orig) {
+    VarDecl *Nvd = cast<VarDecl>(this->attr(0).Exp);
+    auto *E0 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newFunction(Nvd, E0);
+  }
+
+  void reduceCode(Code *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    auto *Res = Builder.newCode(E0, E1);
+    Res->setCallingConvention(Orig->callingConvention());
+    this->resultAttr().Exp = Res;
+  }
+
+  void reduceField(Field *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newField(E0, E1);
+  }
+
+  void reduceSlot(Slot *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *Res = Builder.newSlot(Orig->slotName(), E0);
+    Res->setModifiers(Orig->modifiers());
+    this->resultAttr().Exp = Res;
+  }
+
+  void reduceRecord(Record *Orig) {
+    unsigned Ns = this->numAttrs();
+    assert(Ns == Orig->slots().size());
+    auto *Res = Builder.newRecord(Ns);
+    for (unsigned i = 0; i < Ns; ++i) {
+      Slot *S = cast<Slot>( this->attr(i).Exp );
+      Res->slots().emplace_back(arena(), S);
+    }
+    this->resultAttr().Exp = Res;
+  }
+
+  void reduceScalarType(ScalarType *Orig) {
+    // Scalar types are globally defined; we share pointers.
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceLiteral(Literal *Orig) {
+    this->resultAttr().Exp = new (arena()) Literal(*Orig);
+  }
+
   template<class T>
-  LiteralT<T>* reduceLiteralT(LiteralT<T> &Orig) {
-    return newLiteralT<T>(Orig.value());
-  }
-  SExpr* reduceVariable(Variable &Orig, VarDecl* VD) {
-    // Perform variable substitution
-    return Scope->lookupVar(Orig.variableDecl());
-  }
-  Apply* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    return newApply(E0, E1, Orig.applyKind());
-  }
-  Project* reduceProject(Project &Orig, SExpr* E0) {
-    auto *Res = newProject(E0, Orig.slotName());
-    Res->setArrow(Orig.isArrow());
-    return Res;
+  void reduceLiteralT(LiteralT<T> *Orig) {
+    this->resultAttr().Exp = Builder.newLiteralT<T>(Orig->value());
   }
 
-  Call* reduceCall(Call &Orig, SExpr* E0) {
-    auto *Res = newCall(E0);
+  void reduceVariable(Variable *Orig) {
+    // Perform variable substitution.
+    this->resultAttr() = this->scope()->lookupVar(Orig->variableDecl());
+  }
+
+  void reduceApply(Apply *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newApply(E0, E1, Orig->applyKind());
+  }
+
+  void reduceProject(Project *Orig) {
+    auto *E0  = this->attr(0).Exp;
+    auto *Res = Builder.newProject(E0, Orig->slotName());
+    Res->setArrow(Orig->isArrow());
+    this->resultAttr().Exp = Res;
+  }
+
+  void reduceCall(Call *Orig) {
+    auto *E0  = this->attr(0).Exp;
+    auto *Res = Builder.newCall(E0);
     Res->setCallingConvention(Res->callingConvention());
-    return Res;
-  }
-  Alloc* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    return newAlloc(E0, Orig.allocKind());
-  }
-  Load* reduceLoad(Load &Orig, SExpr* E0) {
-    return newLoad(E0);
-  }
-  Store* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    return newStore(E0, E1);
-  }
-  ArrayIndex* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    return newArrayIndex(E0, E1);
-  }
-  ArrayAdd* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    return newArrayAdd(E0, E1);
-  }
-  UnaryOp* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    return newUnaryOp(Orig.unaryOpcode(), E0);
-  }
-  BinaryOp* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    return newBinaryOp(Orig.binaryOpcode(), E0, E1);
-  }
-  Cast* reduceCast(Cast &Orig, SExpr* E0) {
-    return newCast(Orig.castOpcode(), E0);
+    this->resultAttr().Exp = Res;
   }
 
-  // Phi nodes are created and added to InstructionMap by reduceWeak(BB).
-  // Passes which reduce Phi nodes must also set OverwriteArguments to true.
-  SExpr* reducePhi(Phi& Orig) { return nullptr; }
-
-  Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) {
-    unsigned Idx = B->addPredecessor(CurrentBB);
-    return new (Arena) Goto(B, Idx);
-  }
-  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(Scope->lookupInstr(&Orig), NG, Res);
-  }
-  Goto* reduceGotoEnd(Goto* G) {
-    endBlock(G);      // Phi nodes are set by handlePhiNodeArg.
-    return G;
+  void reduceAlloc(Alloc *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    this->resultAttr().Exp = Builder.newAlloc(E0, Orig->allocKind());
   }
 
-  Branch* reduceBranch(Branch &O, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    return newBranch(C, B0, B1);
-  }
-  Return* reduceReturn(Return &O, SExpr* E) {
-    return newReturn(E);
+  void reduceLoad(Load *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    this->resultAttr().Exp = Builder.newLoad(E0);
   }
 
-  inline BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
-  void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (OverwriteArguments)
-      scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    scope().updateInstructionMap(&Orig, Res);
-  }
-  inline BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term);
-
-  inline SCFG* reduceSCFG_Begin(SCFG &Orig);
-  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
-    /* BlockMap updated by reduceWeak(BasicBlock). */
-  }
-  inline SCFG* reduceSCFG_End(SCFG* Scfg);
-
-  SExpr* reduceUndefined(Undefined &Orig) {
-    return newUndefined();
-  }
-  SExpr* reduceWildcard(Wildcard &Orig) {
-    return newWildcard();
+  void reduceStore(Store *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newStore(E0, E1);
   }
 
-  SExpr* reduceIdentifier(Identifier &Orig) {
-    return new (Arena) Identifier(Orig.idString());
+  void reduceArrayIndex(ArrayIndex *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newArrayIndex(E0, E1);
   }
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    return newLet(Nvd, B);
+
+  void reduceArrayAdd(ArrayAdd *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newArrayAdd(E0, E1);
   }
-  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
-    return newLetrec(Nvd, B);
+
+  void reduceUnaryOp(UnaryOp *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    this->resultAttr().Exp = Builder.newUnaryOp(Orig->unaryOpcode(), E0);
   }
-  SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
-    return newIfThenElse(C, T, E);
+
+  void reduceBinaryOp(BinaryOp *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newBinaryOp(Orig->binaryOpcode(), E0, E1);
+  }
+
+  void reduceCast(Cast *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    this->resultAttr().Exp = Builder.newCast(Orig->castOpcode(), E0);
+  }
+
+  // Phi nodes are created and added to InstructionMap by getBasicBlock().
+  // Passes which alter Phi nodes must also set OverwriteArguments to true.
+  void reducePhi(Phi *Orig) { }
+
+  void reduceGoto(Goto *Orig) {
+    BasicBlock *B = getBasicBlock(Orig->targetBlock());
+    unsigned Idx = B->addPredecessor(Builder.currentBB());
+    Goto *Res = new (arena()) Goto(B, Idx);
+
+    // All "arguments" to the Goto should have been pushed onto the stack.
+    // Write them to their appropriate Phi nodes.
+    assert(B->arguments().size() == this->numAttrs());
+    unsigned i = 0;
+    for (Phi *Ph : B->arguments()) {
+      Builder.setPhiArgument(Ph, this->attr(i).Exp, Idx);
+      ++i;
+    }
+
+    Builder.endBlock(Res);
+    this->resultAttr().Exp = Res;
+  }
+
+  void reduceBranch(Branch *Orig) {
+    auto *C = this->attr(0).Exp;
+    BasicBlock *B0 = getBasicBlock(Orig->thenBlock());
+    BasicBlock *B1 = getBasicBlock(Orig->elseBlock());
+    this->resultAttr().Exp = Builder.newBranch(C, B0, B1);
+  }
+
+  void reduceReturn(Return *Orig) {
+    auto *E = this->attr(0).Exp;
+    this->resultAttr().Exp = Builder.newReturn(E);
+  }
+
+  void reduceBasicBlock(BasicBlock *Orig) {
+    // We don't return a result, because the basic block should have ended
+    // with the terminator.
+    this->resultAttr().Exp = nullptr;
+  }
+
+  void reduceSCFG(SCFG *Orig) {
+    this->resultAttr().Exp = Builder.currentCFG();;
+  }
+
+  void reduceUndefined(Undefined *Orig) {
+    this->resultAttr().Exp = Builder.newUndefined();
+  }
+
+  void reduceWildcard(Wildcard *Orig) {
+    this->resultAttr().Exp = Builder.newWildcard();
+  }
+
+  void reduceIdentifier(Identifier *Orig) {
+    this->resultAttr().Exp =
+      new (arena()) Identifier(Orig->idString());
+  }
+
+  void reduceLet(Let *Orig) {
+    VarDecl *Nvd = cast<VarDecl>( this->attr(0).Exp );
+    auto    *E   = this->attr(1).Exp;
+    this->resultAttr().Exp = Builder.newLet(Nvd, E);
+  }
+
+  void reduceIfThenElse(IfThenElse *Orig) {
+    auto *C = this->attr(0).Exp;
+    auto *T = this->attr(1).Exp;
+    auto *E = this->attr(2).Exp;
+    this->resultAttr().Exp = Builder.newIfThenElse(C, T, E);
   }
 
 public:
-  CopyReducer() : Scope(new ScopeFrame()) { }
-  CopyReducer(MemRegionRef A) : CFGBuilder(A), Scope(new ScopeFrame()) { }
-  ~CopyReducer() {
-    if (Scope) delete Scope;
-  }
+  CopyReducer()
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT())
+  { }
+  CopyReducer(MemRegionRef A)
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A)
+  { }
+  ~CopyReducer() { }
 
 public:
-  // TODO: make private
-  ScopeFrame* Scope;
+  CFGBuilder Builder;
 };
 
 
 
 /// An implementation of Future for lazy, non-destructive traversals.
 /// Visitor extends CopyReducer.
-template<class Visitor>
+template<class Visitor, class ScopeT>
 class LazyCopyFuture : public Future {
 public:
-  LazyCopyFuture(SExpr* E, Visitor* R, ScopeFrame* S)
-    : PendingExpr(E), Reducer(R), Scope(S)
+  LazyCopyFuture(SExpr* E, Visitor* R, ScopeT* S)
+    : PendingExpr(E), Reducer(R), ScopePtr(S)
   { }
-  ~LazyCopyFuture() {
-    if (Scope) delete Scope;
-  }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
-    auto* S = Reducer->switchScope(Scope);
-    // TODO: store the context in which the future was created.
-    auto* Res = Reducer->traverse(PendingExpr, TRV_Decl);
-    Reducer->restoreScope(S);
+    auto* S = Reducer->switchScope(ScopePtr);
 
+    assert(Reducer->numAttrs() == 0 && "Must evaluate future in empty frame.");
+    Reducer->traverse(PendingExpr, TRV_Tail);
+
+    assert(Reducer->numAttrs() == 1 && "Traversal error.");
+    SExpr* Res = Reducer->lastAttr().Exp;
+    Reducer->popAttr();
+
+    Reducer->restoreScope(S);
     finish();
     return Res;
   }
 
 protected:
   void finish() {
-    delete Scope;
-    Scope = 0;
+    if (ScopePtr)
+      delete ScopePtr;
+    ScopePtr = nullptr;
     PendingExpr = nullptr;
   }
 
-  SExpr*      PendingExpr;    // The expression to be rewritten
-  Visitor*    Reducer;        // The reducer object.
-  ScopeFrame* Scope;          // The context in which it occurs
+  SExpr*   PendingExpr;  // The expression to be rewritten
+  ScopeT*  ScopePtr;     // The scope in which it occurs
+  Visitor* Reducer;      // The reducer object.
 };
 
 
 
 /// Base class for non-destructive, lazy traversals.
-template<class Self, class FutureType = LazyCopyFuture<Self> >
-class LazyCopyTraversal : public Traversal<Self, SExprReducerMap> {
+template<class Self, class ScopeT,
+         class FutureType = LazyCopyFuture<Self, ScopeT>>
+class LazyCopyTraversal : public AGTraversal<Self> {
 public:
-  typedef Traversal<Self, SExprReducerMap> SuperTv;
+  typedef AGTraversal<Self> SuperTv;
 
   Self* self() { return static_cast<Self*>(this); }
 
@@ -287,34 +444,37 @@ public:
   /// Default implementation works for LazyFuture; override for other types.
   FutureType* makeFuture(SExpr *E) {
     auto *F = new (self()->arena())
-      FutureType(E, self(), self()->Scope->clone());
+      FutureType(E, self(), self()->scope()->clone());
     FutureQueue.push(F);
     return F;
   }
 
   /// Traverse E, returning a future if K == TRV_Lazy.
-  MAPTYPE(SExprReducerMap, SExpr) traverse(SExpr *E, TraversalKind K) {
-    if (K == TRV_Lazy || K == TRV_Type)
-      return self()->makeFuture(E);
-    return SuperTv::traverse(E, K);
-  }
-
-  /// Lazy traversals cannot be done on types other than SExpr.
-  template<class T>
-  MAPTYPE(SExprReducerMap, T) traverse(T *E, TraversalKind K) {
-    return SuperTv::traverse(E, K);
+  template <class T>
+  void traverse(T *E, TraversalKind K) {
+    if (K == TRV_Lazy || K == TRV_Type) {
+      auto *A = self()->pushAttr();
+      A->Exp = self()->makeFuture(E);
+      return;
+    }
+    SuperTv::traverse(E, K);
   }
 
   /// Perform a lazy traversal.
   SExpr* traverseAll(SExpr *E) {
-    SExpr *Result = self()->traverse(E, TRV_Tail);
+    assert(self()->emptyAttrs() && "In the middle of a traversal.");
 
-    // Process futures in queue.
+    self()->traverse(E, TRV_Tail);
+    SExpr *Result = self()->attr(0).Exp;
+    self()->popAttr();
+
     while (!FutureQueue.empty()) {
       auto *F = FutureQueue.front();
       FutureQueue.pop();
       F->force();
     }
+
+    self()->clearAttrFrames();
     return Result;
   }
 
@@ -324,8 +484,11 @@ protected:
 
 
 
+typedef CopyScope<CopyAttr> DefaultCopyScope;
+
 /// This class will make a deep copy of a term.
-class SExprCopier : public CopyReducer, public LazyCopyTraversal<SExprCopier> {
+class SExprCopier : public CopyReducer<CopyAttr, DefaultCopyScope>,
+                    public LazyCopyTraversal<SExprCopier, DefaultCopyScope> {
 public:
   SExprCopier(MemRegionRef A) : CopyReducer(A) { }
 
@@ -335,51 +498,6 @@ public:
   }
 };
 
-
-
-
-SCFG* CopyReducer::reduceSCFG_Begin(SCFG &Orig) {
-  beginCFG(nullptr, Orig.numBlocks(), Orig.numInstructions());
-  Scope->enterCFG(&Orig, currentCFG());
-  return currentCFG();
-}
-
-SCFG* CopyReducer::reduceSCFG_End(SCFG* Scfg) {
-  Scope->exitCFG();
-  endCFG();
-  Scfg->renumber();
-  return Scfg;
-}
-
-
-BasicBlock* CopyReducer::reduceBasicBlockBegin(BasicBlock &Orig) {
-  BasicBlock *B = reduceWeak(&Orig);
-  beginBlock(B);
-  return B;
-}
-
-
-BasicBlock* CopyReducer::reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
-  // Sanity check.
-  // If Term isn't null, then writing the terminator should end the block.
-  if (currentBB())
-    endBlock(nullptr);
-  return B;
-}
-
-
-// Create new blocks on demand, as we encounter jumps to them.
-BasicBlock* CopyReducer::reduceWeak(BasicBlock *B) {
-  auto *B2 = Scope->lookupBlock(B);
-  if (!B2) {
-    // Create new block, and add all of its Phi nodes to InstructionMap.
-    // This has to be done before we process a Goto.
-    unsigned Nargs = B->arguments().size();
-    B2 = newBlock(Nargs, B->numPredecessors());
-    Scope->updateBlockMap(B, B2);
-  }
-  return B2;
-}
 
 
 }  // end namespace til

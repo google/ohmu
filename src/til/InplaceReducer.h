@@ -14,205 +14,285 @@
 // limitations under the License.
 //
 //===----------------------------------------------------------------------===//
-//
-// InplaceReducer implements the reducer interface so that each reduce simply
-// returns a pointer to the original term.
-//
-// It is intended to be used as a basic class for destructive in-place
-// transformations.
-//
-//===----------------------------------------------------------------------===//
+
 
 #ifndef OHMU_TIL_INPLACEREDUCER_H
 #define OHMU_TIL_INPLACEREDUCER_H
 
+#include "AttributeGrammar.h"
+#include "CopyReducer.h"
 #include "CFGBuilder.h"
-#include "Scope.h"
 
 
 namespace ohmu {
 namespace til  {
 
 
-/// InplaceReducer implements the reducer interface so that each reduce simply
-/// returns a pointer to the original term.
-///
-/// It is intended to be used as a basic class for destructive in-place
-/// transformations.
-class InplaceReducer : public CFGBuilder {
+/// InplaceReducer implements the reducer interface so that each reduce
+/// modifies the original return in-place, and returns a pointer to the
+/// original term.  It is intended to be used as a basic class for destructive
+/// in-place transformations, such as SSA conversion.
+template<class Attr = CopyAttr, class ScopeT = CopyScope<Attr>>
+class InplaceReducer : public AttributeGrammar<Attr, ScopeT> {
 public:
-  ScopeFrame& scope() { return *Scope; }
+  void enterScope(VarDecl *Vd) {
+    // enterScope must be called after reduceVarDecl()
+    auto* Nvd = cast<VarDecl>( this->lastAttr().Exp );
+    auto* Nv  = Builder.newVariable(Nvd);
 
-  void enterScope(VarDecl *Orig, VarDecl *Nvd) {
-    Scope->enterScope(Orig, nullptr);
-  }
-  void exitScope(VarDecl *Orig) {
-    Scope->exitScope(Orig);
-  }
-
-  SExpr*   reduceWeak(Instruction* I) { return scope().lookupInstr(I); }
-  VarDecl* reduceWeak(VarDecl *E)     { return E; }
-  Slot*    reduceWeak(Slot *S)        { return S; }
-
-  BasicBlock* reduceWeak(BasicBlock *B) {
-    if (!Scope->lookupBlock(B))
-      Scope->updateBlockMap(B, B);
-    return B;
+    // Variables that point to Orig will be replaced with Nv.
+    this->scope()->enterScope(Vd, Attr(Nv));
+    Builder.enterScope(Nvd);
   }
 
-  VarDecl* reduceVarDecl(VarDecl &Orig, SExpr* E) {
-    Orig.rewrite(E);
-    return &Orig;
+  void exitScope(VarDecl *Vd) {
+    Builder.exitScope();
+    this->scope()->exitScope();
   }
-  VarDecl* reduceVarDeclLetrec(VarDecl* Nvd, SExpr* D) { return Nvd; }
 
-  SExpr* reduceFunction(Function &Orig, VarDecl *Nvd, SExpr* E0) {
-    Orig.rewrite(Nvd, E0);
-    return &Orig;
+  void enterCFG(SCFG *Cfg) {
+    Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
+    this->scope()->enterCFG(Cfg, Builder.currentCFG());
   }
-  SExpr* reduceCode(Code &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return &Orig;
-  }
-  SExpr* reduceField(Field &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return &Orig;
-  }
-  Slot* reduceSlot(Slot &Orig, SExpr *E0) {
-    Orig.rewrite(E0);
-    return &Orig;
-  }
-  Record* reduceRecordBegin(Record &Orig)    { return &Orig; }
-  void handleRecordSlot(Record *E, Slot *Res) {
-    /* Slots can only be replaced with themselves. */
-  }
-  Record* reduceRecordEnd(Record *R)         { return R;     }
 
-  SExpr*  reduceScalarType(ScalarType &Orig) { return &Orig; }
+  void exitCFG(SCFG *Cfg) {
+    Builder.currentCFG()->renumber();
+    Builder.endCFG();
+    this->scope()->exitCFG();
+  }
 
-  SExpr* reduceLiteral(Literal &Orig)        { return &Orig; }
+  void enterBlock(BasicBlock *B) {
+    Builder.beginBlock( getBasicBlock(B) );
+  }
+
+  void exitBlock(BasicBlock *B) {
+    // Sanity check; the terminator should end the block.
+    if (Builder.currentBB())
+      Builder.endBlock(nullptr);
+  }
+
+  /// Find the basic block that Orig maps to, or create a new one.
+  BasicBlock* getBasicBlock(BasicBlock *Orig) { return Orig; }
+
+  /*--- Reduce Methods ---*/
+
+  void reduceNull() {
+    this->resultAttr().Exp = nullptr;
+  }
+
+  void reduceWeak(Instruction *Orig) {
+    // Map weak references to rewritten instructions.
+    this->resultAttr().Exp = this->scope()->lookupInstr(Orig).Exp;
+  }
+
+  void reduceVarDecl(VarDecl *Orig) {
+    auto *E = this->attr(0).Exp;
+    Orig->rewrite(E);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceFunction(Function *Orig) {
+    VarDecl *Nvd = cast<VarDecl>(this->attr(0).Exp);
+    auto *E0 = this->attr(1).Exp;
+    Orig->rewrite(Nvd, E0);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceCode(Code *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceField(Field *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceSlot(Slot *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceRecord(Record *Orig) {
+    unsigned Ns = this->numAttrs();
+    assert(Ns == Orig->slots().size());
+    for (unsigned i = 0; i < Ns; ++i) {
+      Slot *S = cast<Slot>( this->attr(i).Exp );
+      Orig->slots()[i] = S;
+    }
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceScalarType(ScalarType *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceLiteral(Literal *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
   template<class T>
-  SExpr* reduceLiteralT(LiteralT<T> &Orig)   { return &Orig; }
-
-  SExpr* reduceVariable(Variable &Orig, VarDecl* Vd) {
-    Orig.rewrite(Vd);
-    return &Orig;
-  }
-  SExpr* reduceApply(Apply &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return &Orig;
-  }
-  SExpr* reduceProject(Project &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return &Orig;
+  void reduceLiteralT(LiteralT<T> *Orig) {
+    this->resultAttr().Exp = Orig;
   }
 
-  SExpr* reduceCall(Call &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceLoad(Load &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceArrayIndex(ArrayIndex &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceArrayAdd(ArrayAdd &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceUnaryOp(UnaryOp &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceBinaryOp(BinaryOp &Orig, SExpr* E0, SExpr* E1) {
-    Orig.rewrite(E0, E1);
-    return addInstr(&Orig);
-  }
-  SExpr* reduceCast(Cast &Orig, SExpr* E0) {
-    Orig.rewrite(E0);
-    return addInstr(&Orig);
+  void reduceVariable(Variable *Orig) {
+    this->resultAttr() = Orig;
   }
 
-  /// Phi nodes require special handling, and cannot be
-  /// Passes which reduce Phi nodes must also set OverwriteArguments to true.
-  SExpr* reducePhi(Phi& Orig) { return &Orig; }
-
-  Goto* reduceGotoBegin(Goto &Orig, BasicBlock *B) { return &Orig; }
-  void handlePhiArg(Phi &Orig, Goto *NG, SExpr *Res) {
-    rewritePhiArg(scope().lookupInstr(&Orig), NG, Res);
-  }
-  Goto* reduceGotoEnd(Goto* G) { return G; }
-
-  SExpr* reduceBranch(Branch &Orig, SExpr* C, BasicBlock *B0, BasicBlock *B1) {
-    Orig.rewrite(C, B0, B1);
-    return &Orig;
-  }
-  SExpr* reduceReturn(Return &Orig, SExpr* E) {
-    Orig.rewrite(E);
-    return &Orig;
+  void reduceApply(Apply *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
   }
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig) {
-    beginBlock(&Orig);
-    return &Orig;
-  }
-  void handleBBArg(Phi &Orig, SExpr* Res) {
-    if (OverwriteArguments)
-      scope().updateInstructionMap(&Orig, Res);
-  }
-  void handleBBInstr(Instruction &Orig, SExpr* Res) {
-    scope().updateInstructionMap(&Orig, Res);
-  }
-  BasicBlock* reduceBasicBlockEnd(BasicBlock *B, SExpr* Term) {
-    endBlock(cast<Terminator>(Term));
-    return B;
+  void reduceProject(Project *Orig) {
+    auto *E0  = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
   }
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig);
-  void handleCFGBlock(BasicBlock &Orig, BasicBlock* Res) {
-    assert(&Orig == Res && "Blocks cannot be replaced.");
+  void reduceCall(Call *Orig) {
+    auto *E0  = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
   }
-  SCFG* reduceSCFG_End(SCFG* Scfg);
 
-  SExpr* reduceUndefined (Undefined &Orig)  { return &Orig; }
-  SExpr* reduceWildcard  (Wildcard &Orig)   { return &Orig; }
-  SExpr* reduceIdentifier(Identifier &Orig) { return &Orig; }
+  void reduceAlloc(Alloc *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
+  }
 
-  SExpr* reduceLet(Let &Orig, VarDecl *Nvd, SExpr* B) {
-    Orig.rewrite(Nvd, B);
-    return &Orig;
+  void reduceLoad(Load *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
   }
-  SExpr* reduceLetrec(Letrec &Orig, VarDecl *Nvd, SExpr* B) {
-    Orig.rewrite(Nvd, B);
-    return &Orig;
+
+  void reduceStore(Store *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
   }
-  SExpr* reduceIfThenElse(IfThenElse &Orig, SExpr* C, SExpr* T, SExpr* E) {
-    Orig.rewrite(C, T, E);
-    return &Orig;
+
+  void reduceArrayIndex(ArrayIndex *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceArrayAdd(ArrayAdd *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceUnaryOp(UnaryOp *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceBinaryOp(BinaryOp *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceCast(Cast *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reducePhi(Phi *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceGoto(Goto *Orig) {
+    BasicBlock *B = Orig->targetBlock();
+
+    // All "arguments" to the Goto should have been pushed onto the stack.
+    // Write them to their appropriate Phi nodes.
+    assert(B->arguments().size() == this->numAttrs());
+    unsigned i = 0;
+    for (Phi *Ph : B->arguments()) {
+      Builder.setPhiArgument(Ph, this->attr(i).Exp, Idx);
+      ++i;
+    }
+
+    Builder.endBlock(Orig);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceBranch(Branch *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+    Builder.endBlock(Orig);
+  }
+
+  void reduceReturn(Return *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0, E1);
+    Builder.endBlock(Orig);
+  }
+
+  void reduceBasicBlock(BasicBlock *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceSCFG(SCFG *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceUndefined(Undefined *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceWildcard(Wildcard *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceIdentifier(Identifier *Orig) {
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceLet(Let *Orig) {
+    VarDecl *Nvd = cast<VarDecl>( this->attr(0).Exp );
+    auto    *E0  = this->attr(1).Exp;
+    Orig->rewrite(Nvd, E0);
+    this->resultAttr().Exp = Orig;
+  }
+
+  void reduceIfThenElse(IfThenElse *Orig) {
+    auto *C = this->attr(0).Exp;
+    auto *T = this->attr(1).Exp;
+    auto *E = this->attr(2).Exp;
+    Orig->rewrite(C, T, E);
+    this->resultAttr().Exp = Orig;
   }
 
 public:
-  InplaceReducer() : Scope(new ScopeFrame()) {
-    OverwriteInstructions = true;
-  }
-  InplaceReducer(MemRegionRef A) : CFGBuilder(A), Scope(new ScopeFrame()) {
-    OverwriteInstructions = true;
-  }
+  InplaceReducer()
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT())
+  { }
+  InplaceReducer(MemRegionRef A)
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A)
+  { }
 
-public:
-  // TODO: make private
-  std::unique_ptr<ScopeFrame> Scope;
+protected:
+  CFGBuilder Builder;
 };
 
 

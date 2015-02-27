@@ -28,11 +28,12 @@
 #include "parser/DefaultLexer.h"
 #include "parser/BNFParser.h"
 #include "parser/TILParser.h"
-#include "til/TIL.h"
-#include "til/TILTraverse.h"
-#include "til/TILCompare.h"
-#include "til/CFGReducer.h"
 #include "til/Global.h"
+#include "til/TIL.h"
+#include "til/TILCompare.h"
+#include "til/TILPrettyPrint.h"
+#include "til/TILTraverse.h"
+
 
 #include <iostream>
 

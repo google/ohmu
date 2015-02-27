@@ -129,9 +129,12 @@ Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
 
 
 void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
+  if (!E)
+    return;
+
   Instruction *I = dyn_cast<Instruction>(E);
   if (!I) {
-    diag.error("Invalid argument to Phi node: ") << E;
+    Diag.error("Invalid argument to Phi node: ") << E;
     return;
   }
 
@@ -154,7 +157,7 @@ void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
     Ph->setBaseType(I->baseType());
   }
   else if (Ph->baseType() != I->baseType()) {
-    diag.error("Type mismatch in branch: ")
+    Diag.error("Type mismatch in branch: ")
       << I << " does not have type " << Ph->baseType().getTypeName();
   }
 }
@@ -189,19 +192,6 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
   auto *Nt = new (Arena) Goto(B, Idx);
   endBlock(Nt);
   return Nt;
-}
-
-
-// This is a really a reducer method, not a builder method,
-// But it's shared between CopyReducer and InplaceReducer.
-void CFGBuilder::rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res) {
-  // Ne is what the Phi node was rewritten to.
-  Phi *Ph = dyn_cast_or_null<Phi>(Ne);
-  if (Ph && Ph->block() == NG->targetBlock()) {
-    // The blocks match, so we know that Ph is a rewritten Phi node.
-    // (The original might have been eliminated by rewriting to something else.)
-    setPhiArgument(Ph, Res, NG->phiIndex());
-  }
 }
 
 

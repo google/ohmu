@@ -60,7 +60,6 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
     case TCOP_Cast:       return "cast";
 
     case TCOP_Let:        return "let";
-    case TCOP_Letrec:     return "letrec";
     case TCOP_If:         return "if";
     default:              return nullptr;
   }
@@ -357,15 +356,6 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       auto* v = new (arena_) VarDecl(VarDecl::VK_Let,
                                      copyStr(t->string()), sexpr(1));
       auto* e = new (arena_) Let(v, sexpr(2));
-      delete t;
-      return ParseResult(TILP_SExpr, e);
-    }
-    case TCOP_Letrec: {
-      assert(arity == 3);
-      Token* t = tok(0);
-      auto* v = new (arena_) VarDecl(VarDecl::VK_Letrec,
-                                     copyStr(t->string()), sexpr(1));
-      auto* e = new (arena_) Letrec(v, sexpr(2));
       delete t;
       return ParseResult(TILP_SExpr, e);
     }

@@ -73,7 +73,6 @@ public:
     TCOP_Cast,
 
     TCOP_Let,
-    TCOP_Letrec,
     TCOP_If
   };
 

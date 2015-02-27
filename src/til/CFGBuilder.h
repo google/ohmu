@@ -33,11 +33,14 @@ namespace til  {
 
 
 /// This class provides a useful interface for building and rewriting CFGs.
+/// It maintains information about the lexical context in which a term is
+/// being created, such as the current CFG and the current block.
 class CFGBuilder {
 public:
   void setArena(MemRegionRef A) { Arena = A; }
 
-  MemRegionRef& arena() { return Arena; }
+  MemRegionRef&      arena() { return Arena; }
+  DiagnosticEmitter& diag()  { return Diag; }
 
   SCFG*        currentCFG() { return CurrentCFG; }
   BasicBlock*  currentBB()  { return CurrentBB;  }
@@ -52,6 +55,16 @@ public:
 
   /// Restore the emitInstrs flag.
   void restoreEmit(bool b) { EmitInstrs = b; }
+
+  void enterScope(VarDecl *Nvd) {
+    assert(Nvd->varIndex() == 0 || Nvd->varIndex() == DeBruin);
+    Nvd->setVarIndex(DeBruin);
+    ++DeBruin;
+  }
+
+  void exitScope() {
+    --DeBruin;
+  }
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -162,9 +175,6 @@ public:
   SExpr* newLet(VarDecl *Nvd, SExpr* B) {
     return new (Arena) Let(Nvd, B);
   }
-  SExpr* newLetrec(VarDecl *Nvd, SExpr* B) {
-    return new (Arena) Letrec(Nvd, B);
-  }
   SExpr* newIfThenElse(SExpr* C, SExpr* T, SExpr* E) {
     return new (Arena) IfThenElse(C, T, E);
   }
@@ -184,21 +194,18 @@ public:
   inline Phi* addArg(Phi* A);
 
   /// Utility function for rewriting phi nodes.
-  /// Implementation of handlePhiArg used by CopyReducer and InplaceReducer.
-  void rewritePhiArg(SExpr *Ne, Goto *NG, SExpr *Res);
+  void setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx);
+
 
   CFGBuilder()
     : OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), DeBruin(1)
   { }
   CFGBuilder(MemRegionRef A)
     : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), DeBruin(1)
   { }
   virtual ~CFGBuilder() { }
-
-private:
-  void setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx);
 
 protected:
   MemRegionRef               Arena;
@@ -210,8 +217,9 @@ protected:
   std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
   bool                       EmitInstrs;      //< should we emit instrs?
+  unsigned                   DeBruin;         //< current debruin index
 
-  DiagnosticEmitter diag;
+  DiagnosticEmitter Diag;
 };
 
 

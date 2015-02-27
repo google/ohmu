@@ -23,10 +23,16 @@ literal ::=
 
 value ::=
     literal
-  | "\\" "(" function
-  | "\\@" x= %TK_Identifier v=value   { (sfunction x v) }
+  | "\\"  "(" function
+  | "\\@" "(" sfunction
   | "struct" "{" ss=slotList "}"      { (record ss)     }
   | "[" es=exprList "]"               { (array es)      }
+  ;
+
+field ::=
+  ":" t=expr "=" ( e=expr      { (field t e)         }
+                 | "_"         { (field t (litNull)) }
+                 )
   ;
 
 function ::=
@@ -39,24 +45,26 @@ funRest ::=
   | "," x= %TK_Identifier ":" t=expr v=funRest  { (function x t v) }
   ;
 
+sfunction ::=
+    x= %TK_Identifier ")" v=funBody             { (sfunction x v) }
+  ;
+
 funBody ::=
-    "->" value
+    "(" function
+  | "@" "(" sfunction
+  | "=" value
   | ":" t=expr "->" ( e=expr   { (code t e)         }
                     | "_"      { (code t (litNull)) }
                     )
   ;
 
-field ::=
-  ":" t=expr "=" ( e=expr      { (field t e)         }
-                 | "_"         { (field t (litNull)) }
-                 )
-  ;
 
 slot ::=
     m= %TK_Identifier
-      ( "(" f=function ";"   { (slot m f) }
-      | "=" v=value    ";"   { (slot m v) }
-      | f=field        ";"   { (slot m f) }
+      ( "(" f=function ";"                        { (slot m f) }
+      | "@" "(" f=sfunction ";"                   { (slot m f) }
+      | "=" v=value    ";"                        { (slot m v) }
+      | f=field        ";"                        { (slot m f) }
       )
   ;
 
@@ -85,7 +93,7 @@ mkApply[f,a] ::=
 postfix ::=
   simple
   |*[f] ( "(" ( ")"                     { (call f)      }
-              | a=expr  e=mkApply[f,a]  { (call e)      }
+              | a=expr  mkApply[f,a]
               )
         | "@" "(" ( ")"                 { (sapply f)    }
                   | a=expr ")"          { (sapply f a)  }
@@ -182,7 +190,6 @@ statement ::=
                 |                                            { e1 }
                 )
   | "let"    s= %TK_Identifier e1=letbody  ";" e2=statement  { (let s e1 e2) }
-  | "letrec" s= %TK_Identifier e1=letbody  ";" e2=statement  { (letrec s e1 e2) }
   | "var"    s= %TK_Identifier "=" e1=expr ";" e2=statement  { (let s (alloc e1) e2) }
   ;
 
@@ -190,4 +197,5 @@ statement ::=
 letbody ::= 
     "=" expr
   | "(" function
+  | "@" "(" sfunction
   ;

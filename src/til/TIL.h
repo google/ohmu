@@ -361,9 +361,9 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
 
   enum FutureStatus : unsigned char {
-    FS_pending,
-    FS_evaluating,
-    FS_done
+    FS_pending,     ///< Not yet evaluated.
+    FS_evaluating,  ///< Currently being evaluated.
+    FS_done         ///< Already evaluated.
   };
 
   Future() : Instruction(COP_Future), Status(FS_pending),
@@ -456,7 +456,6 @@ public:
     VK_Fun,     ///< Function parameter
     VK_SFun,    ///< Self-applicable Function (self) parameter
     VK_Let,     ///< Let-variable
-    VK_Letrec,  ///< Letrec-variable  (mu-operator for recursive definition)
   };
 
   VarDecl(VariableKind K, StringRef s, SExpr *D)
@@ -487,7 +486,6 @@ public:
 private:
   friend class Function;
   friend class Let;
-  friend class Letrec;
 
   unsigned  VarIndex;      // The de-bruin index of the variable.
   StringRef VarName;       // The name of the variable.
@@ -668,11 +666,11 @@ public:
   Literal(BaseType BT) : Instruction(COP_Literal) { BType = BT; }
   Literal(const Literal &L) : Instruction(L) { }
 
-  template<class T> const LiteralT<T>& as() const {
-    return *static_cast<const LiteralT<T>*>(this);
+  template<class T> const LiteralT<T>* as() const {
+    return static_cast<const LiteralT<T>*>(this);
   }
-  template<class T> LiteralT<T>& as() {
-    return *static_cast<LiteralT<T>*>(this);
+  template<class T> LiteralT<T>* as() {
+    return static_cast<LiteralT<T>*>(this);
   }
 
   DECLARE_TRAVERSE_AND_COMPARE(Literal)
@@ -1506,35 +1504,6 @@ public:
   const SExpr *body() const { return Body.get(); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Let)
-
-private:
-  SExprRefT<VarDecl> VDecl;
-  SExprRef Body;
-};
-
-
-/// A let-expression,  e.g.  let x=t; u.
-/// This is a pseduo-term; it will be lowered to instructions in a CFG.
-class Letrec : public SExpr {
-public:
-  static bool classof(const SExpr *E) { return E->opcode() == COP_Letrec; }
-
-  Letrec(VarDecl *Vd, SExpr *Bd) : SExpr(COP_Letrec), VDecl(Vd), Body(Bd) {
-     assert(Vd->kind() == VarDecl::VK_Letrec);
-  }
-
-  void rewrite(VarDecl *Vd, SExpr *B) {
-    VDecl.reset(Vd);
-    Body.reset(B);
-  }
-
-  VarDecl *variableDecl()  { return VDecl.get(); }
-  const VarDecl *variableDecl() const { return VDecl.get(); }
-
-  SExpr *body() { return Body.get(); }
-  const SExpr *body() const { return Body.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Letrec)
 
 private:
   SExprRefT<VarDecl> VDecl;

@@ -33,7 +33,7 @@ namespace til  {
 class VisitCFG : public Visitor<VisitCFG> {
 public:
   // Don't traverse inside CFGs; just add them to the list.
-  bool traverseSCFG(SCFG* cfg, TraversalKind k) {
+  bool traverseSCFG(SCFG* cfg) {
     cfgList_.push_back(cfg);
     return true;
   }
