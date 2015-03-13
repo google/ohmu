@@ -770,23 +770,18 @@ void TypedEvaluator::traverseNestedCode(Code* Orig) {
   // and the queue will be processed before we leave the current CFG.
 
   // Create a new scope, where args point to phi nodes in the new block.
-  unsigned Nargs = 0;
-  unsigned Vidx = scope()->numVars()-1;
-  while (Vidx > 0) {
-    VarDecl* Vd = scope()->entry(Vidx).VDecl;
-    if (!Vd || Vd->kind() == VarDecl::VK_Let)
-      break;
-    ++Nargs;
-    --Vidx;
-  }
+  unsigned Nargs = Builder.deBruinIndex() -
+      Builder.deBruinIndexOfEnclosingNestedFunction();
+  unsigned Vidx  = scope()->numVars() - Nargs;
 
   auto* Nb = Builder.newBlock(Nargs);
   auto* Ns = scope()->clone();
   for (unsigned i=0; i < Nargs; ++i) {
     // TODO: (FIXME) Hack to deal with self-variables.
-    auto &Entry = Ns->entry(Vidx + 1 + i);
+    auto &Entry = Ns->entry(Vidx + i);
     if (Entry.VDecl->kind() == VarDecl::VK_SFun)
       continue;
+    assert(Entry.VDecl->kind() != VarDecl::VK_Let);
 
     auto &At    = Entry.VarAttr;
     At.Exp      = Nb->arguments()[i];

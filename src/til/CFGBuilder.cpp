@@ -23,6 +23,34 @@ namespace ohmu {
 namespace til  {
 
 
+void CFGBuilder::enterScope(VarDecl *Nvd) {
+  assert(Nvd->varIndex() == 0 || Nvd->varIndex() == DeBruin);
+  Nvd->setVarIndex(DeBruin);
+
+  if (currentCFG() && NestedDeBruin == 0) {
+    // We are entering a function nested within a CFG.
+    // Stop emitting instructions and mark the spot, b/c nested functions
+    // will be converted to blocks.
+    NestedDeBruin = DeBruin;
+    OldEmit       = EmitInstrs;
+    EmitInstrs    = false;
+  }
+
+  ++DeBruin;
+}
+
+
+void CFGBuilder::exitScope() {
+  --DeBruin;
+
+  if (DeBruin == NestedDeBruin) {
+    NestedDeBruin = 0;
+    EmitInstrs    = OldEmit;
+  }
+}
+
+
+
 SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
   assert(!CurrentCFG && !CurrentBB && "Already inside a CFG");
 

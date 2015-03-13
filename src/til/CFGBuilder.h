@@ -56,15 +56,15 @@ public:
   /// Restore the emitInstrs flag.
   void restoreEmit(bool b) { EmitInstrs = b; }
 
-  void enterScope(VarDecl *Nvd) {
-    assert(Nvd->varIndex() == 0 || Nvd->varIndex() == DeBruin);
-    Nvd->setVarIndex(DeBruin);
-    ++DeBruin;
-  }
+  void enterScope(VarDecl *Nvd);
+  void exitScope();
 
-  void exitScope() {
-    --DeBruin;
-  }
+  /// Return the current deBruin index().  (Index of last variable in scope).
+  unsigned deBruinIndex() { return DeBruin; }
+
+  /// Return the deBruin index of the first argument to the enclosing
+  /// nested function.
+  unsigned deBruinIndexOfEnclosingNestedFunction() { return NestedDeBruin; }
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -199,11 +199,13 @@ public:
 
   CFGBuilder()
     : OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), DeBruin(1)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), OldEmit(true),
+      DeBruin(1), NestedDeBruin(0)
   { }
   CFGBuilder(MemRegionRef A)
     : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), DeBruin(1)
+      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), OldEmit(true),
+      DeBruin(1), NestedDeBruin(0)
   { }
   virtual ~CFGBuilder() { }
 
@@ -214,10 +216,12 @@ protected:
 
   SCFG*                      CurrentCFG;
   BasicBlock*                CurrentBB;
-  std::vector<Phi*>          CurrentArgs;     //< arguments in CurrentBB.
-  std::vector<Instruction*>  CurrentInstrs;   //< instructions in CurrentBB.
-  bool                       EmitInstrs;      //< should we emit instrs?
-  unsigned                   DeBruin;         //< current debruin index
+  std::vector<Phi*>          CurrentArgs;    //< arguments in CurrentBB.
+  std::vector<Instruction*>  CurrentInstrs;  //< instructions in CurrentBB.
+  bool                       EmitInstrs;     //< should we emit instrs?
+  bool                       OldEmit;        //< old value of emit
+  unsigned                   DeBruin;        //< current debruin index
+  unsigned                   NestedDeBruin;  //< index for enclosing nested fun
 
   DiagnosticEmitter Diag;
 };
