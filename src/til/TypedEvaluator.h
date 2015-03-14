@@ -73,7 +73,7 @@ public:
   TypedCopyAttr& operator=(const TypedCopyAttr &A) = default;
 
   TypedCopyAttr(TypedCopyAttr &&A) : CopyAttr(A),
-      TypeExpr(A.TypeExpr), Rel(A.Rel), Subst(std::move(A.Subst)) {
+      TypeExpr(A.TypeExpr), Subst(std::move(A.Subst)), Rel(A.Rel) {
     A.TypeExpr = nullptr;
     A.Rel      = BT_Type;
   }
@@ -114,7 +114,7 @@ public:
 
 public:
   SExpr*    TypeExpr;   ///< The type of the term; should be a value.
-  std::vector<TypedCopyAttr> Subst;    ///< Variable substitution for TypeExpr
+  Substitution<TypedCopyAttr> Subst;    ///< Substitution for TypeExpr
   Relation  Rel;        ///< How the type is related to the term.
 };
 
@@ -148,9 +148,12 @@ public:
   ScopeCPS* clone() { return new ScopeCPS(*this); }
 
   ScopeCPS() : Cont(nullptr) { }
+  ScopeCPS(Substitution<TypedCopyAttr> &&Subst)
+    : Super(std::move(Subst)), Cont(nullptr)
+  { }
 
 protected:
-  ScopeCPS(const ScopeCPS& S) : Super(S), Cont(S.Cont) { }
+  ScopeCPS(const ScopeCPS& S) = default;
 
 private:
   BasicBlock* Cont;
@@ -165,7 +168,7 @@ struct PendingBlock {
   BasicBlock* Cont;
 
   PendingBlock(SExpr *E, BasicBlock *B, ScopeCPS *S)
-      : Exp(E), Block(B), Cont(nullptr), Scope(S)
+      : Exp(E), Block(B), Scope(S), Cont(nullptr)
   { }
   ~PendingBlock() {
     if (Scope)
@@ -227,7 +230,6 @@ public:
 private:
   friend class CFGFuture;
 
-  void pushScopeSubst  (TypedCopyAttr &At, unsigned Vidx = 0);
   void evaluateTypeExpr(TypedCopyAttr &At);
   void computeAttrType (TypedCopyAttr &At, SExpr *E);
   void promoteVariable (Variable *V);

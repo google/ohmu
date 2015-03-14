@@ -104,7 +104,7 @@ void TypedEvaluator::reduceFunction(Function *Orig) {
   auto& Res    = resultAttr();
   Res.Rel      = TypedCopyAttr::BT_Equivalent;
   Res.TypeExpr = Res.Exp;
-  // TODO: need to set the substitution here.
+  Res.Subst.init( Builder.deBruinIndex() );
 }
 
 
@@ -114,7 +114,7 @@ void TypedEvaluator::reduceRecord(Record *Orig) {
   auto& Res    = resultAttr();
   Res.Rel      = TypedCopyAttr::BT_Equivalent;
   Res.TypeExpr = Res.Exp;
-  // TODO: need to set the substitution here.
+  Res.Subst.init( Builder.deBruinIndex() );
 }
 
 
@@ -124,7 +124,7 @@ void TypedEvaluator::reduceCode(Code *Orig) {
   auto& Res    = resultAttr();
   Res.Rel      = TypedCopyAttr::BT_Equivalent;
   Res.TypeExpr = Res.Exp;
-  // TODO: need to set the substitution here.
+  Res.Subst.init( Builder.deBruinIndex() );
 }
 
 
@@ -134,7 +134,7 @@ void TypedEvaluator::reduceField(Field *Orig) {
   auto& Res    = resultAttr();
   Res.Rel      = TypedCopyAttr::BT_Equivalent;
   Res.TypeExpr = Res.Exp;
-  // TODO: need to set the substitution here.
+  Res.Subst.init( Builder.deBruinIndex() );
 }
 
 
@@ -144,15 +144,7 @@ void TypedEvaluator::evaluateTypeExpr(TypedCopyAttr &At) {
     return;
 
   // Create a new scope from the substitution.
-  ScopeCPS Ns;
-
-  unsigned n = At.Subst.size();
-  if (n > 0) {
-    for (unsigned i = 0; i < n; ++i) {
-      Ns.enterScope(nullptr, std::move(At.Subst[i]));
-    }
-    At.Subst.clear();
-  }
+  ScopeCPS Ns( std::move(At.Subst) );
 
   auto* S = switchScope(&Ns);
   computeAttrType(At, At.TypeExpr);
@@ -191,11 +183,7 @@ void TypedEvaluator::promoteVariable(Variable *V) {
   // TODO: optimize for this common case where the scope is empty.
 
   unsigned Vidx = V->variableDecl()->varIndex();
-  ScopeCPS Ns;
-
-  // We start at index 1, because 0 means undefined.
-  for (unsigned i = 1; i < Vidx; ++i)
-    Ns.enterScope(nullptr, TypedCopyAttr(nullptr));
+  ScopeCPS Ns(Vidx);
 
   auto* S = switchScope(&Ns);
   computeAttrType(Res, V->variableDecl()->definition());
@@ -205,23 +193,25 @@ void TypedEvaluator::promoteVariable(Variable *V) {
 
 
 void TypedEvaluator::reduceVariable(Variable *Orig) {
-  // We substitute for variables, so look up the substitution.
-  auto& At = scope()->var( Orig->variableDecl()->varIndex() );
-  if (At.TypeExpr) {
-    // If we have a typed substitution, then return that.
-    resultAttr() = At;
-    return;
-  }
+  unsigned Idx = Orig->variableDecl()->varIndex();
 
-  // If the substitution is for another variable, promote it.
-  // Otherwise we have a null substitution, in which case we promote Orig.
-  Variable *V;
-  if (At.Exp)
-    V = dyn_cast<Variable>(At.Exp);
-  else
+  Variable* V;
+  if (Idx < scope()->nullVars()) {
     V = Orig;
+  }
+  else {
+    // We substitute for variables, so look up the substitution.
+    auto& At = scope()->var( Orig->variableDecl()->varIndex() );
+    if (At.TypeExpr) {
+      // If we have a typed substitution, then return that.
+      resultAttr() = At;
+      return;
+    }
 
-  assert(V && "Invalid substitution.");
+    // Otherwise if the substitution is for another variable, promote it.
+    V = dyn_cast_or_null<Variable>(At.Exp);
+    assert(V && "Invalid substitution.");
+  }
 
   promoteVariable(V);
 }
@@ -526,7 +516,7 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
 
   StringRef Idstr = Orig->idString();
 
-  for (unsigned i = scope()->numVars()-1; i > 0; --i) {
+  for (unsigned i = scope()->numVars()-1; i >= scope()->nullVars(); --i) {
     auto& Entry = scope()->entry(i);
     VarDecl *Vd = Entry.VDecl;
     if (!Vd)
@@ -603,19 +593,6 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
 }
 
 
-
-// Push substitutions for all variables from the current scope into At.
-// If Vidx is specified, only includes vars up to Vidx.
-void TypedEvaluator::pushScopeSubst(TypedCopyAttr& At, unsigned Vidx) {
-  assert(At.Subst.empty() && "Substitution list must be empty.");
-
-  if (Vidx == 0) Vidx = scope()->numVars();
-  // We start at index 1, because index 0 means undefined.
-  for (unsigned i = 1; i < Vidx; ++i)
-    At.pushSubst(scope()->var(i));
-}
-
-
 void TypedEvaluator::traverseFunction(Function *Orig) {
   if (EvalMode == TEval_WeakHead) {
     auto& Res    = resultAttr();
@@ -624,7 +601,7 @@ void TypedEvaluator::traverseFunction(Function *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    pushScopeSubst(Res);
+    Res.Subst.initFromScope(scope());
     return;
   }
   SuperTv::traverseFunction(Orig);
@@ -636,10 +613,10 @@ void TypedEvaluator::traverseRecord(Record *Orig) {
     // We do not copy values, but instead construct a delayed substitution.
     // There is no valid residual, because the substitution hasn't been done.
     auto& Res    = resultAttr();
-    Res.Exp      = Orig;
+    Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    pushScopeSubst(Res);
+    Res.Subst.initFromScope(scope());
     return;
   }
   SuperTv::traverseRecord(Orig);
@@ -654,7 +631,7 @@ void TypedEvaluator::traverseCode(Code *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    pushScopeSubst(Res);
+    Res.Subst.initFromScope(scope());
     return;
   }
 
@@ -685,7 +662,7 @@ void TypedEvaluator::traverseField(Field *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    pushScopeSubst(Res);
+    Res.Subst.initFromScope(scope());
     return;
   }
   SuperTv::traverseField(Orig);
@@ -824,7 +801,7 @@ bool TypedEvaluator::reduceNestedCall(Call* Orig, Code* C) {
     Res.Exp = Builder.newUndefined();
     return true;
   }
-  if (Ca.Subst.size() != Pb->Block->arguments().size()) {
+  if (Ca.Subst.numVarAttrs() != Pb->Block->arguments().size()) {
     diag().error("Invalid number of arguments to function call.") << Orig;
     Res.Exp = Builder.newUndefined();
     return true;
@@ -832,7 +809,7 @@ bool TypedEvaluator::reduceNestedCall(Call* Orig, Code* C) {
 
   // Insert a Goto to the new block.
   std::vector<SExpr*> Args;
-  for (auto& At : Ca.Subst) {
+  for (auto& At : Ca.Subst.varAttrs()) {
     // TODO: (FIXME) Ugly hack to deal with self-arguments.
     if (isa<Function>(At.Exp)) {
       Args.push_back(nullptr);

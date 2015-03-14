@@ -59,7 +59,6 @@ namespace ohmu {
 namespace til {
 
 
-
 /// AttrBase defines the basic interface expected for synthesized attributes.
 class AttrBase {
   // Create an empty attribute
@@ -73,14 +72,81 @@ private:
 
 
 
+/// A Substitution stores a list of terms that will be substituted for free
+/// variables.  Each variable has a deBruin index, which is used to look up the
+/// substitution for that variable.  A common pattern that occurs when doing
+/// type checking or inlining of functions within a nested context, is for
+/// the first 'n' variables to be substituted for themselves; this is a null
+/// substitution.
+template<class Attr>
+class Substitution {
+public:
+  unsigned nullVars()    const { return NullVars; }
+  unsigned numVarAttrs() const { return VarAttrs.size(); }
+  unsigned size()        const { return NullVars + VarAttrs.size(); }
+  bool     empty()       const { return size() == 0; }
+
+  Attr& var(unsigned i) {
+    assert(i >= NullVars && i < size() && "Index out of bounds.");
+    return VarAttrs[i-NullVars];
+  }
+
+  std::vector<Attr>& varAttrs() { return VarAttrs; }
+
+  bool isNull(unsigned Idx) { return Idx < NullVars; }
+
+  void push_back(const Attr&  At) { VarAttrs.push_back(At); }
+  void push_back(Attr&& At)       { VarAttrs.push_back(std::move(At)); }
+
+  void clear() {
+    NullVars = 0;
+    VarAttrs.clear();
+  }
+
+  void init(unsigned Nv) {
+    assert(empty() && "Already initialized.");
+    NullVars = Nv;
+  }
+
+  /// Create a substitution from the variable mapping in S.
+  template<class ScopeT>
+  void initFromScope(ScopeT* S) {
+    assert(empty() && "Already initialized.");
+    NullVars = S->nullVars();
+    unsigned n = S->numVars();
+    for (unsigned i = NullVars; i < n; ++i) {
+      VarAttrs.push_back(S->var(i));
+    }
+  }
+
+  Substitution() : NullVars(0) { }
+  Substitution(unsigned Nv) : NullVars(Nv) { }
+  Substitution(const Substitution& S) = default;
+  Substitution(Substitution&& S)      = default;
+
+  Substitution<Attr>& operator=(const Substitution<Attr> &S) = default;
+  Substitution<Attr>& operator=(Substitution<Attr> &&S)      = default;
+
+private:
+  unsigned          NullVars;   //< Number of null variables
+  std::vector<Attr> VarAttrs;   //< Synthesized attributes for remaining vars.
+};
+
+
+
 /// A ScopeFrame maps variables in the lexical context to synthesized
 /// attributes.  In particular, it tracks attributes for:
 /// (1) Ordinary variables (i.e. function parameters).
 /// (2) Instructions (which are essentially let-variables.)
+///
+/// Scopes are often used in conjunction with substitutions, so the same
+/// concepts of null mapping apply here.
+///
 template<class Attr, typename ExprStateT=int>
 class ScopeFrame {
 public:
   struct VarMapEntry {
+    VarMapEntry() : VDecl(nullptr) { }
     VarMapEntry(VarDecl* Vd, Attr &&Va)
         : VDecl(Vd), VarAttr(std::move(Va))
     { }
@@ -98,23 +164,31 @@ public:
   /// Subclasses should override it.
   void exitSubExpr(TraversalKind K, ExprStateT S) { }
 
-  /// Return the binding for the i^th variable (VarDecl) in the scope
+  /// Return the number of variables with a null mapping.
+  /// Variables with deBruin index < nullVars() have no synthesized attribute.
+  unsigned nullVars() const { return NullVars; }
+
+  /// Return the number of variables in the context.
+  unsigned numVars() const { return NullVars + VarMap.size(); }
+
+  /// Return true if the variable with index Idx has a null mapping.
+  bool isNull(unsigned Idx) { return Idx < NullVars; }
+
+  /// Return the attribute for the i^th variable (VarDecl) in the scope
   /// Note that var(0) is reserved; 0 denotes an undefined variable.
-  Attr& var(unsigned i) { return VarMap[i].VarAttr; }
+  Attr& var(unsigned i) {
+    assert(i >= NullVars && i < numVars() && "Index out of bounds.");
+    return VarMap[i-NullVars].VarAttr;
+  }
 
-  /// Set the binding for the i^th variable (VarDecl) from top of scope.
-  /// Note that var(0) is reserved.
-  void setVar(unsigned i, Attr&& At) { VarMap[i].VarAttr = std::move(At); }
-
-  /// Return the variable substitution for Orig.
+  /// Return the attribute for the variable declared by Orig.
   Attr& lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
 
-  /// Return the number of variables (VarDecls) in the current scope.
-  /// Note that this will always be > 0, since var(0) is reserved.
-  unsigned numVars() { return VarMap.size(); }
-
-  /// Return the VarDecl->SExpr map entry for the i^th variable.
-  VarMapEntry& entry(unsigned i) { return VarMap[i]; }
+  /// Return the VarDecl -> Attr map entry for the i^th variable.
+  VarMapEntry& entry(unsigned i) {
+    assert(i >= NullVars && i < numVars() && "Index out of bounds.");
+    return VarMap[i-NullVars];
+  }
 
   /// Return whatever the given instruction maps to during CFG rewriting.
   Attr& lookupInstr(Instruction *Orig) {
@@ -159,14 +233,25 @@ public:
   /// Create a copy of this scope.  (Used for lazy rewriting)
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
-  ScopeFrame() {
-    // Variable ID 0 means uninitialized.
-    VarMap.push_back(VarMapEntry(nullptr, Attr()));
+  /// Create a new scope where the first Nv variables have a null substitution.
+  ScopeFrame(unsigned Nv) : NullVars(Nv) { }
+
+  /// Create a new scope from a substitution.
+  ScopeFrame(Substitution<Attr>&& Subst) : NullVars(Subst.nullVars()) {
+    assert(Subst.nullVars() > 0 && "Substitution cannot be empty.");
+    for (unsigned i=NullVars,n=Subst.size(); i < n; ++i) {
+      VarMap.emplace_back(nullptr, std::move(Subst.var(i)));
+    }
+    Subst.clear();
   }
+
+  /// Default constructor.
+  ScopeFrame() : NullVars(1) { }  // deBruin index 0 is reserved
 
 protected:
   ScopeFrame(const ScopeFrame &F) = default;
 
+  unsigned                 NullVars;        //< vars with no attributes.
   std::vector<VarMapEntry> VarMap;          //< map vars to values
   std::vector<Attr>        InstructionMap;  //< map instrs to values
 };

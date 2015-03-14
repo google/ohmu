@@ -102,6 +102,8 @@ public:
 
   CopyScope() { }
 
+  CopyScope(Substitution<Attr> &&Subst) : Super(std::move(Subst)) { }
+
 protected:
   CopyScope(const CopyScope& S) = default;
 
@@ -397,7 +399,7 @@ template<class Visitor, class ScopeT>
 class LazyCopyFuture : public Future {
 public:
   LazyCopyFuture(SExpr* E, Visitor* R, ScopeT* S)
-    : PendingExpr(E), Reducer(R), ScopePtr(S)
+    : PendingExpr(E), ScopePtr(S), Reducer(R)
   { }
 
   /// Traverse PendingExpr and return the result.

@@ -1,0 +1,24 @@
+
+
+Array(nDim: Int) = struct {
+  dim (i: Int): Int -> _;
+  data(dims: List(Int)): Int -> _;
+
+  elem = elemImpl(0, []);
+
+  elemImpl(d: Int, dims: List(Int)) =
+    if (d >= nDim) then
+      (: Int -> data(dims)())
+    else
+      \(i: Int) = elemImpl(d+1, append(dims, dim(i)));
+};
+
+
+varArgs(n: Int, args: List(Int), f: Function) =
+  if (n == 0)
+    (: T -> f(args))
+  else
+    \(i: Int) = varArgs(n-1, append(args, i))
+
+
+printIntegers(n: Int) = varArgs(n, [], print)
