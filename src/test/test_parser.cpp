@@ -71,7 +71,7 @@ int main(int argc, const char** argv) {
 #if 1
   jagger::wax::Module module;
   jagger::buildModuleFromTIL(module, global);
-  module.computeDominators();
+  //module.computeDominators();
   jagger::print(module);
 #endif
 

@@ -95,6 +95,13 @@ void print(const wax::Module& module) {
       printf("\n");
     }
   }
+  printf("Instrs:\n");
+  for (auto instr : module.instrArray) {
+    //printf("%3d : %16s %d\n", instr.index(), codes[instr.type()], instr.data());
+    printf("%3d | ", instr.index());
+    print(instr);
+    printf("\n");
+  }
 }
 }  // namespace jagger
 

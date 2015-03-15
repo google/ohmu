@@ -30,31 +30,26 @@ T&& move(T& a) {
   return (T && )a;
 }
 template <typename T>
-void swap(T&& a, T&& b) {
-  auto c = move(a);
-  a = b;
-  b = c;
+void swap(T& a, T& b) {
+  T c = move(a);
+  a = move(b);
+  b = move(c);
 }
 
 struct TypedPtr {
-  //__forceinline size_t set(size_t i, uchar type, uint data) const {
-  //  this->type(i) = type;
-  //  this->data(i) = data;
-  //  return i + 1;
-  //}
-  __forceinline uchar& type(size_t i) const { return ((uchar*)root)[i]; }
-  __forceinline uint& data(size_t i) const { return ((uint*)root)[i]; }
-  __forceinline bool empty() const { return root == nullptr; }
+  __forceinline uchar& type(size_t i) const { return ((uchar*)p)[i]; }
+  __forceinline uint& data(size_t i) const { return ((uint*)p)[i]; }
+  __forceinline bool empty() const { return p == nullptr; }
   __forceinline struct TypedRef operator[](size_t i) const;
-  explicit operator bool() const { return root != nullptr; }
+  explicit operator bool() const { return p != nullptr; }
 
-  bool operator==(const TypedPtr& a) const { return root == a.root; }
-  bool operator!=(const TypedPtr& a) const { return root != a.root; }
+  bool operator==(const TypedPtr& a) const { return p == a.p; }
+  bool operator!=(const TypedPtr& a) const { return p != a.p; }
 
  private:
   friend struct TypedArray;
-  explicit TypedPtr(char* root) : root(root) {}
-  char* root;
+  TypedPtr() : p(nullptr) {}
+  char* p;
 };
 
 struct TypedRef {
@@ -62,9 +57,6 @@ struct TypedRef {
   __forceinline T as() const {
     return *(const T*)this;
   }
-  bool operator==(const TypedRef& a) const { return p == a.p && i == a.i; }
-  bool operator!=(const TypedRef& a) const { return p != a.p || i != a.i; }
-  void operator++() { ++i; }
   uchar& type() const { return p.type(i); }
   uint& data() const { return p.data(i); }
   uint index() const { return (uint)i; }
@@ -88,33 +80,62 @@ struct TypedStruct : TypedRef {
   __forceinline T field(size_t j) const {
     return p[i + j].as<T>();
   }
+  Payload& payload() const { return *(Payload*)&p.data(i); }
 
  protected:
   __forceinline TypedRef init_(uchar type, Payload data) const {
     static_assert(sizeof(Payload) <= sizeof(p.data(i)),
                   "Can't cast to object of larger size.");
     p.type(i) = type;
-    *(Payload*)&p.data(i) = data;
+    payload() = data;
     return p[i + SIZE];
   }
 };
 
 struct TypedArray {
-  TypedArray() : root(nullptr) {}
-  void init(size_t size) {
-    if (root) delete[](&root[0] + first / 4);
-    this->size = size;
-    first = (size + 2) / 3;
+  struct Iterator {
+    TypedRef operator*() const { return root[i]; }
+    void operator++() { ++i; }
+    bool operator!=(const Iterator& a) const { return i != a.i; }
+
+   private:
+    friend TypedArray;
+    Iterator(TypedPtr root, size_t i) : root(root), i(i) {}
+    TypedPtr root;
+    size_t i;
+  };
+
+  TypedArray() : size(0), first(0) {}
+  explicit TypedArray(size_t size) : size(size), first((size + 2) / 3) {
+    if (!size) return;
     auto buffer = new uint[(first * 3 + 3) / 4 + size];
-    root = TypedPtr((char*)(buffer - first / 4));
+    root.p = (char*)(buffer - first / 4);
   }
   TypedArray(const TypedArray&) = delete;
   TypedArray& operator=(const TypedArray&) = delete;
-  ~TypedArray() { if (root) delete[](&root[0] + first / 4); }
+  TypedArray(TypedArray&& a) : size(a.size), first(a.first), root(a.root) {
+    a.size = 0;
+    a.first = 0;
+    a.root = TypedPtr();
+  }
+  TypedArray& operator=(TypedArray&& a) {
+    if (this == &a) return *this;
+    if (root) delete[](&root.data(0) + first / 4);
+    size = a.size;
+    first = a.first;
+    root = a.root;
+    a.size = 0;
+    a.first = 0;
+    a.root = TypedPtr();
+    return *this;
+  }
+  ~TypedArray() {
+    if (root) delete[](&root.data(0) + first / 4);
+  }
   size_t bound() const { return first + size; }
 
-  TypedRef begin() const { return root[first]; }
-  TypedRef end() const { return root[bound()]; }
+  Iterator begin() const { return Iterator(root, first); }
+  Iterator end() const { return Iterator(root, bound()); }
 
   size_t size;
   size_t first;
@@ -170,10 +191,10 @@ static const uint INVALID_INDEX = (uint)-1;
 
 template <typename T>
 struct Array {
-  T& operator[](size_t i) const { return root[i]; }
+  T& operator[](size_t i) const { assert(i < size_); return root[i]; }
   T* begin() const { return root; }
   T* end() const { return root + size_; }
-  T& last() const { return root[size_ - 1]; }
+  T& last() const { return (*this)[size_ - 1]; }
   explicit operator bool() const { return root != nullptr; }
   size_t size() const { return size_; }
 
@@ -188,14 +209,14 @@ struct Array {
     root = a.root;
     size_ = a.size_;
     a.root = nullptr;
+    a.size_ = 0;
     return *this;
   }
-  ~Array() { if (root) delete[] root; }
-  void swap(Array& a) {
-    jagger::swap(root, a.root);
-    jagger::swap(size_, a.size_);
+  ~Array() {
+    if (root) delete[] root;
   }
   AddressRange<T> slice(size_t first, size_t bound) const {
+    if (first > size_) first = size_;
     if (bound > size_) bound = size_;
     return AddressRange<T>(root + first, root + size_);
   }

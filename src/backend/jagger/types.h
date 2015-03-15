@@ -28,6 +28,7 @@ struct Block {
   bool postDominates(const Block& other) const {
     return other.postDomTreeID - postDomTreeID < postDomTreeSize;
   }
+  void print() const;
   uint dominator;
   uint domTreeID;
   uint domTreeSize;
@@ -58,6 +59,9 @@ struct Module {
   Module() {}
   Module(const Module&) = delete;
   Module& operator=(const Module&) = delete;
+  void normalize();
+  void print() const;
+
   Array<Block> blockArray;
   Array<Function> functionArray;
   Array<uint> neighborArray;
@@ -68,7 +72,11 @@ struct Module {
   Array<char> constData;
   Array<char> mutableData;
 
-  void computeDominators();
+private:
+  void sortByBlockID(Array<Block>& swapArray);
+  void computeDominators(Array<Block>& swapArray);
+  void computePostDominators(Array<Block>& swapArray);
+  void computeLoopDepth();
 };
 
 //==============================================================================
@@ -95,6 +103,7 @@ struct Type {
   Type(Kind kind, Size size = BYTE, Count count = SCALAR, Variance variance = VARYING)
     : data(kind | size | count | variance) {}
   static Type Void() { return Type(VOID); }
+  void print() const;
 
   Kind kind() const { return (Kind)(data & KIND); }
   Size size() const { return (Size)(data & SIZE); }
@@ -110,12 +119,18 @@ struct Type {
 };
 
 struct Label {
-  enum Kind : uint { ZERO, INITIALIZED, CONSTANT, CODE, TLS_ZERO, TLS_INITIALIZED };
-  Label(Kind kind, uint size) : data((size << 3) + kind) {}
-  Kind kind() const { return (Kind)(data & 0x7); }
-  uint size() const { return data >> 3; }
+  enum Flags {
+    EXTERNAL = 1,
+    CODE = 2,
+    WRITABLE = 4,
+    UNINITIALIZED = 8,
+    THREAD_LOCAL = 16,
+  };
+  Label(uint index, uint flags) : data((index << 5) + flags) {}
+  uint flags() const { return data & 0x1f; }
+  uint index() const { return data >> 5; }
 
-private:
+ private:
   uint data;
 };
 
@@ -138,6 +153,7 @@ enum Code : uchar {
   CALL,
   CALL_SPMD,
   RETURN,
+  INDIRECT_JUMP,
   JUMP,
   BRANCH,
   SWITCH,
@@ -201,7 +217,7 @@ enum Code : uchar {
 
 namespace local {
 struct Reference : TypedStruct<uint, 1> {
-  TypedRef target() const { return p[p.data(i)]; }
+  TypedRef target() const { return p[data()]; }
 };
 }  // namespace local
 
@@ -284,18 +300,25 @@ struct Return : TypedStruct<uint, 1> {
   uint& numArgs() const { return p.data(i); }
   TypedRef init(uint numArgs) const { return init_(RETURN, numArgs); }
 };
-struct Jump : TypedStruct<uint, 2> {
+struct IndirectJump : TypedStruct<uint, 2> {
   Use target() const { return field<Use>(1); }
   TypedRef init(uint target) const {
     this->target().init(target);
     return init_(JUMP, 0);
   }
 };
+struct Jump : TypedStruct<uint, 2> {
+  StaticAddress target() const { return field<StaticAddress>(1); }
+  TypedRef init(Label target) const {
+    this->target().init(target);
+    return init_(JUMP, 0);
+  }
+};
 struct Branch : TypedStruct<uint, 4> {
   Use arg() const { return field<Use>(1); }
-  Use target0() const { return field<Use>(2); }
-  Use target1() const { return field<Use>(3); }
-  TypedRef init(uint arg, uint target0, uint target1) const {
+  StaticAddress target0() const { return field<StaticAddress>(2); }
+  StaticAddress target1() const { return field<StaticAddress>(3); }
+  TypedRef init(uint arg, Label target0, Label target1) const {
     this->arg().init(arg);
     this->target0().init(target0);
     this->target1().init(target1);
@@ -305,7 +328,7 @@ struct Branch : TypedStruct<uint, 4> {
 struct Switch : TypedStruct<uint, 2> {
   uint& numTargets() const { return p.data(i); }
   Use arg() const { return field<Use>(1); }
-  Use target(size_t j) const { return field<Use>(2 + j); }
+  StaticAddress target(size_t j) const { return field<StaticAddress>(2 + j); }
   TypedRef init(uint arg, uint numTargets) const {
     this->arg().init(arg);
     return init_(SWITCH, numTargets);

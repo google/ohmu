@@ -4,7 +4,8 @@
 #include "til/VisitCFG.h"
 
 namespace jagger {
-namespace {
+  void print(const wax::Module& module);
+  namespace {
 struct ModuleBuilder {
   struct BlockSidecar {
     ohmu::til::BasicBlock* basicBlock;
@@ -15,10 +16,9 @@ struct ModuleBuilder {
     Range literals;
   };
   ModuleBuilder(wax::Module& module, ohmu::til::Global& global)
-      : module(module), global(global) {
-  }
+      : module(module), global(global) {}
   ModuleBuilder(const ModuleBuilder&) = delete;
-  ModuleBuilder& operator =(const ModuleBuilder&) = delete;
+  ModuleBuilder& operator=(const ModuleBuilder&) = delete;
   void walkTILGraph();
   void buildFunctionArray();
   void buildBlockSidecarArray();
@@ -36,8 +36,7 @@ struct ModuleBuilder {
 
 void ModuleBuilder::walkTILGraph() {
   visitCFG.traverseAll(global.global());
-  if (visitCFG.cfgs().empty())
-    error("Can't build a module without any input.");
+  if (visitCFG.cfgs().empty()) error("Can't build a module without any input.");
 }
 
 void ModuleBuilder::buildFunctionArray() {
@@ -73,8 +72,7 @@ void ModuleBuilder::buildBlockSidecarArray() {
 
 void ModuleBuilder::buildBlockArray() {
   module.blockArray = Array<wax::Block>(blockSidecarArray.size());
-  module.neighborArray =
-      Array<uint>(blockSidecarArray.last().boundSuccessor);
+  module.neighborArray = Array<uint>(blockSidecarArray.last().boundSuccessor);
   auto sidecar = blockSidecarArray.begin();
   auto blocks = module.blockArray.begin();
   auto neighbors = module.neighborArray.begin();
@@ -93,10 +91,8 @@ void ModuleBuilder::buildBlockArray() {
     for (auto& tilPred : sidecar->basicBlock->predecessors())
       neighbors[--preds] = entryBlockID + tilPred->blockID();
 
-    if (!block.predecessors.size())
-      block.caseIndex = INVALID_INDEX;
-    if (!block.successors.size())
-      block.phiIndex = INVALID_INDEX;
+    if (!block.predecessors.size()) block.caseIndex = INVALID_INDEX;
+    if (!block.successors.size()) block.phiIndex = INVALID_INDEX;
     for (auto& i : block.successors(neighbors))
       blocks[i].caseIndex = (uint)(&i - (neighbors + succs));
     for (auto& i : block.predecessors(neighbors))
@@ -152,17 +148,17 @@ void ModuleBuilder::countLiterals() {
   for (auto& sidecar : blockSidecarArray.slice(1, -1))
     sidecar.literals.bound += sidecar.literals.first =
         (&sidecar)[-1].literals.bound;
-  //for (auto& sidecar : blockSidecarArray)
-  //  printf("count = [%d, %d)\n", sidecar.literals.first, sidecar.literals.bound);
+  // for (auto& sidecar : blockSidecarArray)
+  //  printf("count = [%d, %d)\n", sidecar.literals.first,
+  //  sidecar.literals.bound);
 }
 
 //==============================================================================
 // Building literalsArray
 //==============================================================================
 
-ohmu::til::Literal** buildBlockLiteralsArray(
-    ohmu::til::BasicBlock& basicBlock,
-    ohmu::til::Literal** literal) {
+ohmu::til::Literal** buildBlockLiteralsArray(ohmu::til::BasicBlock& basicBlock,
+                                             ohmu::til::Literal** literal) {
   for (auto instr : basicBlock.instructions()) switch (instr->opcode()) {
       case ohmu::til::COP_Load: { /*TODO: figure out address literals*/
       } break;
@@ -202,8 +198,7 @@ ohmu::til::Literal** buildBlockLiteralsArray(
 }
 
 void ModuleBuilder::buildLiteralsArray() {
-  if (!blockSidecarArray.last().literals.bound)
-    return;
+  if (!blockSidecarArray.last().literals.bound) return;
   literals =
       Array<ohmu::til::Literal*>(blockSidecarArray.last().literals.bound);
   auto p = literals.begin();
@@ -213,13 +208,11 @@ void ModuleBuilder::buildLiteralsArray() {
   std::sort(literals.begin(), literals.end());
   size_t uniqueSize = 1;
   for (size_t i = 1, e = literals.size(); i != e; ++i)
-    if (literals[i] != literals[i - 1])
-      uniqueSize++;
+    if (literals[i] != literals[i - 1]) uniqueSize++;
   Array<ohmu::til::Literal*> swap(uniqueSize);
   swap[0] = literals[0];
   for (size_t i = 1, j = 1, e = literals.size(); i != e; ++i)
-    if (literals[i] != literals[i - 1])
-      swap[j++] = literals[i];
+    if (literals[i] != literals[i - 1]) swap[j++] = literals[i];
   literals = move(swap);
   module.constDataEntries = Array<wax::StaticData>(literals.size());
   auto literalEntries = module.constDataEntries.begin();
@@ -227,11 +220,20 @@ void ModuleBuilder::buildLiteralsArray() {
   for (auto literal : literals) {
     uint size;
     switch (literal->baseType().Size) {
-      case ohmu::til::BaseType::ST_8: size = 1; break;
-      case ohmu::til::BaseType::ST_16: size = 2; break;
-      case ohmu::til::BaseType::ST_32: size = 4; break;
-      case ohmu::til::BaseType::ST_64: size = 8; break;
-      default: error("Unsupported literal size.");
+      case ohmu::til::BaseType::ST_8:
+        size = 1;
+        break;
+      case ohmu::til::BaseType::ST_16:
+        size = 2;
+        break;
+      case ohmu::til::BaseType::ST_32:
+        size = 4;
+        break;
+      case ohmu::til::BaseType::ST_64:
+        size = 8;
+        break;
+      default:
+        error("Unsupported literal size.");
     }
     literalEntries[i++].alignment = literalEntries[i].bytes.bound = size;
   }
@@ -254,7 +256,7 @@ void ModuleBuilder::buildLiteralsArray() {
         break;
       case ohmu::til::BaseType::ST_32:
         *(uint*)addr = literal->as<uint>().value();
-        //printf("%02x - %02x : %d\n", dataEntry[-1].bytes.first,
+        // printf("%02x - %02x : %d\n", dataEntry[-1].bytes.first,
         //       dataEntry[-1].bytes.bound, literal->as<uint>().value());
         break;
       case ohmu::til::BaseType::ST_64:
@@ -274,10 +276,10 @@ void countBlockEvents(wax::Block& block,
   if (block.dominator != INVALID_INDEX) count += wax::BlockHeader::SLOT_COUNT;
   count += block.predecessors.size() * wax::Phi::SLOT_COUNT;
   for (auto instr : basicBlock.instructions()) switch (instr->opcode()) {
-      //case ohmu::til::COP_Load: {
+      // case ohmu::til::COP_Load: {
       //  count += wax::Load::SLOT_COUNT;
       //} break;
-      //case ohmu::til::COP_Store: {
+      // case ohmu::til::COP_Store: {
       //  auto store = ohmu::cast<ohmu::til::Store>(instr);
       //  if (store->source()->opcode() == ohmu::til::COP_Literal)
       //    count += wax::Load::SLOT_COUNT;
@@ -315,7 +317,7 @@ void countBlockEvents(wax::Block& block,
       auto ret = ohmu::cast<ohmu::til::Return>(instr);
       if (ret->returnValue()->opcode() == ohmu::til::COP_Literal)
         count += wax::StaticAddress::SLOT_COUNT + wax::Load::SLOT_COUNT;
-      count += wax::Return::SLOT_COUNT + 1; // 1 for the argument
+      count += wax::Return::SLOT_COUNT + 1;  // 1 for the argument
     } break;
     default:
       error("Unknown terminator type while building literals.");
@@ -331,8 +333,16 @@ void ModuleBuilder::countEvents() {
     countBlockEvents(blocks[i], *sidecar[i].basicBlock);
   blocks[0].events.first = 0;
   for (size_t i = 1, e = module.blockArray.size(); i != e; ++i)
-    blocks[i].events.bound += blocks[i].events.first = blocks[i - 1].events.bound;
-  module.instrArray.init(module.blockArray.last().events.bound);
+    blocks[i].events.bound += blocks[i].events.first =
+        blocks[i - 1].events.bound;
+  printf("initing with : %d\n", module.blockArray.last().events.bound);
+  module.instrArray = TypedArray(module.blockArray.last().events.bound);
+  for (auto& block : module.blockArray) {
+    block.events.first += module.instrArray.first;
+    block.events.bound += module.instrArray.first;
+  }
+  for (auto i : module.blockArray)
+    printf(">> %d - %d\n", i.events.first, i.events.bound);
 }
 
 wax::Type translateType(const ohmu::til::BaseType& type) {
@@ -413,7 +423,7 @@ wax::Type translateType(const ohmu::til::BaseType& type) {
 TypedRef emitImmediateLoad(TypedRef event, const ohmu::til::Literal* literal) {
   auto staticAddress = event.index();
   event = event.as<wax::StaticAddress>().init(
-      wax::Label(wax::Label::CONSTANT, literal->stackID()));
+    wax::Label(literal->stackID(), 0));
   event = event.as<wax::Load>().init(
       wax::LoadStorePayload(translateType(literal->baseType())), staticAddress);
   return event;
@@ -422,22 +432,24 @@ TypedRef emitImmediateLoad(TypedRef event, const ohmu::til::Literal* literal) {
 void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
                       const ModuleBuilder::BlockSidecar& sidecar) {
   TypedRef event = events[block.events.first];
+  auto base = event;
+  //printf("block.dominator = %d\n", block.dominator);
   if (block.dominator != INVALID_INDEX)
     event = event.as<wax::BlockHeader>().init(blocks, block);
   for (size_t j = 0, e = block.predecessors.size(); j != e; ++j)
     event = event.as<wax::Phi>().init();
   for (auto instr : sidecar.basicBlock->instructions())
     switch (instr->opcode()) {
-      //case ohmu::til::COP_Load: {
+      // case ohmu::til::COP_Load: {
       //  error("unsupported");
       //  auto load = ohmu::cast<ohmu::til::Load>(instr);
       //  //load->pointer
       //  events.type(i + 0) = wax::LOAD;
       //  events.type(i + 1) = wax::USE; // TODO: or static address.
       //  events.data(i + 0) = 0; // TODO: LoadStorePayload
-      //  events.data(i + 1) = 0; // TODO: either address or label 
+      //  events.data(i + 1) = 0; // TODO: either address or label
       //} break;
-      //case ohmu::til::COP_Store: {
+      // case ohmu::til::COP_Store: {
       //  error("unsupported");
       //  auto store = ohmu::cast<ohmu::til::Store>(instr);
       //  if (store->source()->opcode() == ohmu::til::COP_Literal)
@@ -458,6 +470,7 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
           arg = instr->stackID();
           type = translateType(instr->baseType());
         }
+        unaryOp->setStackID(event.index());
         auto payload = wax::TypedPayload(translateType(unaryOp->baseType()));
         switch (unaryOp->unaryOpcode()) {
           case ohmu::til::UOP_BitNot:
@@ -479,6 +492,7 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
         wax::Type type;
         if (binaryOp->expr0()->opcode() == ohmu::til::COP_Literal) {
           auto literal = ohmu::cast<ohmu::til::Literal>(binaryOp->expr0());
+          auto temp = event;
           event = emitImmediateLoad(event, literal);
           arg0 = event.index() - wax::Load::SLOT_COUNT;
           type = translateType(literal->baseType());
@@ -495,66 +509,68 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
           auto instr = ohmu::cast<ohmu::til::Instruction>(binaryOp->expr1());
           arg1 = instr->stackID();
         }
+        binaryOp->setStackID(event.index());
         auto payload = wax::TypedPayload(type);
         switch (binaryOp->binaryOpcode()) {
-        case ohmu::til::BOP_Add:
-          event = event.as<wax::Add>().init(payload, arg0, arg1);
-          break;
-        case ohmu::til::BOP_Sub:
-          event = event.as<wax::Sub>().init(payload, arg0, arg1);
-          break;
-        case ohmu::til::BOP_Mul:
-          event = event.as<wax::Mul>().init(payload, arg0, arg1);
-          break;
-        case ohmu::til::BOP_Div:
-          event = event.as<wax::Div>().init(payload, arg0, arg1);
-          break;
-        case ohmu::til::BOP_Rem:
-          event = event.as<wax::Mod>().init(payload, arg0, arg1);
-          break;
-        case ohmu::til::BOP_Shl:
-          event = event.as<wax::Shift>().init(
-              wax::ShiftPayload(payload.type, wax::ShiftPayload::LEFT), arg0,
-              arg1);
-          break;
-        case ohmu::til::BOP_Shr:
-          event = event.as<wax::Shift>().init(
-            wax::ShiftPayload(payload.type, wax::ShiftPayload::RIGHT), arg0,
-            arg1);
-          break;
-        case ohmu::til::BOP_BitAnd:
-          event = event.as<wax::Logic>().init(
-              wax::LogicPayload(payload.type, wax::LogicPayload::AND), arg0,
-              arg1);
-          break;
-        case ohmu::til::BOP_BitXor:
-          event = event.as<wax::Logic>().init(
-            wax::LogicPayload(payload.type, wax::LogicPayload::XOR), arg0,
-            arg1);
-          break;
-        case ohmu::til::BOP_BitOr:
-          event = event.as<wax::Logic>().init(
-            wax::LogicPayload(payload.type, wax::LogicPayload::OR), arg0,
-            arg1);
-          break;
-        case ohmu::til::BOP_Eq:
-          event = event.as<wax::Compare>().init(
-              wax::ComparePayload(type, wax::ComparePayload::EQ), arg0, arg1);
-          break;
-        case ohmu::til::BOP_Neq:
-          event = event.as<wax::Compare>().init(
-            wax::ComparePayload(type, wax::ComparePayload::NEQ), arg0, arg1);
-          break;
-        case ohmu::til::BOP_Lt:
-          event = event.as<wax::Compare>().init(
-            wax::ComparePayload(type, wax::ComparePayload::LT), arg0, arg1);
-          break;
-        case ohmu::til::BOP_Leq:
-          event = event.as<wax::Compare>().init(
-            wax::ComparePayload(type, wax::ComparePayload::LE), arg0, arg1);
-          break;
-        default:
-          error("Unknown binary op.");
+          case ohmu::til::BOP_Add:
+            event = event.as<wax::Add>().init(payload, arg0, arg1);
+            break;
+          case ohmu::til::BOP_Sub:
+            event = event.as<wax::Sub>().init(payload, arg0, arg1);
+            break;
+          case ohmu::til::BOP_Mul:
+            event = event.as<wax::Mul>().init(payload, arg0, arg1);
+            break;
+          case ohmu::til::BOP_Div:
+            event = event.as<wax::Div>().init(payload, arg0, arg1);
+            break;
+          case ohmu::til::BOP_Rem:
+            event = event.as<wax::Mod>().init(payload, arg0, arg1);
+            break;
+          case ohmu::til::BOP_Shl:
+            event = event.as<wax::Shift>().init(
+                wax::ShiftPayload(payload.type, wax::ShiftPayload::LEFT), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_Shr:
+            event = event.as<wax::Shift>().init(
+                wax::ShiftPayload(payload.type, wax::ShiftPayload::RIGHT), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_BitAnd:
+            event = event.as<wax::Logic>().init(
+                wax::LogicPayload(payload.type, wax::LogicPayload::AND), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_BitXor:
+            event = event.as<wax::Logic>().init(
+                wax::LogicPayload(payload.type, wax::LogicPayload::XOR), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_BitOr:
+            event = event.as<wax::Logic>().init(
+                wax::LogicPayload(payload.type, wax::LogicPayload::OR), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_Eq:
+            event = event.as<wax::Compare>().init(
+                wax::ComparePayload(type, wax::ComparePayload::EQ), arg0, arg1);
+            break;
+          case ohmu::til::BOP_Neq:
+            event = event.as<wax::Compare>().init(
+                wax::ComparePayload(type, wax::ComparePayload::NEQ), arg0,
+                arg1);
+            break;
+          case ohmu::til::BOP_Lt:
+            event = event.as<wax::Compare>().init(
+                wax::ComparePayload(type, wax::ComparePayload::LT), arg0, arg1);
+            break;
+          case ohmu::til::BOP_Leq:
+            event = event.as<wax::Compare>().init(
+                wax::ComparePayload(type, wax::ComparePayload::LE), arg0, arg1);
+            break;
+          default:
+            error("Unknown binary op.");
         }
       } break;
       default:
@@ -563,9 +579,10 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
   auto instr = sidecar.basicBlock->terminator();
   switch (instr->opcode()) {
     case ohmu::til::COP_Goto:
-      event = event.as<wax::Jump>().init(
+      event = event.as<wax::Jump>().init(wax::Label(
           sidecar.entryBlockID +
-          ohmu::cast<ohmu::til::Goto>(instr)->targetBlock()->blockID());
+              ohmu::cast<ohmu::til::Goto>(instr)->targetBlock()->blockID(),
+          wax::Label::CODE));
       break;
     case ohmu::til::COP_Branch: {
       auto branch = ohmu::cast<ohmu::til::Branch>(instr);
@@ -575,25 +592,24 @@ void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
         auto literal = ohmu::cast<ohmu::til::Literal>(branch->condition());
         event = emitImmediateLoad(event, literal);
         arg = event.index() - wax::Load::SLOT_COUNT;
-      }
-      else {
+      } else {
         auto instr = ohmu::cast<ohmu::til::Instruction>(branch->condition());
         arg = instr->stackID();
       }
-      event = event.as<wax::Branch>().init(arg,
-          sidecar.entryBlockID + branch->thenBlock()->blockID(),
-          sidecar.entryBlockID + branch->elseBlock()->blockID());
+      event = event.as<wax::Branch>().init(
+          arg, wax::Label(sidecar.entryBlockID + branch->thenBlock()->blockID(),
+                          wax::Label::CODE),
+          wax::Label(sidecar.entryBlockID + branch->elseBlock()->blockID(),
+                     wax::Label::CODE));
     } break;
     case ohmu::til::COP_Return: {
-      auto ret= ohmu::cast<ohmu::til::Return>(instr);
+      auto ret = ohmu::cast<ohmu::til::Return>(instr);
       uint arg;
       if (ret->returnValue()->opcode() == ohmu::til::COP_Literal) {
-        assert(false && "This shouldn't happen.");
         auto literal = ohmu::cast<ohmu::til::Literal>(ret->returnValue());
         event = emitImmediateLoad(event, literal);
         arg = event.index() - wax::Load::SLOT_COUNT;
-      }
-      else {
+      } else {
         auto instr = ohmu::cast<ohmu::til::Instruction>(ret->returnValue());
         arg = instr->stackID();
       }
@@ -611,10 +627,7 @@ void ModuleBuilder::buildEventsArray() {
   auto events = module.instrArray.root;
   for (size_t i = 0, e = module.blockArray.size(); i != e; ++i)
     buildBlockEvents(blocks, events, blocks[i], sidecar[i]);
-  //void buildBlockEvents(wax::Block* blocks, TypedPtr events, wax::Block& block,
-  //  const ModuleBuilder::BlockSidecar& sidecar,
-  //  const ohmu::til::BasicBlock& basicBlock) {
-  }
+}
 }  // namespace {
 
 //==============================================================================
@@ -627,358 +640,10 @@ void buildModuleFromTIL(wax::Module& module, ohmu::til::Global& global) {
   builder.buildFunctionArray();
   builder.buildBlockSidecarArray();
   builder.buildBlockArray();
+  module.normalize();
   builder.countLiterals();
   builder.buildLiteralsArray();
   builder.countEvents();
-  //builder.buildEventArray();
+  builder.buildEventsArray();
 }
 }  // namespace jagger
-
-#if 0
-namespace Jagger {
-//extern void printDebug(EventBuilder builder, size_t numEvents);
-//extern void normalize(const EventList& in);
-
-struct Block {
-  static const size_t NO_DOMINATOR = (size_t)-1;
-  ohmu::til::BasicBlock* basicBlock;
-  Block* list;
-  size_t dominator;
-  size_t head;
-  size_t firstEvent;
-  size_t boundEvent;
-  size_t phiSlot;
-};
-
-uchar typeDesc(const ohmu::til::ValueType& type) {
-  static const uchar jaggerType[ohmu::til::ValueType::BT_ValueRef + 1] = {
-      BINARY_DATA,    BINARY_DATA,    UNSIGNED_INTEGER, FLOAT,
-      SIGNED_INTEGER, SIGNED_INTEGER, SIGNED_INTEGER};
-  static const uchar logBits[ohmu::til::ValueType::ST_128 + 1] = {
-      LOG1 << 2,  LOG1 << 2,  LOG8 << 2,  LOG16 << 2,
-      LOG32 << 2, LOG64 << 2, LOG128 << 2};
-  uchar x = jaggerType[type.Base];
-  if (type.Signed && type.Base == ohmu::til::ValueType::BT_Int)
-    x = SIGNED_INTEGER;
-  x |= logBits[type.Size];
-  if (type.VectSize) {
-    assert(!(type.VectSize & type.VectSize - 1));
-    unsigned long size = type.VectSize;
-    unsigned long log;
-    _BitScanReverse(&log, size);
-    x |= log << 5;
-  }
-  return x;
-}
-
-size_t (*emitLiteralTable[32])(EventBuilder, size_t, ohmu::til::Literal&);
-size_t (*emitUnaryOpIntTable[32])(EventBuilder, size_t, ohmu::til::UnaryOp&);
-size_t (*emitBinaryOpIntTable[32])(EventBuilder, size_t, ohmu::til::BinaryOp&);
-size_t (*emitInstructionTable[32])(EventBuilder, size_t, ohmu::til::Instruction&);
-size_t (*emitTerminatorTable[32])(EventBuilder, size_t, Block&);
-
-size_t emitBlockHeader(EventBuilder builder, size_t i, Block& block) {
-  auto blocks = block.list;
-  if (block.dominator == Block::NO_DOMINATOR)
-    return builder.op(i, NOP, 0);
-  if (blocks + block.head != &block)
-    return builder.op(i, JOIN_HEADER, blocks[block.head].boundEvent);
-  if (blocks[block.dominator].boundEvent == block.firstEvent)
-    return builder.op(i, NOP, 0);
-  return builder.op(i, CASE_HEADER, blocks[block.dominator].boundEvent);
-}
-
-size_t emitPhi(EventBuilder builder, size_t i, ohmu::til::Phi& phi) {
-  return builder.op(i, PHI, 0);
-}
-
-// Expression emission
-size_t emitIntLiteral(EventBuilder builder, size_t i,
-                      ohmu::til::Literal& literal) {
-  i = builder.op(i, IMMEDIATE_BYTES, (uint)literal.as<int>().value());
-  return builder.op(i, ANCHOR, 0);
-}
-
-size_t emitInstruction(EventBuilder builder, size_t i,
-                       ohmu::til::Instruction& instr) {
-  return (emitInstructionTable[instr.opcode()])(builder, i, instr);
-}
-
-// TODO: handle vectors and sizes!
-size_t emitLiteral(EventBuilder builder, size_t i,
-                   ohmu::til::Instruction& instr) {
-  auto& literal = *ohmu::cast<ohmu::til::Literal>(&instr);
-  i = emitLiteralTable[literal.valueType().Base](builder, i, literal);
-  literal.setStackID(i - 1);
-  return i;
-}
-
-size_t emitUnaryOp(EventBuilder builder, size_t i,
-                   ohmu::til::Instruction& instr) {
-  auto& unaryOp = *ohmu::cast<ohmu::til::UnaryOp>(&instr);
-  auto arg = ohmu::cast<ohmu::til::Instruction>(unaryOp.expr());
-  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
-  return emitUnaryOpIntTable[unaryOp.unaryOpcode()](
-      builder, unaryOp.setStackID(i), unaryOp);
-}
-
-size_t emitBinaryOp(EventBuilder builder, size_t i,
-                    ohmu::til::Instruction& instr) {
-  auto& binaryOp = *ohmu::cast<ohmu::til::BinaryOp>(&instr);
-  auto arg0 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr0());
-  auto arg1 = ohmu::cast<ohmu::til::Instruction>(binaryOp.expr1());
-  if (arg0->isTrivial()) i = emitInstruction(builder, i, *arg0);
-  if (arg1->isTrivial()) i = emitInstruction(builder, i, *arg1);
-  //TODO: pull these out and initialize them dynamically
-  static const uchar opcodeTable[] = {
-    /* BOP_Add      =*/ ADD,
-    /* BOP_Sub      =*/ SUB,
-    /* BOP_Mul      =*/ MUL,
-    /* BOP_Div      =*/ DIV,
-    /* BOP_Rem      =*/ IMOD,
-    /* BOP_Shl      =*/ NOP,
-    /* BOP_Shr      =*/ NOP,
-    /* BOP_BitAnd   =*/ LOGIC,
-    /* BOP_BitXor   =*/ LOGIC,
-    /* BOP_BitOr    =*/ LOGIC,
-    /* BOP_Eq       =*/ COMPARE,
-    /* BOP_Neq      =*/ COMPARE,
-    /* BOP_Lt       =*/ COMPARE,
-    /* BOP_Leq      =*/ COMPARE,
-    /* BOP_Gt       =*/ COMPARE,
-    /* BOP_Geq      =*/ COMPARE,
-    /* BOP_LogicAnd =*/ LOGIC,
-    /* BOP_LogicOr  =*/ LOGIC,
-  };
-  static const uchar controlTable[] = {
-    /* BOP_Add      =*/ 0,
-    /* BOP_Sub      =*/ 0,
-    /* BOP_Mul      =*/ 0,
-    /* BOP_Div      =*/ 0,
-    /* BOP_Rem      =*/ 0,
-    /* BOP_Shl      =*/ 0,
-    /* BOP_Shr      =*/ 0,
-    /* BOP_BitAnd   =*/ LOGICAL_AND,
-    /* BOP_BitXor   =*/ LOGICAL_XOR,
-    /* BOP_BitOr    =*/ LOGICAL_OR,
-    /* BOP_Eq       =*/ CMP_EQ,
-    /* BOP_Neq      =*/ CMP_NEQ,
-    /* BOP_Lt       =*/ CMP_LT,
-    /* BOP_Leq      =*/ CMP_LE,
-    /* BOP_Gt       =*/ CMP_GT,
-    /* BOP_Geq      =*/ CMP_GE,
-    /* BOP_LogicAnd =*/ LOGICAL_AND,
-    /* BOP_LogicOr  =*/ LOGICAL_OR,
-  };
-  uchar code = opcodeTable[binaryOp.binaryOpcode()];
-  i = builder.op(i, LAST_USE, arg0->stackID());
-  i = builder.op(i, LAST_USE, arg1->stackID());
-  i = builder.op(
-      i, code, code == COMPARE
-                   ? (unsigned)CompareData(
-                         typeDesc(arg0->valueType()),
-                         (Compare)controlTable[binaryOp.binaryOpcode()])
-                   : code == LOGIC
-                         ? (unsigned)LogicData(
-                               typeDesc(binaryOp.valueType()),
-                               (Logic)controlTable[binaryOp.binaryOpcode()])
-                         : (unsigned)BasicData(typeDesc(binaryOp.valueType())));
-  binaryOp.setStackID(i);
-  return builder.op(i, ANCHOR, 0);
-}
-
-size_t emitTerminator(EventBuilder builder, size_t i, Block& block) {
-  return emitTerminatorTable[block.basicBlock->terminator()->opcode()](
-      builder, i, block);
-}
-
-size_t emitGoto(EventBuilder builder, size_t i, Block& block) {
-  auto& targetBasicBlock = *ohmu::cast<ohmu::til::Goto>(
-                                block.basicBlock->terminator())->targetBlock();
-  auto& targetBlock = block.list[targetBasicBlock.blockID()];
-  auto phiSlot = block.phiSlot;
-  auto phiOffset = targetBlock.firstEvent + 1;
-  for (auto arg : targetBasicBlock.arguments()) {
-    auto target =
-        builder.empty() ? 0 : ohmu::cast<ohmu::til::Instruction>(
-                                  arg->values()[phiSlot].get())->stackID();
-    i = builder.op(i, LAST_USE, target);
-    i = builder.op(i, JOIN_COPY, phiOffset++);
-  }
-  return builder.op(i, JUMP, targetBlock.firstEvent);
-}
-
-size_t emitBranch(EventBuilder builder, size_t i, Block& block) {
-  auto& branch = *ohmu::cast<ohmu::til::Branch>(block.basicBlock->terminator());
-  auto arg = ohmu::cast<ohmu::til::Instruction>(branch.condition());
-  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
-  auto& thenBlock = block.list[branch.thenBlock()->blockID()];
-  auto& elseBlock = block.list[branch.elseBlock()->blockID()];
-  i = builder.op(i, LAST_USE, arg->stackID());
-  i = builder.op(i, BRANCH, elseBlock.firstEvent);
-  i = builder.op(i, BRANCH_TARGET, thenBlock.firstEvent);
-  return i;
-}
-
-size_t emitReturn(EventBuilder builder, size_t i, Block& block) {
-  auto& ret = *ohmu::cast<ohmu::til::Return>(block.basicBlock->terminator());
-  auto arg = ohmu::cast<ohmu::til::Instruction>(ret.returnValue());
-  if (arg->isTrivial()) i = emitInstruction(builder, i, *arg);
-  return builder.op(i, RET, arg->stackID());
-}
-
-void initTables() {
-  // Always instantiate to avoid race conditions.
-  //emitBinaryOpIntTable[ohmu::til::BOP_Add] = emitBinaryOpIntAdd;
-  //emitBinaryOpIntTable[ohmu::til::BOP_Sub] = emitBinaryOpIntSub;
-  //emitBinaryOpIntTable[ohmu::til::BOP_Mul] = emitBinaryOpIntMul;
-  //emitBinaryOpIntTable[ohmu::til::BOP_Eq] = emitBinaryOpIntEq;
-  //emitBinaryOpIntTable[ohmu::til::BOP_Lt] = emitBinaryOpIntLt;
-  //emitBinaryOpIntTable[ohmu::til::BOP_Leq] = emitBinaryOpIntLeq;
-
-  emitInstructionTable[ohmu::til::COP_Literal] = emitLiteral;
-  emitInstructionTable[ohmu::til::COP_UnaryOp] = emitUnaryOp;
-  emitInstructionTable[ohmu::til::COP_BinaryOp] = emitBinaryOp;
-
-  emitLiteralTable[ohmu::til::ValueType::BT_Int] = emitIntLiteral;
-
-  emitTerminatorTable[ohmu::til::COP_Goto] = emitGoto;
-  emitTerminatorTable[ohmu::til::COP_Branch] = emitBranch;
-  emitTerminatorTable[ohmu::til::COP_Return] = emitReturn;
-}
-
-size_t initBlock(Block* blocks, ohmu::til::BasicBlock& basicBlock) {
-  auto blockID = basicBlock.blockID();
-  auto& block = blocks[basicBlock.blockID()];
-  block.list = blocks;
-  block.basicBlock = &basicBlock;
-  block.head = blockID;
-  block.dominator = Block::NO_DOMINATOR;
-
-  // Assign phi slots
-  if (basicBlock.arguments().size())
-    for (size_t i = 0, e = basicBlock.predecessors().size(); i != e; ++i)
-      blocks[basicBlock.predecessors()[i]->blockID()].phiSlot = i;
-
-  // Assign events offsets.
-  block.firstEvent = 0;
-  EventBuilder builder(nullptr);
-  size_t i = emitBlockHeader(builder, 0, block);
-  for (auto arg : basicBlock.arguments()) i = emitPhi(builder, i, *arg);
-  for (auto instr : basicBlock.instructions())
-    i = emitInstruction(builder, i, *instr);
-  i = emitTerminator(builder, i, block);
-  return block.boundEvent = i;
-}
-
-void initBlockDominators(Block& block) {
-  auto& basicBlock = *block.basicBlock;
-  if (ohmu::til::BasicBlock* parent = basicBlock.parent()) {
-    block.dominator = parent->blockID();
-    //if (basicBlock.postDominates(*parent) || block.dominator + 1 == block.head)
-    if (basicBlock.postDominates(*parent))
-      block.head = block.list[block.dominator].head;
-  }
-}
-
-size_t emitBlock(EventBuilder builder, size_t i, Block& block) {
-  auto& basicBlock = *block.basicBlock;
-  i = emitBlockHeader(builder, block.firstEvent, block);
-  for (auto arg : basicBlock.arguments())
-    i = emitPhi(builder, arg->setStackID(i), *arg);
-  for (auto instr : basicBlock.instructions())
-    i = emitInstruction(builder, i, *instr);
-  return emitTerminator(builder, i, block);
-}
-
-void emitEvents(ohmu::til::Global& global) {
-  initTables();
-
-  // Visit all of the CFGs
-  ohmu::til::VisitCFG visitCFG;
-  visitCFG.traverseAll(global.global());
-  auto& cfgs = visitCFG.cfgs();
-  auto numCFGs = cfgs.size();
-  if (!numCFGs) return;
-
-  // Generate offsets for each CFG in the block array.
-  auto cfgOffsets = new size_t[numCFGs + 1];
-  *cfgOffsets = 0;
-  for (size_t i = 0; i < numCFGs; i++)
-    cfgOffsets[i + 1] = cfgOffsets[i] + cfgs[i]->numBlocks();
-  auto numBlocks = cfgOffsets[numCFGs];
-
-  // Allocate and initialize the 
-  auto blocks = new Block[numBlocks];
-
-  // Initialize the blocks (both loops are parallel safe)
-  size_t numEvents = 0;
-  for (size_t i = 0; i < numCFGs; i++)
-    for (auto& basicBlock : cfgs[i]->blocks())
-      numEvents += initBlock(blocks + cfgOffsets[i], *basicBlock.get());
-
-  // Check to see if we're going to run out of address space.
-  if ((uint)numEvents != numEvents) {
-    printf("Too many events!\n");
-    delete[] cfgOffsets;
-    delete[] blocks;
-    return;
-  }
-
-  // Initialize the block dominators (outer loop is parallel safe)
-  for (size_t i = 0; i < numCFGs; i++)
-    for (auto& basicBlock : cfgs[i]->blocks())
-      initBlockDominators(blocks[cfgOffsets[i] + basicBlock->blockID()]);
-
-  // Perform block prefix sum of block events.
-  EventList eventList;
-  eventList.init(numEvents);
-  size_t i = eventList.first;
-  for (auto& block : AdaptRange(blocks, numBlocks)) {
-    block.firstEvent = i;
-    i = block.boundEvent += i;
-    printf("block %d : %d-%d\n", block.basicBlock->blockID(), block.firstEvent,
-           block.boundEvent);
-  }
-
-  // Emit the events.
-  i = eventList.first;
-  for (auto& block : AdaptRange(blocks, numBlocks))
-    i = emitBlock(eventList.builder, i, block);
-
-  normalize(eventList);
-  printDebug(eventList.builder, numEvents);
-  //delete[] eventBuffer;
-
-  printf("numCFGs = %d\n", numCFGs);
-  printf("numBlocks = %d\n", numBlocks);
-
-  // Clean up.
-  delete[] cfgOffsets;
-  delete[] blocks;
-}
-
-} // namespace Jagger
-
-#if 0
-int buffer[1000];
-for (size_t size = 1; size < 16; size++) {
-  size_t o = (size + 2) / 3;
-  auto p = (char*)buffer - o / 4 * 4;
-  for (size_t i = 0; i < 1000; i++)
-    buffer[i] = 0;
-  for (size_t i = 0; i < size; i++) {
-    p[i + o] = i + 1;
-    ((unsigned*)p)[i + o] = (i + 1) * 0x1010101;
-  }
-  auto bound = ((o * 3 + 3) / 4 + size) * 4;
-  //printf("%d : %d : %d\n", size, o, bound);
-  if (bound > 80)
-    bound = 80;
-  for (size_t i = 0; i < bound; i++)
-    printf("%x", 0xf & ((unsigned char*)buffer)[i]);
-  if (bound != 80)
-    printf("\n");
-}
-#endif
-#endif
