@@ -405,6 +405,7 @@ public:
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
     auto* S = Reducer->switchScope(ScopePtr);
+    bool B = Reducer->Builder.switchEmit(false);
 
     assert(Reducer->numAttrs() == 0 && "Must evaluate future in empty frame.");
     Reducer->traverse(PendingExpr, TRV_Tail);
@@ -413,6 +414,7 @@ public:
     SExpr* Res = Reducer->lastAttr().Exp;
     Reducer->popAttr();
 
+    Reducer->Builder.restoreEmit(B);
     Reducer->restoreScope(S);
     finish();
     return Res;

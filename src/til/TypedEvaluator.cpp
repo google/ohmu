@@ -17,7 +17,7 @@
 
 
 #include "TypedEvaluator.h"
-
+#include "Evaluator.h"
 
 namespace ohmu {
 namespace til  {
@@ -184,7 +184,6 @@ void TypedEvaluator::promoteVariable(Variable *V) {
 
   unsigned Vidx = V->variableDecl()->varIndex();
   ScopeCPS Ns(Vidx);
-
   auto* S = switchScope(&Ns);
   computeAttrType(Res, V->variableDecl()->definition());
   restoreScope(S);
@@ -195,25 +194,34 @@ void TypedEvaluator::promoteVariable(Variable *V) {
 void TypedEvaluator::reduceVariable(Variable *Orig) {
   unsigned Idx = Orig->variableDecl()->varIndex();
 
-  Variable* V;
   if (Idx < scope()->nullVars()) {
-    V = Orig;
+    // No substitution, so just promote the variable.
+    promoteVariable(Orig);
+    return;
   }
   else {
     // We substitute for variables, so look up the substitution.
     auto& At = scope()->var( Orig->variableDecl()->varIndex() );
     if (At.TypeExpr) {
-      // If we have a typed substitution, then return that.
+      // If we have a typed substitution, then return it.
       resultAttr() = At;
       return;
     }
-
-    // Otherwise if the substitution is for another variable, promote it.
-    V = dyn_cast_or_null<Variable>(At.Exp);
-    assert(V && "Invalid substitution.");
+    if (Variable* V = dyn_cast_or_null<Variable>(At.Exp)) {
+      // If the substitution maps to another variable, then promote that one.
+      promoteVariable(V);
+      return;
+    }
+    if (Instruction* I = dyn_cast<Instruction>(At.Exp)) {
+      // If the substitution is a simply-typed expression, then return it.
+      if (I->baseType().isSimple()) {
+        resultAttr() = At;
+        return;
+      }
+    }
   }
-
-  promoteVariable(V);
+  // Otherwise we have an untyped expression, which should never happen.
+  assert(false && "Invalid Substitution.");
 }
 
 
@@ -447,7 +455,18 @@ void TypedEvaluator::reduceBinaryOp(BinaryOp *Orig) {
   }
 
   if (!checkAndExtendTypes(I0, I1)) {
-    diag().error("Arithmetic operation on incompatible types: ") << Orig;
+    diag().error("Arithmetic operation on incompatible types: ")
+        << Orig << " [" << I0 << ", " << I1 << "]";
+  }
+
+  if (Literal* L0 = dyn_cast<Literal>(I0)) {
+    if (Literal* L1 = dyn_cast<Literal>(I1)) {
+      Res.Exp = evaluateBinaryOp(Orig->binaryOpcode(), L0->baseType(), arena(),
+                                 L0, L1);
+      Res.Rel = TypedCopyAttr::BT_Type;
+      Res.TypeExpr = nullptr;
+      return;
+    }
   }
 
   Instruction* Re = nullptr;
@@ -532,6 +551,13 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
       if (Variable *V = dyn_cast_or_null<Variable>(Entry.VarAttr.Exp)) {
         promoteVariable(V);
         return;
+      }
+      if (Instruction* I = dyn_cast<Instruction>(Entry.VarAttr.Exp)) {
+        // If the substitution is a simply-typed expression, then return it.
+        if (I->baseType().isSimple()) {
+          Res = Entry.VarAttr;
+          return;
+        }
       }
       assert(false && "Invalid substitution.");
       return;
@@ -669,7 +695,6 @@ void TypedEvaluator::traverseField(Field *Orig) {
 }
 
 
-
 void TypedEvaluator::traverseLet(Let *Orig) {
   if (!Builder.currentCFG()) {
     SuperTv::traverseLet(Orig);
@@ -697,12 +722,24 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
 
   // End current block with a branch
   traverseArg(Orig->condition());
-  Instruction* Nc = dyn_cast<Instruction>(lastAttr().Exp);
-  Branch* Br = Builder.newBranch(Nc);
 
-  //Instruction* nci = dyn_cast<Instruction>(nc);
-  //if (!nci || nci->baseType().Base != BaseType::BT_Bool)
-  //  diag.error("Branch condition is not a boolean: ") << nci;
+  // Eliminate static conditionals
+  Literal* Lc = dyn_cast<Literal>(lastAttr().Exp);
+  if (Lc->baseType().Base == BaseType::BT_Bool) {
+    bool Cb = Lc->as<bool>()->value();
+    if (Cb)
+      traverse(Orig->thenExpr(), TRV_Tail);
+    else
+      traverse(Orig->elseExpr(), TRV_Tail);
+    resultAttr() = lastAttr();
+    return;
+  }
+
+  Instruction* Nc = dyn_cast<Instruction>(lastAttr().Exp);
+  if (!Nc || Nc->baseType().Base != BaseType::BT_Bool)
+    diag().error("Branch condition is not a boolean: ") << Nc;
+
+  Branch* Br = Builder.newBranch(Nc);
 
   // If the current continuation is null, then make a new one.
   BasicBlock* CurrCont = scope()->currentContinuation();
@@ -728,6 +765,7 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
 
   // Otherwise, if we created a new continuation, then start processing it.
   Builder.beginBlock(Cont);
+  // TODO: return result of if
 }
 
 

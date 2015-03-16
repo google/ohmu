@@ -52,7 +52,7 @@ sfunction ::=
 funBody ::=
     "(" function
   | "@" "(" sfunction
-  | "=" value
+  | "->" expr
   | ":" t=expr "->" ( e=expr   { (code t e)         }
                     | "_"      { (code t (litNull)) }
                     )
@@ -60,10 +60,10 @@ funBody ::=
 
 slot ::=
     m= %TK_Identifier
-      ( "(" f=function ";"                        { (slot m f) }
+      ( "(" f=function      ";"                   { (slot m f) }
       | "@" "(" f=sfunction ";"                   { (slot m f) }
-      | "=" v=value    ";"                        { (slot m v) }
-      | f=field        ";"                        { (slot m f) }
+      | f=field             ";"                   { (slot m f) }
+      | "=" e=expr          ";"                   { (slot m e) }
       )
   ;
 

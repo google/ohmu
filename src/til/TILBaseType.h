@@ -57,6 +57,11 @@ struct BaseType {
   }
   bool operator!=(const BaseType& Vt) const { return !(*this == Vt); }
 
+  /// Return true if this is a simple (i.e. non-pointer) type
+  bool isSimple() {
+    return (Base != BT_Pointer);
+  }
+
   /// Return true if this is a numeric (int or float) type
   bool isNumeric() {
     return (Base == BT_Int || Base == BT_Float);
