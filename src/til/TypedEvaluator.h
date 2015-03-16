@@ -192,6 +192,17 @@ private:
 public:
   DiagnosticEmitter& diag() { return Builder.diag(); }
 
+  void enterCFG(SCFG *Cfg) {
+    Super::enterCFG(Cfg);
+    scope()->setCurrentContinuation(Builder.currentCFG()->exit());
+    Builder.beginBlock(Builder.currentCFG()->entry());
+  }
+
+  void exitCFG(SCFG *Cfg) {
+    processPendingBlocks();
+    Super::exitCFG(Cfg);
+  }
+
   /** reduceX(...) methods */
 
   void reduceScalarType(ScalarType *Orig);
@@ -263,6 +274,10 @@ protected:
   std::queue<PendingBlock*>                  PendingBlockQueue;
   DenseMap<Code*, PendingBlock*>             CodeMap;
 };
+
+
+typedef LazyCopyFuture<TypedEvaluator, ScopeCPS> TypedEvalFuture;
+
 
 
 template<class T>

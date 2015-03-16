@@ -24,28 +24,26 @@ namespace til  {
 
 
 void CFGBuilder::enterScope(VarDecl *Nvd) {
-  assert(Nvd->varIndex() == 0 || Nvd->varIndex() == DeBruin);
-  Nvd->setVarIndex(DeBruin);
+  assert(Nvd->varIndex() == 0 || Nvd->varIndex() == CurrentState.DeBruin);
+  Nvd->setVarIndex(CurrentState.DeBruin);
 
-  if (currentCFG() && NestedDeBruin == 0) {
+  if (CurrentState.EmitInstrs) {
     // We are entering a function nested within a CFG.
-    // Stop emitting instructions and mark the spot, b/c nested functions
-    // will be converted to blocks.
-    NestedDeBruin = DeBruin;
-    OldEmit       = EmitInstrs;
-    EmitInstrs    = false;
+    // Stop emitting instructions to the current CFG, and mark the spot.
+    // Nested functions will be converted to blocks.
+    OldCfgState = CurrentState;
+    CurrentState.EmitInstrs = false;
   }
-
-  ++DeBruin;
+  ++CurrentState.DeBruin;
 }
 
 
 void CFGBuilder::exitScope() {
-  --DeBruin;
-
-  if (DeBruin == NestedDeBruin) {
-    NestedDeBruin = 0;
-    EmitInstrs    = OldEmit;
+  --CurrentState.DeBruin;
+  if (CurrentState.DeBruin == OldCfgState.DeBruin) {
+    // We are exiting the nested function; return to CFG.
+    CurrentState = OldCfgState;
+    OldCfgState  = BuilderState(0, false);
   }
 }
 
@@ -54,6 +52,7 @@ void CFGBuilder::exitScope() {
 SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
   assert(!CurrentCFG && !CurrentBB && "Already inside a CFG");
 
+  CurrentState.EmitInstrs = true;
   if (!Cfg) {
     CurrentCFG = new (Arena) SCFG(Arena, 0);
     // CurrentCFG->blocks().reserve(Arena, NumBlocks);
@@ -69,6 +68,7 @@ void CFGBuilder::endCFG() {
   assert(CurrentCFG && "Not inside a CFG.");
   // assert(!CurrentBB && "Never finished the last block.");
 
+  CurrentState.EmitInstrs = false;
   CurrentCFG = nullptr;
 }
 

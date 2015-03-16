@@ -378,7 +378,10 @@ public:
   // Takes ownership of Sc
   AttributeGrammar(ScopeT* Sc)
       : ScopeHandlerBase<ScopeT>(Sc), AttrFrame(0)
-  { }
+  {
+    // TODO: FIXME!  This is to prevent memory corruption.
+    Attrs.reserve(100000);
+  }
   ~AttributeGrammar() override { }
 
 protected:

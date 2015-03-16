@@ -137,8 +137,13 @@ public:
   }
 
   void enterCFG(SCFG *Cfg) {
-    Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
-    this->scope()->enterCFG(Cfg, Builder.currentCFG());
+    if (Cfg) {
+      Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
+      this->scope()->enterCFG(Cfg, Builder.currentCFG());
+    }
+    else {
+      Builder.beginCFG(nullptr);
+    }
   }
 
   void exitCFG(SCFG *Cfg) {
@@ -398,23 +403,32 @@ public:
 template<class Visitor, class ScopeT>
 class LazyCopyFuture : public Future {
 public:
-  LazyCopyFuture(SExpr* E, Visitor* R, ScopeT* S)
-    : PendingExpr(E), ScopePtr(S), Reducer(R), Emit(false)
+  typedef CFGBuilder::BuilderState BuilderState;
+
+  LazyCopyFuture(Visitor* R, SExpr* E, ScopeT* S, const BuilderState& Bs,
+                 bool NewCfg = false)
+    : Reducer(R), PendingExpr(E), ScopePtr(S), BState(Bs), CreateCfg(NewCfg)
   { }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
-    auto* S = Reducer->switchScope(ScopePtr);
-    bool B = Reducer->Builder.switchEmit(Emit);
+    auto* S  = Reducer->switchScope(ScopePtr);
+    auto  Bs = Reducer->Builder.switchState(BState);
 
-    assert(Reducer->numAttrs() == 0 && "Must evaluate future in empty frame.");
+    if (CreateCfg) {
+      Reducer->enterCFG(nullptr);
+    }
+
     Reducer->traverse(PendingExpr, TRV_Tail);
-
-    assert(Reducer->numAttrs() == 1 && "Traversal error.");
     SExpr* Res = Reducer->lastAttr().Exp;
     Reducer->popAttr();
 
-    Reducer->Builder.restoreEmit(B);
+    if (CreateCfg) {
+      Res = Reducer->Builder.currentCFG();
+      Reducer->exitCFG(nullptr);
+    }
+
+    Reducer->Builder.restoreState(Bs);
     Reducer->restoreScope(S);
     finish();
     return Res;
@@ -428,10 +442,11 @@ protected:
     PendingExpr = nullptr;
   }
 
-  SExpr*   PendingExpr;  // The expression to be rewritten
-  ScopeT*  ScopePtr;     // The scope in which it occurs
-  Visitor* Reducer;      // The reducer object.
-  bool     Emit;         // Should we emit instructions to the current CFG?
+  Visitor*     Reducer;      // The reducer object.
+  SExpr*       PendingExpr;  // The expression to be rewritten
+  ScopeT*      ScopePtr;     // The scope in which it occurs
+  BuilderState BState;       // The builder state.
+  bool         CreateCfg;    // Evaluate in a new CFG?
 };
 
 
@@ -449,7 +464,8 @@ public:
   /// Default implementation works for LazyFuture; override for other types.
   FutureType* makeFuture(SExpr *E) {
     auto *F = new (self()->arena())
-      FutureType(E, self(), self()->scope()->clone());
+      FutureType(self(), E, self()->scope()->clone(),
+                 self()->Builder.currentState());
     FutureQueue.push(F);
     return F;
   }
@@ -473,6 +489,7 @@ public:
     SExpr *Result = self()->attr(0).Exp;
     self()->popAttr();
 
+    // Force any SExprs that were rewritten lazily.
     while (!FutureQueue.empty()) {
       auto *F = FutureQueue.front();
       FutureQueue.pop();

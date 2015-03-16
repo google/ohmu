@@ -23,33 +23,6 @@ namespace ohmu {
 namespace til  {
 
 
-class CFGFuture : public LazyCopyFuture<TypedEvaluator, ScopeCPS> {
-public:
-  typedef LazyCopyFuture<TypedEvaluator, ScopeCPS> Super;
-
-  CFGFuture(SExpr* E, TypedEvaluator* R, ScopeCPS* S)
-    : LazyCopyFuture(E, R, S)
-  { }
-
-  /// Create new CFG, and write results to the CFG.
-  virtual SExpr* evaluate() override {
-    CFGBuilder &B = Reducer->Builder;
-    auto *Cfg = B.beginCFG(nullptr);
-    B.beginBlock(Cfg->entry());
-    ScopePtr->setCurrentContinuation(Cfg->exit());
-    Emit = true;
-
-    Super::evaluate();
-    // TODO: should this be moved to Reducer->endCFG or some such?
-    Reducer->processPendingBlocks();
-
-    B.endCFG();
-    Cfg->renumber();
-    return Cfg;
-  }
-};
-
-
 static TypedCopyAttr::Relation
 getRelationFromVarDecl(VarDecl::VariableKind K) {
   switch (K) {
@@ -156,7 +129,7 @@ void TypedEvaluator::evaluateTypeExpr(TypedCopyAttr &At) {
 // Set the TypeExpr for At by evaluating E
 void TypedEvaluator::computeAttrType(TypedCopyAttr &At, SExpr *E) {
   auto M = switchEvalMode(TEval_WeakHead);
-  bool B = Builder.switchEmit(false);
+  auto B = Builder.disableEmit();
 
   traverse(E, TRV_Decl);     // Type of E is stored in lastAttr()
   At.moveType(lastAttr());   // Copy type to original attribute
@@ -341,9 +314,11 @@ void TypedEvaluator::reduceCall(Call *Orig) {
     return;
 
   // Set the result type.
-  Res.TypeExpr = C->returnType();   // TODO -- evaluate definition.
+  Res.TypeExpr = C->returnType();
   Res.Rel      = TypedCopyAttr::BT_Type;
   Res.stealSubstitution(Ca);
+
+  // TODO: FIXME!!  Res is not a stable reference; it may be invalidated.
   evaluateTypeExpr(Res);
 
   // Set the result residual.
@@ -370,7 +345,7 @@ void TypedEvaluator::reduceLoad(Load *Orig) {
     return;
   }
 
-  Res.TypeExpr = F->range();  // TODO -- evaluate definition.
+  Res.TypeExpr = F->range();
   Res.Rel      = TypedCopyAttr::BT_Type;
   Res.stealSubstitution(Fa);
   evaluateTypeExpr(Res);
@@ -673,8 +648,9 @@ void TypedEvaluator::traverseCode(Code *Orig) {
   else {
     // We don't forward to Super here, because we have to use CFGFuture.
     // Make a new CFGFuture for the code body, and push it on the stack.
-    auto *F = new (arena())
-        CFGFuture(Orig->body(), this, scope()->clone());
+    auto *F = new (arena()) TypedEvalFuture(this, Orig->body(),
+                                            scope()->clone(),
+                                            Builder.currentState(), true);
     FutureQueue.push(F);
     auto *A = pushAttr();
     A->Exp = F;
@@ -699,7 +675,7 @@ void TypedEvaluator::traverseField(Field *Orig) {
 
 
 void TypedEvaluator::traverseLet(Let *Orig) {
-  if (!Builder.currentCFG()) {
+  if (!Builder.emitInstrs()) {
     SuperTv::traverseLet(Orig);
     return;
   }
@@ -737,9 +713,9 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
   }
 
   // Just do a normal traversal if we're not currently rewriting in a CFG.
-  if (!Builder.currentBB() || !Builder.emitInstrs()) {
-    self()->traverse(Orig->thenExpr(), TRV_Tail);
-    self()->traverse(Orig->elseExpr(), TRV_Tail);
+  if (!Builder.emitInstrs()) {
+    self()->traverse(Orig->thenExpr(), TRV_Arg);
+    self()->traverse(Orig->elseExpr(), TRV_Arg);
     self()->reduceIfThenElse(Orig);
     return;
   }
@@ -771,7 +747,8 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
 
   // Otherwise, if we created a new continuation, then start processing it.
   Builder.beginBlock(Cont);
-  // TODO: return result of if
+  auto &Res = resultAttr();
+  Res.Exp = Builder.currentBB()->arguments()[0];
 }
 
 

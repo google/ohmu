@@ -37,6 +37,16 @@ namespace til  {
 /// being created, such as the current CFG and the current block.
 class CFGBuilder {
 public:
+  // Lightweight struct that summarizes info about the current context.
+  // Used to quickly switch output contexts during lazy rewriting.
+  struct BuilderState {
+    BuilderState() : DeBruin(1), EmitInstrs(false) { }
+    BuilderState(unsigned Db, bool Em) : DeBruin(Db), EmitInstrs(Em) { }
+
+    unsigned DeBruin;     // DeBruin index for current location.
+    unsigned EmitInstrs;  // Do we have a current CFG?
+  };
+
   void setArena(MemRegionRef A) { Arena = A; }
 
   MemRegionRef&      arena() { return Arena; }
@@ -44,27 +54,47 @@ public:
 
   SCFG*        currentCFG() { return CurrentCFG; }
   BasicBlock*  currentBB()  { return CurrentBB;  }
-  bool         emitInstrs() { return EmitInstrs; }
 
+  /// Return true if we are in a CFG, and emitting instructions.
+  bool emitInstrs() { return CurrentState.EmitInstrs; }
 
-  /// Set the emitInstrs flag, and return old flag.
-  /// If b is true, then the builder will add instructions to the current CFG.
-  bool switchEmit(bool b) {
-    bool ob = EmitInstrs;  EmitInstrs = b;  return ob;
+  /// Return the current deBruin index().  (Index of last variable in scope).
+  unsigned deBruinIndex() { return CurrentState.DeBruin; }
+
+  /// Return the deBruin index of the first argument to the enclosing
+  /// nested function.  (For functions which are nested inside a CFG.)
+  unsigned deBruinIndexOfEnclosingNestedFunction() {
+    return OldCfgState.DeBruin;
   }
 
-  /// Restore the emitInstrs flag.
-  void restoreEmit(bool b) { EmitInstrs = b; }
+  /// Return the current builder state.
+  const BuilderState currentState() { return CurrentState; }
+
+  /// Switch to a new builder state.
+  BuilderState switchState(const BuilderState &S) {
+    assert(S.EmitInstrs == false && "Cannot switch into an emitting state.");
+    auto Temp = CurrentState;  CurrentState = S;  return Temp;
+  }
+
+  /// Restore the previous builder state
+  void restoreState(const BuilderState &S) {
+    CurrentState = S;
+  }
+
+  /// Switch builder state to stop emitting instructions to the current CFG.
+  bool disableEmit() {
+    bool Temp = CurrentState.EmitInstrs;
+    CurrentState.EmitInstrs = false;
+    return Temp;
+  }
+
+  /// Restore the previous emit flag.
+  void restoreEmit(bool B) { CurrentState.EmitInstrs = B; }
+
 
   void enterScope(VarDecl *Nvd);
   void exitScope();
 
-  /// Return the current deBruin index().  (Index of last variable in scope).
-  unsigned deBruinIndex() { return DeBruin; }
-
-  /// Return the deBruin index of the first argument to the enclosing
-  /// nested function.
-  unsigned deBruinIndexOfEnclosingNestedFunction() { return NestedDeBruin; }
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -199,13 +229,11 @@ public:
 
   CFGBuilder()
     : OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), OldEmit(true),
-      DeBruin(1), NestedDeBruin(0)
+      CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
   { }
   CFGBuilder(MemRegionRef A)
     : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), EmitInstrs(true), OldEmit(true),
-      DeBruin(1), NestedDeBruin(0)
+      CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
   { }
   virtual ~CFGBuilder() { }
 
@@ -218,10 +246,8 @@ protected:
   BasicBlock*                CurrentBB;
   std::vector<Phi*>          CurrentArgs;    //< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;  //< instructions in CurrentBB.
-  bool                       EmitInstrs;     //< should we emit instrs?
-  bool                       OldEmit;        //< old value of emit
-  unsigned                   DeBruin;        //< current debruin index
-  unsigned                   NestedDeBruin;  //< index for enclosing nested fun
+  BuilderState               CurrentState;   //< state at current location.
+  BuilderState               OldCfgState;    //< state at old CFG location.
 
   DiagnosticEmitter Diag;
 };
@@ -229,7 +255,7 @@ protected:
 
 template<class T>
 inline T* CFGBuilder::addInstr(T* I) {
-  if (!I || !EmitInstrs)
+  if (!I || !CurrentState.EmitInstrs)
     return I;
 
   if (I->block() == nullptr)
@@ -240,11 +266,11 @@ inline T* CFGBuilder::addInstr(T* I) {
 }
 
 inline Phi* CFGBuilder::addArg(Phi* A) {
-  if (!A || !EmitInstrs)
+  if (!A || !CurrentState.EmitInstrs)
     return A;
 
   if (A->block() == nullptr)
-    A->setBlock(CurrentBB);      // Mark A as having been added
+    A->setBlock(CurrentBB);        // Mark A as having been added
   assert(A->block() == CurrentBB && "Invalid argument.");
   CurrentArgs.push_back(A);
   return A;

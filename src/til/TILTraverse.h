@@ -463,7 +463,7 @@ void Traversal<S>::traverseLet(Let *E) {
   self()->traverse(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   self()->enterScope(E->variableDecl());
-  self()->traverse(E->body(), TRV_Tail);
+  self()->traverse(E->body(), TRV_Arg);
   self()->exitScope(E->variableDecl());
   self()->reduceLet(E);
 }
@@ -471,8 +471,8 @@ void Traversal<S>::traverseLet(Let *E) {
 template <class S>
 void Traversal<S>::traverseIfThenElse(IfThenElse *E) {
   self()->traverseArg(E->condition());
-  self()->traverse(E->thenExpr(), TRV_Tail);
-  self()->traverse(E->elseExpr(), TRV_Tail);
+  self()->traverse(E->thenExpr(), TRV_Arg);
+  self()->traverse(E->elseExpr(), TRV_Arg);
   self()->reduceIfThenElse(E);
 }
 
