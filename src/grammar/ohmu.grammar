@@ -25,8 +25,8 @@ value ::=
     literal
   | "\\"  "(" function
   | "\\@" "(" sfunction
-  | "struct" "{" ss=slotList "}"      { (record ss)     }
-  | "[" es=exprList "]"               { (array es)      }
+  | "struct" "{" ss=slotList "}"      { (record ss)  }
+  | "[" es=exprList "]"               { (array es)   }
   ;
 
 field ::=
@@ -168,7 +168,7 @@ expr61 ::=
   |*[a] "||" b=expr60 { (binary "||" a b) }
   ;
 
-expr70 ::= 
+expr70 ::=
   expr61
   | "new" e1=expr61 { (alloc e1) }
   ;
@@ -182,7 +182,7 @@ expr90 ::=
 expr ::=
   expr90
   | "if" "(" c=expr90 ")" "then" e1=expr90 "else" e2=expr90  { (if c e1 e2) }
-  ; 
+  ;
 
 statement ::=
     e1=expr ";" (e2=statement                                { (let "" e1 e2) }
@@ -193,7 +193,7 @@ statement ::=
   ;
 
 
-letbody ::= 
+letbody ::=
     "=" expr
   | "(" function
   | "@" "(" sfunction

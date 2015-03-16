@@ -227,6 +227,8 @@ public:
   void traverseLet       (Let *Orig);
   void traverseIfThenElse(IfThenElse *Orig);
 
+  void traverseFuture(Future *Orig);
+
 private:
   friend class CFGFuture;
 

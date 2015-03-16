@@ -95,8 +95,14 @@ public:
 
   bool isNull(unsigned Idx) { return Idx < NullVars; }
 
-  void push_back(const Attr&  At) { VarAttrs.push_back(At); }
-  void push_back(Attr&& At)       { VarAttrs.push_back(std::move(At)); }
+  void push_back(const Attr& At) {
+    assert(NullVars > 0);   // Index 0 is reserved.
+    VarAttrs.push_back(At);
+  }
+  void push_back(Attr&& At) {
+    assert(NullVars > 0);   // Index 0 is reserved.
+    VarAttrs.push_back(std::move(At));
+  }
 
   void clear() {
     NullVars = 0;

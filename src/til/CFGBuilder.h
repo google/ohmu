@@ -44,13 +44,13 @@ public:
 
   SCFG*        currentCFG() { return CurrentCFG; }
   BasicBlock*  currentBB()  { return CurrentBB;  }
+  bool         emitInstrs() { return EmitInstrs; }
+
 
   /// Set the emitInstrs flag, and return old flag.
   /// If b is true, then the builder will add instructions to the current CFG.
   bool switchEmit(bool b) {
-    bool ob = EmitInstrs;
-    EmitInstrs = b;
-    return ob;
+    bool ob = EmitInstrs;  EmitInstrs = b;  return ob;
   }
 
   /// Restore the emitInstrs flag.

@@ -190,7 +190,7 @@ void Traversal<S>::traverseFunction(Function *E) {
   self()->traverse(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the function.
   self()->enterScope(E->variableDecl());
-  self()->traverse(E->body(), TRV_Decl);
+  self()->traverse(E->body(), TRV_Lazy);
   self()->exitScope(E->variableDecl());
   self()->reduceFunction(E);
 }
@@ -214,7 +214,7 @@ void Traversal<S>::traverseField(Field *E) {
 
 template <class S>
 void Traversal<S>::traverseSlot(Slot *E) {
-  self()->traverse(E->definition(), TRV_Decl);
+  self()->traverse(E->definition(), TRV_Lazy);
   self()->reduceSlot(E);
 }
 
@@ -435,9 +435,8 @@ void Traversal<S>::traverseSCFG(SCFG *E) {
 
 template <class S>
 void Traversal<S>::traverseFuture(Future *E) {
-  auto* Res = E->maybeGetResult();
-  assert(Res && "Cannot traverse Future that has not been forced.");
-  self()->traverseArg(Res);
+  SExpr* Res = E->force();
+  self()->traverse(Res, TRV_Decl);
 }
 
 template <class S>

@@ -37,6 +37,7 @@ public:
     auto *Cfg = B.beginCFG(nullptr);
     B.beginBlock(Cfg->entry());
     ScopePtr->setCurrentContinuation(Cfg->exit());
+    Emit = true;
 
     Super::evaluate();
     // TODO: should this be moved to Reducer->endCFG or some such?
@@ -606,9 +607,7 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
       unsigned Vidx =  Sv->variableDecl()->varIndex();
       assert(Vidx > 0 && "Variable index is not set.");
 
-      // We start at index 1, because 0 means undefined.
-      for (unsigned i = 1; i < Vidx; ++i)
-        Res.pushSubst( TypedCopyAttr(nullptr) );
+      Res.Subst.init(Vidx);
       Res.pushSubst( TypedCopyAttr(Sv) );
       return;
     }
@@ -714,18 +713,16 @@ void TypedEvaluator::traverseLet(Let *Orig) {
 
 
 void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
-  // Just do a normal traversal if we're not currently rewriting in a CFG.
-  if (!Builder.currentBB()) {
-    SuperTv::traverseIfThenElse(Orig);
-    return;
-  }
-
-  // End current block with a branch
   traverseArg(Orig->condition());
+
+  // Type-check the conditional...
+  Instruction* Nc = dyn_cast<Instruction>(lastAttr().Exp);
+  if (!Nc || Nc->baseType().Base != BaseType::BT_Bool)
+    diag().error("Branch condition is not a boolean: ") << Nc;
 
   // Eliminate static conditionals
   Literal* Lc = dyn_cast<Literal>(lastAttr().Exp);
-  if (Lc->baseType().Base == BaseType::BT_Bool) {
+  if (Lc && Lc->baseType().Base == BaseType::BT_Bool) {
     bool Cb = Lc->as<bool>()->value();
     if (Cb)
       traverse(Orig->thenExpr(), TRV_Tail);
@@ -735,10 +732,15 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
     return;
   }
 
-  Instruction* Nc = dyn_cast<Instruction>(lastAttr().Exp);
-  if (!Nc || Nc->baseType().Base != BaseType::BT_Bool)
-    diag().error("Branch condition is not a boolean: ") << Nc;
+  // Just do a normal traversal if we're not currently rewriting in a CFG.
+  if (!Builder.currentBB() || !Builder.emitInstrs()) {
+    self()->traverse(Orig->thenExpr(), TRV_Tail);
+    self()->traverse(Orig->elseExpr(), TRV_Tail);
+    self()->reduceIfThenElse(Orig);
+    return;
+  }
 
+  // Otherwise convert conditionals to CFG branches
   Branch* Br = Builder.newBranch(Nc);
 
   // If the current continuation is null, then make a new one.
@@ -766,6 +768,13 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
   // Otherwise, if we created a new continuation, then start processing it.
   Builder.beginBlock(Cont);
   // TODO: return result of if
+}
+
+
+void TypedEvaluator::traverseFuture(Future* Orig) {
+  SExpr *Res = Orig->force();
+  traverse(Res, TRV_Decl);
+  resultAttr() = std::move( lastAttr() );
 }
 
 

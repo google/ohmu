@@ -1,0 +1,29 @@
+
+foo(i: Int): Int -> 0;
+
+bar(i: Int) ->
+  if (i == 0) then
+    \(): Int -> 0
+  else
+    \(x: Int) -> bar(i-1);
+
+
+testGood(): Int -> {
+  let a = foo(0)();
+  let b = bar(0)();
+  let c = bar(1, 0)();
+  let d = bar(2, 0, 0)();
+  d;
+};
+
+/*
+testBad0(): Int -> {
+  let a = bar(0, 0)();
+  a;
+};
+
+testBad1(): Int -> {
+  let a = bar(1)();
+  a;
+};
+*/

@@ -399,13 +399,13 @@ template<class Visitor, class ScopeT>
 class LazyCopyFuture : public Future {
 public:
   LazyCopyFuture(SExpr* E, Visitor* R, ScopeT* S)
-    : PendingExpr(E), ScopePtr(S), Reducer(R)
+    : PendingExpr(E), ScopePtr(S), Reducer(R), Emit(false)
   { }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {
     auto* S = Reducer->switchScope(ScopePtr);
-    bool B = Reducer->Builder.switchEmit(false);
+    bool B = Reducer->Builder.switchEmit(Emit);
 
     assert(Reducer->numAttrs() == 0 && "Must evaluate future in empty frame.");
     Reducer->traverse(PendingExpr, TRV_Tail);
@@ -431,6 +431,7 @@ protected:
   SExpr*   PendingExpr;  // The expression to be rewritten
   ScopeT*  ScopePtr;     // The scope in which it occurs
   Visitor* Reducer;      // The reducer object.
+  bool     Emit;         // Should we emit instructions to the current CFG?
 };
 
 
@@ -456,7 +457,7 @@ public:
   /// Traverse E, returning a future if K == TRV_Lazy.
   template <class T>
   void traverse(T *E, TraversalKind K) {
-    if (K == TRV_Lazy || K == TRV_Type) {
+    if ((K == TRV_Lazy || K == TRV_Type) && !E->isValue()) {
       auto *A = self()->pushAttr();
       A->Exp = self()->makeFuture(E);
       return;
