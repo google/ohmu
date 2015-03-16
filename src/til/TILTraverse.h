@@ -198,7 +198,10 @@ void Traversal<S>::traverseFunction(Function *E) {
 template <class S>
 void Traversal<S>::traverseCode(Code *E) {
   self()->traverse(E->returnType(), TRV_Type);
-  self()->traverse(E->body(),       TRV_Lazy);
+  if (E->body())
+    self()->traverse(E->body(), TRV_Lazy);
+  else
+    self()->traverseNull();
   self()->reduceCode(E);
 }
 

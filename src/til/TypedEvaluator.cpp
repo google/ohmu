@@ -667,14 +667,18 @@ void TypedEvaluator::traverseCode(Code *Orig) {
 
   // Push the return type onto the stack.
   traverse(Orig->returnType(), TRV_Type);
-
-  // We don't forward to Super here, because we have to use CFGFuture.
-  // Make a new CFGFuture for the code body, and push it on the stack.
-  auto *F = new (arena())
-      CFGFuture(Orig->body(), this, scope()->clone());
-  FutureQueue.push(F);
-  auto *A = pushAttr();
-  A->Exp = F;
+  if (!Orig->body()) {
+    traverseNull();
+  }
+  else {
+    // We don't forward to Super here, because we have to use CFGFuture.
+    // Make a new CFGFuture for the code body, and push it on the stack.
+    auto *F = new (arena())
+        CFGFuture(Orig->body(), this, scope()->clone());
+    FutureQueue.push(F);
+    auto *A = pushAttr();
+    A->Exp = F;
+  }
   reduceCode(Orig);
 }
 
