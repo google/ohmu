@@ -1,44 +1,37 @@
-//===- Util.h --------------------------------------------------*- C++ --*-===//
-// Copyright 2014  Google
+//===- LLVMDependencies.h --------------------------------------*- C++ --*-===//
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//                     The LLVM Compiler Infrastructure
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// This file is distributed under the University of Illinois Open Source
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines various utility classes that are used by the rest of the
-// language infrastructure.
+// This file encapsulates all of the dependencies between ohmu and clang/llvm.
+// The standalone version of ohmu provides its own verson of these definitions.
+//
+// The standalone version can be found at:
+//
+//    https://github.com/google/ohmu
 //
 //===----------------------------------------------------------------------===//
 
 
-#ifndef OHMU_UTIL_H
-#define OHMU_UTIL_H
+#ifndef OHMU_BASE_LLVM_DEPENDENCIES_H
+#define OHMU_BASE_LLVM_DEPENDENCIES_H
 
 #include <cassert>
+#include <cstddef>
 #include <cstring>
-#include <cstdlib>
 #include <iostream>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
-
-// A few handy definitions borrowed from LLVM
-#ifndef LLVM_DELETED_FUNCTION
-#define LLVM_DELETED_FUNCTION = delete
-#endif
+#define OHMU_STANDALONE
 
 
 namespace ohmu {
-
 
 template <class T, class U>
 inline bool isa(const U* p) { return T::classof(p); }
@@ -98,7 +91,6 @@ public:
     : str_(s.c_str()), len_(s.length())
   { }
 
-  size_t      length() const { return len_; }
   const char* c_str()  const { return str_; }
 
   size_t      size()   const { return len_; }
@@ -175,11 +167,43 @@ private:
 
 
 
+template<class K, class V>
+class DenseMap {
+public:
+  typedef typename std::unordered_map<K,V>::iterator iterator;
+  typedef typename std::unordered_map<K,V>::const_iterator const_iterator;
+
+  iterator       begin()       { return map_.begin(); }
+  const_iterator begin() const { return map_.begin(); }
+  iterator       end()         { return map_.end();   }
+  const_iterator end() const   { return map_.end();   }
+
+  iterator find(const K& k) {
+    return map_.find(k);
+  }
+  const_iterator find(const K& k) const {
+    return map_.find(k);
+  }
+
+  void insert(const std::pair<K, V> &KV) {
+    map_.insert(KV);
+  }
+  void insert(std::pair<K, V> &&KV) {
+    map_.insert(KV);
+  }
+
+  void shrink_and_clear() { map_.clear(); }
+
+private:
+  std::unordered_map<K, V> map_;
+};
+
+
 
 // Copies s to mem, and returns a StringRef of mem.
 // Mem must have space for at least s.length()+1 bytes of data.
 inline StringRef copyStringRef(char* mem, StringRef s) {
-  unsigned len = s.length();
+  unsigned len = s.size();
   strncpy(mem, s.c_str(), len);
   mem[len] = 0;
   return StringRef(mem, len);
@@ -187,47 +211,14 @@ inline StringRef copyStringRef(char* mem, StringRef s) {
 
 
 inline std::ostream& operator<<(std::ostream& ss, const StringRef str) {
-  ss << str.c_str();
-  return ss;
+  return ss.write(str.data(), str.size());
 }
 
-
-class PointerHash {
-public:
-  unsigned operator()(void* ptr) const {
-    // Based on murmer hash
-    const unsigned int m = 0x5bd1e995;
-    unsigned i = *reinterpret_cast<unsigned*>(&ptr);
-    return (((i*m) ^ (i >> 2))*m ^ (i >> 24))*m;
-  }
-};
+} // end namespace ohmu
 
 
-template <class K, class T>
-class HashMap {
-private:
-  typedef std::unordered_map<K, T> MapType;
-
-public:
-  size_t size() const { return hashmap_.size(); }
-
-  void insert(const K& k, const T& t) {
-    hashmap_.emplace(std::make_pair(k, t));
-  }
-
-  T find(const K& k, const T& invalid) {
-    typename MapType::iterator it = hashmap_.find(k);
-    if (it == hashmap_.end())
-      return invalid;
-    return (*it).second;
-  }
-
-private:
-  MapType hashmap_;
-};
+// Must be included after the above.
+#include "base/DiagnosticEmitter.h"
 
 
-}  // end namespace ohmu
-
-
-#endif  //OHMU_UTIL_H
+#endif  // OHMU_BASE_LLVM_DEPENDENCIES_H

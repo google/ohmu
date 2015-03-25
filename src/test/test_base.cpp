@@ -19,7 +19,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "base/Util.h"
+#include "base/LLVMDependencies.h"
 #include "base/MemRegion.h"
 #include "base/ArrayTree.h"
 

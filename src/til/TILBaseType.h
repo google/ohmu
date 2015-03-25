@@ -11,12 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H
-
-#include "TILDependencies.h"
+#ifndef OHMU_TIL_TILBASETYPE_H
+#define OHMU_TIL_TILBASETYPE_H
 
 #include <stdint.h>
+
 
 namespace ohmu {
 namespace til {
@@ -84,8 +83,8 @@ struct BaseType {
 
   const char* getTypeName();
 
-  BaseType(BaseCode B, SizeCode Sz, unsigned char VS)
-      : Base(B), Size(Sz), VectSize(VS)
+  BaseType(BaseCode B, SizeCode Sz, unsigned char Vs)
+      : Base(B), Size(Sz), VectSize(Vs)
   { }
 
   BaseCode      Base;
@@ -179,4 +178,4 @@ inline BaseType BaseType::getBaseType<void*>() {
 }  // end namespace ohmu
 
 
-#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILVALUETYPE_H
+#endif  // OHMU_TIL_TILBASETYPE_H

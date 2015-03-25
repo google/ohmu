@@ -3,7 +3,7 @@
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT in the llvm repository for details.
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,7 +11,7 @@
 // by the thread safety analysis (See ThreadSafety.cpp).  The TIL is intended
 // to be largely independent of clang, in the hope that the analysis can be
 // reused for other non-C++ languages.  All dependencies on clang/llvm should
-// go in TILDependencies.h.
+// go in LLVMDependencies.h.
 //
 // Thread safety analysis works by comparing mutex expressions, e.g.
 //
@@ -44,15 +44,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TIL_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TIL_H
+#ifndef OHMU_TIL_TIL_H
+#define OHMU_TIL_TIL_H
 
 // Note: we use a relative path for includes, so that these files can be
-// reused outside of clang/llvm.  All clang and llvm dependencies should go
-// in TILDependencies.h.
-#include "TILDependencies.h"
-#include "TILBaseType.h"
+// reused in a different directory structure outside of clang/llvm.
+// All clang and llvm dependencies should go in base/LLVMDependencies.h.
 
+#include "base/ArrayTree.h"
+#include "base/LLVMDependencies.h"
+#include "base/MemRegion.h"
+#include "base/MutArrayRef.h"
+#include "base/SimpleArray.h"
+
+#include "TILBaseType.h"
 
 #include <stdint.h>
 #include <algorithm>
@@ -64,7 +69,6 @@
 
 namespace ohmu {
 namespace til {
-
 
 /// Enum for the different distinct classes of SExpr
 enum TIL_Opcode {
@@ -97,7 +101,7 @@ enum TIL_BinaryOpcode : unsigned char {
   BOP_Lt,           ///<  <
   BOP_Leq,          ///<  <=
   BOP_Gt,           ///<  >   (surface syntax only: will be rewritten to <)
-  BOP_Geq,          ///<  >=  (surface syntax only: will be rewritten to >=)
+  BOP_Geq,          ///<  >=  (surface syntax only: will be rewritten to <=)
   BOP_LogicAnd,     ///<  &&  (no short-circuit)
   BOP_LogicOr       ///<  ||  (no short-circuit)
 };
@@ -210,7 +214,7 @@ public:
   /// SExpr objects cannot be deleted.
   // This declaration is public to workaround a gcc bug that breaks building
   // with REQUIRES_EH=1.
-  void operator delete(void *) LLVM_DELETED_FUNCTION;
+  void operator delete(void *) = delete;
 
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
@@ -223,10 +227,10 @@ protected:
   unsigned short Flags;
 
 private:
-  SExpr() LLVM_DELETED_FUNCTION;
+  SExpr() = delete;
 
   /// SExpr objects must be created in an arena.
-  void *operator new(size_t) LLVM_DELETED_FUNCTION;
+  void *operator new(size_t) = delete;
 };
 
 
@@ -255,12 +259,12 @@ public:
   const T* get() const { return Ptr; }
 
   void reset(std::nullptr_t) {
-    assert(!Ptr || (Ptr->opcode() != COP_Future) && "Cannot reset future.");
+    assert((!Ptr || (Ptr->opcode() != COP_Future)) && "Cannot reset future.");
     Ptr = nullptr;
   }
 
   void reset(T* P) {
-    assert(!Ptr || (Ptr->opcode() != COP_Future) && "Cannot reset future.");
+    assert((!Ptr || (Ptr->opcode() != COP_Future)) && "Cannot reset future.");
     Ptr = maybeRegisterFuture(&Ptr, P);
   }
 
@@ -368,6 +372,7 @@ public:
 
   Future() : Instruction(COP_Future), Status(FS_pending),
              Result(nullptr), IPos(nullptr)  { }
+  virtual ~Future() = delete;
 
 public:
   // Return the result of this future if it exists, otherwise return null.
@@ -1078,7 +1083,7 @@ public:
     return E->opcode() >= COP_Goto && E->opcode() <= COP_Return;
   }
 
-  typedef ArrayRef<SExprRefT<BasicBlock>> BlockArray;
+  typedef MutArrayRef<SExprRefT<BasicBlock>> BlockArray;
 
 protected:
   Terminator(TIL_Opcode Op) : Instruction(Op) { }
@@ -1553,4 +1558,4 @@ inline bool Goto::isBackEdge() const {
 }  // end namespace til
 }  // end namespace ohmu
 
-#endif
+#endif   // OHMU_TIL_TIL_H

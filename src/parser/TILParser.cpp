@@ -111,7 +111,7 @@ TIL_CastOpcode TILParser::lookupCastOpcode(StringRef s) {
 inline StringRef TILParser::copyStr(StringRef s) {
   // Put all strings in the string arena, which must survive
   // for the duration of the compile.
-  char* temp = reinterpret_cast<char*>(stringArena_.allocate(s.length()+1));
+  char* temp = reinterpret_cast<char*>(stringArena_.allocate(s.size()+1));
   return copyStringRef(temp, s);
 }
 
@@ -130,7 +130,7 @@ int TILParser::toInteger(StringRef s) {
   char* end = nullptr;
   long long val = strtol(s.c_str(), &end, 0);
   // FIXME: some proper error handling here?
-  assert(end == s.c_str() + s.length() && "Could not parse string.");
+  assert(end == s.c_str() + s.size() && "Could not parse string.");
   return static_cast<int>(val);
 }
 
@@ -138,7 +138,7 @@ double TILParser::toDouble(StringRef s) {
   char* end = nullptr;
   double val = strtod(s.c_str(), &end);
   // FIXME: some proper error handling here?
-  assert(end == s.c_str() + s.length() && "Could not parse string.");
+  assert(end == s.c_str() + s.size() && "Could not parse string.");
   return val;
 }
 

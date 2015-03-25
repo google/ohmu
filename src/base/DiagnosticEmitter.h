@@ -22,13 +22,11 @@
 #ifndef OHMU_TIL_DIAGNOSTIC_H
 #define OHMU_TIL_DIAGNOSTIC_H
 
-#include "TIL.h"
-#include "TILPrettyPrint.h"
+#include "LLVMDependencies.h"
 
 #include <ostream>
 
 namespace ohmu {
-namespace til  {
 
 
 /// Wraps a std::ostream to provide custom output for various things.
@@ -65,10 +63,7 @@ public:
     return *this;
   }
 
-  DiagnosticStream& operator<<(SExpr *e) {
-    TILDebugPrinter::print(e, ss, false);
-    return *this;
-  }
+  std::ostream& outputStream() { return ss; }
 
 public:
   std::ostream& ss;
@@ -97,7 +92,6 @@ private:
 };
 
 
-}  // end namespace til
 }  // end namespace ohmu
 
 #endif  // OHMU_TIL_DIAGNOSTIC_H

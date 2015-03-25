@@ -1,24 +1,17 @@
 //===- SimpleArray.h -------------------------------------------*- C++ --*-===//
-// Copyright 2014  Google
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//                     The LLVM Compiler Infrastructure
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// This file is distributed under the University of Illinois Open Source
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef OHMU_SIMPLEARRAY_H
-#define OHMU_SIMPLEARRAY_H
+#ifndef OHMU_BASE_SIMPLEARRAY_H
+#define OHMU_BASE_SIMPLEARRAY_H
 
-#include "Util.h"
+#include "MemRegion.h"
+
 
 namespace ohmu {
 
@@ -182,7 +175,7 @@ private:
 
   static const size_t InitialCapacity = 4;
 
-  SimpleArray(const SimpleArray<T> &A) LLVM_DELETED_FUNCTION;
+  SimpleArray(const SimpleArray<T> &A) = delete;
 
   T *Data;
   size_t Size;
@@ -191,4 +184,4 @@ private:
 
 }  // end namespace ohmu
 
-#endif  // OHMU_SIMPLEARRAY_H
+#endif  // OHMU_BASE_SIMPLEARRAY_H

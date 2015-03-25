@@ -19,8 +19,6 @@
 #ifndef OHMU_BASE_NESTEDSTACK_H_
 #define OHMU_BASE_NESTEDSTACK_H_
 
-#include "Util.h"
-
 #include <vector>
 
 namespace ohmu {

@@ -1,17 +1,9 @@
-//===- CFGBuilder.h --------------------------------------------*- C++ --*-===//
-// Copyright 2014  Google
+//===- CFGBuilder.cpp ------------------------------------------*- C++ --*-===//
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//                     The LLVM Compiler Infrastructure
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT in the llvm repository for details.
 //
 //===----------------------------------------------------------------------===//
 
@@ -87,7 +79,7 @@ void CFGBuilder::beginBlock(BasicBlock *B) {
 
 void CFGBuilder::endBlock(Terminator *Term) {
   assert(CurrentBB && "No current block.");
-  assert(OverwriteInstructions || CurrentBB->instructions().size() == 0 &&
+  assert((OverwriteInstructions || CurrentBB->instructions().size() == 0) &&
          "Already finished block.");
 
   // Ovewrite existing arguments with CurrentArgs, if requested.

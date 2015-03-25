@@ -3,7 +3,7 @@
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
+#ifndef OHMU_TIL_TILPRETTYPRINT_H
+#define OHMU_TIL_TILPRETTYPRINT_H
 
 #include "TIL.h"
 
@@ -107,7 +107,7 @@ protected:
   }
 
   StringRef printableName(StringRef N) {
-    if (N.length() > 0)
+    if (N.size() > 0)
       return N;
     return StringRef("x", 1);
   }
@@ -239,7 +239,7 @@ protected:
 
   void printVariable(const Variable *E, StreamType &SS) {
     auto* Vd = E->variableDecl();
-    if (Vd->varName().length() > 0) {
+    if (Vd->varName().size() > 0) {
       SS << Vd->varName() << Vd->varIndex();
       return;
     }
@@ -367,6 +367,11 @@ protected:
   }
 
   void printProject(const Project *E, StreamType &SS) {
+    if (!E->record()) {
+      SS << "_global.";
+      SS << E->slotName();
+      return;
+    }
     if (CStyle) {
       // Omit the 'this->'
       if (const Apply *SAP = dyn_cast<Apply>(E->record())) {
@@ -662,9 +667,17 @@ public:
 };
 
 
+#ifdef OHMU_STANDALONE
+inline DiagnosticStream& operator<<(DiagnosticStream& Ds, SExpr *E) {
+  TILDebugPrinter::print(E, Ds.outputStream(), false);
+  return Ds;
+}
+#endif
+
+
 }  // end namespace til
 }  // end namespace ohmu
 
 
-#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILPRETTYPRINT_H
+#endif  // OHMU_TIL_TILPRETTYPRINT_H
 

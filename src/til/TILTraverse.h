@@ -3,7 +3,7 @@
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H
-#define LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H
+#ifndef OHMU_TIL_TILTRAVERSE_H
+#define OHMU_TIL_TILTRAVERSE_H
 
 #include "TIL.h"
 
@@ -480,4 +480,4 @@ void Traversal<S>::traverseIfThenElse(IfThenElse *E) {
 } // end namespace til
 } // end namespace ohmu
 
-#endif  // LLVM_CLANG_ANALYSIS_ANALYSES_THREADSAFETY_TILTRAVERSE_H
+#endif  // OHMU_TIL_TILTRAVERSE_H

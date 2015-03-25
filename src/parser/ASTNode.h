@@ -45,7 +45,7 @@
 #include <iostream>
 #include <string>
 
-#include "base/Util.h"
+#include "base/LLVMDependencies.h"
 
 namespace ohmu {
 namespace parsing {

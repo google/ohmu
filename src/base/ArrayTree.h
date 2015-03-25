@@ -1,30 +1,22 @@
 //===- ArrayTree.h ---------------------------------------------*- C++ --*-===//
-// Copyright 2014  Google
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//                     The LLVM Compiler Infrastructure
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// This file is distributed under the University of Illinois Open Source
+// License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef OHMU_BASE_ARRAYTREE_H
 #define OHMU_BASE_ARRAYTREE_H
 
-
 #include "MemRegion.h"
-#include "Util.h"
+
+#include <cassert>
+#include <cstring>
 
 
 namespace ohmu {
-
 
 /// ArrayTree stores its elements in a 2-level "tree".   Rather than storing
 /// elements in a contiguous array, it stores them in contiguous chunks of size
@@ -71,7 +63,7 @@ public:
     assert(Size > 0 && "No elements in the array.");
     return at(Size-1);
   }
-  const T &back() const { return at(Size-1)
+  const T &back() const {
     assert(Size > 0 && "No elements in the array.");
     return at(Size-1);
   }
@@ -215,7 +207,7 @@ private:
   /// Reserve space for a new leaf.
   void reserveLeaf(MemRegionRef A);
 
-  ArrayTree(const ArrayTree &A) LLVM_DELETED_FUNCTION;
+  ArrayTree(const ArrayTree &A) = delete;
 
   T **Data;
   unsigned Size;
@@ -304,7 +296,6 @@ void ArrayTree<T, Exp>::resize(MemRegionRef A, unsigned Nsz,
     new (&Data[rootIndex(i)][leafIndex(i)]) T(args...);
   Size = Nsz;
 }
-
 
 
 }  // end namespace ohmu

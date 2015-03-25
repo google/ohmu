@@ -35,6 +35,7 @@
 #define OHMU_DEFAULTLEXER_H
 
 #include "base/MemRegion.h"
+#include "base/LLVMDependencies.h"
 
 #include "parser/Token.h"
 #include "parser/Lexer.h"
@@ -90,7 +91,7 @@ public:
   bool readFloatExp(char startChar);
 
   StringRef copyStr(StringRef s) {
-    char* mem = static_cast<char*>(stringArena_.allocate(s.length()+1));
+    char* mem = static_cast<char*>(stringArena_.allocate(s.size()+1));
     return copyStringRef(mem, s);
   }
 
