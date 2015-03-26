@@ -214,7 +214,7 @@ public:
   /// SExpr objects cannot be deleted.
   // This declaration is public to workaround a gcc bug that breaks building
   // with REQUIRES_EH=1.
-  void operator delete(void *) = delete;
+  // void operator delete(void *) = delete;
 
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
@@ -372,7 +372,7 @@ public:
 
   Future() : Instruction(COP_Future), Status(FS_pending),
              Result(nullptr), IPos(nullptr)  { }
-  virtual ~Future() = delete;
+  virtual ~Future() { }   // eliminate virtual destructor warning.
 
 public:
   // Return the result of this future if it exists, otherwise return null.
@@ -403,9 +403,9 @@ public:
 
 private:
   FutureStatus Status;
-  SExpr *Result;                    //< Result of forcing this future.
-  Instruction** IPos;               //< Backpointer to CFG loc where F occurs.
-  std::vector<SExpr**> Positions;   //< Backpointers to places where F occurs.
+  SExpr *Result;                    ///< Result of forcing this future.
+  Instruction** IPos;               ///< Backpointer to CFG loc where F occurs.
+  std::vector<SExpr**> Positions;   ///< Backpointers to places where F occurs.
 };
 
 
@@ -621,7 +621,7 @@ public:
   const SExpr *definition() const { return Definition.get(); }
 
   unsigned modifiers() { return Flags; }
-  void     setModifiers(unsigned M) { Flags = M; }
+  void     setModifiers(unsigned M) { Flags = static_cast<unsigned short>(M); }
 
   bool     hasModifier  (SlotKind K) { return (Flags & K) != 0; }
   void     setModifier  (SlotKind K) { Flags = Flags | K;  }
@@ -655,8 +655,8 @@ public:
   DECLARE_TRAVERSE_AND_COMPARE(Record)
 
 private:
-  SlotArray Slots;    //< The slots in the record.
-  SlotMap*  SMap;     //< A map from slot names to indices.
+  SlotArray Slots;    ///< The slots in the record.
+  SlotMap*  SMap;     ///< A map from slot names to indices.
 };
 
 

@@ -31,7 +31,7 @@ enum TraversalKind {
   TRV_Tail,  ///< owned subexpr in tail position      e.g. u in  let x=t; u
   TRV_Decl,  ///< owned subexpr in a declaration      e.g. function body
   TRV_Lazy,  ///< owned subexpr in lazy position      e.g. code body
-  TRV_Type   ///< owned subexpr in type position      e.g. T in  \x:T -> u
+  TRV_Type   ///< owned subexpr in type position      e.g. T in  \\x:T -> u
 };
 
 

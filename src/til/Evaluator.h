@@ -23,6 +23,8 @@
 namespace ohmu {
 namespace til {
 
+// TODO: minimum integer size should not be hardcoded at ST_32.
+// See TILBaseType.h
 
 template< template<typename> class F, class RTy, typename... ArgTypes >
 RTy branchOnNumericType(BaseType BT, ArgTypes... Args) {
@@ -33,10 +35,6 @@ RTy branchOnNumericType(BaseType BT, ArgTypes... Args) {
     return F<bool>::action(Args...);
   case BaseType::BT_Int: {
     switch (BT.Size) {
-    case BaseType::ST_8:
-      return F<int8_t>::action(Args...);
-    case BaseType::ST_16:
-      return F<int16_t>::action(Args...);
     case BaseType::ST_32:
       return F<int32_t>::action(Args...);
     case BaseType::ST_64:
@@ -48,10 +46,6 @@ RTy branchOnNumericType(BaseType BT, ArgTypes... Args) {
   }
   case BaseType::BT_UnsignedInt: {
     switch (BT.Size) {
-    case BaseType::ST_8:
-      return F<uint8_t>::action(Args...);
-    case BaseType::ST_16:
-      return F<uint16_t>::action(Args...);
     case BaseType::ST_32:
       return F<uint32_t>::action(Args...);
     case BaseType::ST_64:
@@ -85,43 +79,39 @@ RTy branchOnNumericType(BaseType BT, ArgTypes... Args) {
 }
 
 
-#define DEFINE_BINARY_OP_CLASS_T(CName, OP, RTyp)                             \
-template<class Ty>                                                            \
+#define DEFINE_BINARY_OP_CLASS(CName, OP, RTy)                                \
+template<class Ty1>                                                           \
 struct CName {                                                                \
-  static LiteralT<RTyp>* action(MemRegionRef A, Literal* E0, Literal* E1) {   \
-    return new (A) LiteralT<RTyp>(E0->as<Ty>()->value()  OP                   \
-                                  E1->as<Ty>()->value());                     \
+  static LiteralT<RTy>* action(MemRegionRef A, Literal* E0, Literal* E1) {    \
+    return new (A) LiteralT<RTy>(E0->as<Ty1>()->value()  OP                   \
+                                 E1->as<Ty1>()->value());                     \
   }                                                                           \
 };
-
-#define DEFINE_BINARY_OP_CLASS(CName, OP) \
-  DEFINE_BINARY_OP_CLASS_T(CName, OP, Ty)
 
 
 namespace opclass {
 
-DEFINE_BINARY_OP_CLASS(Add, +)
-DEFINE_BINARY_OP_CLASS(Sub, -)
-DEFINE_BINARY_OP_CLASS(Mul, *)
-DEFINE_BINARY_OP_CLASS(Div, /)
-DEFINE_BINARY_OP_CLASS(Rem, %)
-DEFINE_BINARY_OP_CLASS(Shl, <<)
-DEFINE_BINARY_OP_CLASS(Shr, <<)
-DEFINE_BINARY_OP_CLASS(BitAnd, &)
-DEFINE_BINARY_OP_CLASS(BitXor, ^)
-DEFINE_BINARY_OP_CLASS(BitOr, |)
+DEFINE_BINARY_OP_CLASS(Add,      +,   Ty1)
+DEFINE_BINARY_OP_CLASS(Sub,      -,   Ty1)
+DEFINE_BINARY_OP_CLASS(Mul,      *,   Ty1)
+DEFINE_BINARY_OP_CLASS(Div,      /,   Ty1)
+DEFINE_BINARY_OP_CLASS(Rem,      %,   Ty1)
+DEFINE_BINARY_OP_CLASS(Shl,      <<,  Ty1)
+DEFINE_BINARY_OP_CLASS(Shr,      >>,  Ty1)
+DEFINE_BINARY_OP_CLASS(BitAnd,   &,   Ty1)
+DEFINE_BINARY_OP_CLASS(BitXor,   ^,   Ty1)
+DEFINE_BINARY_OP_CLASS(BitOr,    |,   Ty1)
 
-DEFINE_BINARY_OP_CLASS_T(Eq,  ==, bool)
-DEFINE_BINARY_OP_CLASS_T(Neq, !=, bool)
-DEFINE_BINARY_OP_CLASS_T(Lt,  <,  bool)
-DEFINE_BINARY_OP_CLASS_T(Leq, <=, bool)
+DEFINE_BINARY_OP_CLASS(Eq,       ==,  bool)
+DEFINE_BINARY_OP_CLASS(Neq,      !=,  bool)
+DEFINE_BINARY_OP_CLASS(Lt,       <,   bool)
+DEFINE_BINARY_OP_CLASS(Leq,      <=,  bool)
 
-DEFINE_BINARY_OP_CLASS(LogicAnd, &&)
-DEFINE_BINARY_OP_CLASS(LogicOr,  ||)
+DEFINE_BINARY_OP_CLASS(LogicAnd, &&,  bool)
+DEFINE_BINARY_OP_CLASS(LogicOr,  ||,  bool)
 
 }  // end namespace opclass
 
-#undef DEFINE_BINARY_OP_CLASS_T
 #undef DEFINE_BINARY_OP_CLASS
 
 

@@ -61,8 +61,8 @@ const char* TILParser::getOpcodeName(TIL_ConstructOp op) {
 
     case TCOP_Let:        return "let";
     case TCOP_If:         return "if";
-    default:              return nullptr;
   }
+  return nullptr;
 }
 
 
@@ -328,25 +328,25 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
     case TCOP_UnaryOp: {
       assert(arity == 2);
       Token* t = tok(0);
-      TIL_UnaryOpcode op = lookupUnaryOpcode(t->string());
+      TIL_UnaryOpcode uop = lookupUnaryOpcode(t->string());
       delete t;
-      auto* e = new (arena_) UnaryOp(op, sexpr(1));
+      auto* e = new (arena_) UnaryOp(uop, sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_BinaryOp: {
       assert(arity == 3);
       Token* t = tok(0);
-      TIL_BinaryOpcode op = lookupBinaryOpcode(t->string());
+      TIL_BinaryOpcode bop = lookupBinaryOpcode(t->string());
       delete t;
-      auto* e = new (arena_) BinaryOp(op, sexpr(1), sexpr(2));
+      auto* e = new (arena_) BinaryOp(bop, sexpr(1), sexpr(2));
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Cast: {
       assert(arity == 2);
       Token* t = tok(0);
-      TIL_CastOpcode op = lookupCastOpcode(t->string());
+      TIL_CastOpcode cop = lookupCastOpcode(t->string());
       delete t;
-      auto* e = new (arena_) Cast(op, sexpr(1));
+      auto* e = new (arena_) Cast(cop, sexpr(1));
       return ParseResult(TILP_SExpr, e);
     }
 

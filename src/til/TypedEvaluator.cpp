@@ -398,7 +398,12 @@ void TypedEvaluator::reduceUnaryOp(UnaryOp *Orig) {
 
 
 bool TypedEvaluator::checkAndExtendTypes(Instruction*& I0, Instruction*& I1) {
-  if (I0->baseType() == I1->baseType())
+  BaseType Bt0 = I0->baseType();
+  BaseType Bt1 = I1->baseType();
+
+  bool NeedsPromotion = Bt0.promoteInteger() || Bt1.promoteInteger();
+
+  if (I0->baseType() == I1->baseType() && !NeedsPromotion)
     return true;
 
   TIL_CastOpcode Op = typeConvertable(I0->baseType(), I1->baseType());

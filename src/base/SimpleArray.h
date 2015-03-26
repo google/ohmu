@@ -140,11 +140,11 @@ public:
   // An adaptor to reverse a simple array
   class ReverseAdaptor {
    public:
-    ReverseAdaptor(SimpleArray &Array) : Array(Array) {}
+    ReverseAdaptor(SimpleArray &Arr) : Array(Arr) {}
     // A reverse iterator used by the reverse adaptor
     class Iterator {
      public:
-      Iterator(T *Data) : Data(Data) {}
+      Iterator(T *Dat) : Data(Dat) {}
       T &operator*() { return *Data; }
       const T &operator*() const { return *Data; }
       Iterator &operator++() {

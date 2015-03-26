@@ -14,6 +14,8 @@
 #ifndef OHMU_TIL_TILBASETYPE_H
 #define OHMU_TIL_TILBASETYPE_H
 
+#include "base/LLVMDependencies.h"
+
 #include <stdint.h>
 
 
@@ -46,6 +48,9 @@ struct BaseType {
     ST_128
   };
 
+  // TODO: don't hardcode the minimim size!
+  static const SizeCode MinimumIntegerSize = ST_32;
+
   inline static SizeCode getSizeCode(unsigned nbytes);
 
   template <class T>
@@ -74,6 +79,17 @@ struct BaseType {
   /// Return true if this is a signed integer or float.
   bool isSigned() {
     return (Base == BT_Int || Base == BT_Float);
+  }
+
+  /// Promote to minimim integer size type.
+  /// Returns true if promotion was necessary.
+  bool promoteInteger() {
+    // TODO: don't hardcode the minimim size!
+    if (isIntegral() && Size < MinimumIntegerSize) {
+      Size = MinimumIntegerSize;
+      return true;
+    }
+    return false;
   }
 
   /// Encode as 32-bit integer

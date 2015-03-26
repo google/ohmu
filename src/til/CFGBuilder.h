@@ -229,15 +229,15 @@ public:
 
 protected:
   MemRegionRef               Arena;
-  bool OverwriteArguments;     //< Set to true for passes which rewrite Phi.
-  bool OverwriteInstructions;  //< Set to true for in-place rewriting passes.
+  bool OverwriteArguments;     ///< Set to true for passes which rewrite Phi.
+  bool OverwriteInstructions;  ///< Set to true for in-place rewriting passes.
 
   SCFG*                      CurrentCFG;
   BasicBlock*                CurrentBB;
-  std::vector<Phi*>          CurrentArgs;    //< arguments in CurrentBB.
-  std::vector<Instruction*>  CurrentInstrs;  //< instructions in CurrentBB.
-  BuilderState               CurrentState;   //< state at current location.
-  BuilderState               OldCfgState;    //< state at old CFG location.
+  std::vector<Phi*>          CurrentArgs;    ///< arguments in CurrentBB.
+  std::vector<Instruction*>  CurrentInstrs;  ///< instructions in CurrentBB.
+  BuilderState               CurrentState;   ///< state at current location.
+  BuilderState               OldCfgState;    ///< state at old CFG location.
 
   DiagnosticEmitter Diag;
 };

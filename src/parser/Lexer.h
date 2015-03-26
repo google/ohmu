@@ -237,7 +237,7 @@ protected:
 
   // Get the current source location
   SourceLocation getCurrentLocation() {
-    return SourceLocation(lineNum_, linePos_);
+    return SourceLocation(lineNum_, static_cast<unsigned short>(linePos_));
   }
 
   // Tell the lexer that an error has occured.

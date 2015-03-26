@@ -34,7 +34,7 @@ public:
   UnMoveableItem(unsigned h) : uniqueHandle(h) { }
   ~UnMoveableItem() { uniqueHandle = 0; }
 
-  int getHandle() { return uniqueHandle; }
+  unsigned getHandle() { return uniqueHandle; }
 
 private:
   UnMoveableItem(const UnMoveableItem& i) = delete;
@@ -44,7 +44,7 @@ private:
   void operator=(UnMoveableItem&& i) = delete;
 
 private:
-  int uniqueHandle;
+  unsigned uniqueHandle;
 };
 
 

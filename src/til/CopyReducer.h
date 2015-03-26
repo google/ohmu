@@ -401,7 +401,7 @@ public:
                  bool NewCfg = false)
     : Reducer(R), PendingExpr(E), ScopePtr(S), BState(Bs), CreateCfg(NewCfg)
   { }
-  ~LazyCopyFuture() = delete;
+  virtual ~LazyCopyFuture() { }
 
   /// Traverse PendingExpr and return the result.
   virtual SExpr* evaluate() override {

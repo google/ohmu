@@ -26,6 +26,7 @@ const char* BaseType::getTypeName() {
       default:
         break;
       }
+      break;
     }
     case BT_UnsignedInt: {
       switch (Size) {
@@ -36,6 +37,7 @@ const char* BaseType::getTypeName() {
       default:
         break;
       }
+      break;
     }
     case BT_Float: {
       switch (Size) {
@@ -44,6 +46,7 @@ const char* BaseType::getTypeName() {
       default:
         break;
       }
+      break;
     }
     case BT_String:   return "String";
     case BT_Pointer:  return "Pointer";

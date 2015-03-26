@@ -362,7 +362,8 @@ Token DefaultLexer::readToken() {
     readIdentifier(c);
     StringRef str = copyStr(finishToken());
 
-    unsigned keyid = lookupKeyword(str.c_str());
+    unsigned short keyid =
+      static_cast<unsigned short>( lookupKeyword(str.c_str()) );
     if (keyid) {
       return Token(keyid, str, sloc);
     }
@@ -374,7 +375,8 @@ Token DefaultLexer::readToken() {
     readOperator(c);
     StringRef str = copyStr(finishToken());
 
-    unsigned keyid = lookupKeyword(str.c_str());
+    unsigned short keyid =
+      static_cast<unsigned short>( lookupKeyword(str.c_str()) );
     if (keyid) {
       return Token(keyid, str, sloc);
     }

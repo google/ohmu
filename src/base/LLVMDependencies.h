@@ -81,7 +81,7 @@ inline const T* dyn_cast_or_null(const U* p) {
 class StringRef {
 public:
   StringRef(const char* s)
-    : str_(s), len_((unsigned) strlen(s))
+    : str_(s), len_(static_cast<unsigned>(strlen(s)))
   { }
   StringRef(const char* s, unsigned len)
     : str_(s), len_(len)

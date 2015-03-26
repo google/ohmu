@@ -309,15 +309,15 @@ protected:
 
   void printSlot(const Slot *E, StreamType &SS) {
     SS << E->slotName();
-    if (auto *F = dyn_cast<Function>(E->definition())) {
-      printFunction(F, SS, 1);
+    if (auto *Fn = dyn_cast<Function>(E->definition())) {
+      printFunction(Fn, SS, 1);
     }
-    else if (auto *C = dyn_cast<Code>(E->definition())) {
+    else if (auto *Cd = dyn_cast<Code>(E->definition())) {
       SS << "()";
-      printCode(C, SS);
+      printCode(Cd, SS);
     }
-    else if (auto *F = dyn_cast<Field>(E->definition())) {
-      printField(F, SS);
+    else if (auto *Fld = dyn_cast<Field>(E->definition())) {
+      printField(Fld, SS);
     }
     else {
       SS << " = ";

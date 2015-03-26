@@ -67,13 +67,13 @@ public:
     : tokenID_(tok.tokenID_), tokenStr_(tok.tokenStr_),
       sourceLoc_(tok.sourceLoc_)
   { }
-  Token(unsigned tid)
+  Token(unsigned short tid)
     : tokenID_(tid), tokenStr_(""), sourceLoc_(SourceLocation())
   { }
-  Token(unsigned tid, const char* s, const SourceLocation& loc)
+  Token(unsigned short tid, const char* s, const SourceLocation& loc)
     : tokenID_(tid), tokenStr_(StringRef(s)), sourceLoc_(SourceLocation())
   { }
-  Token(unsigned tid, StringRef s, const SourceLocation& loc)
+  Token(unsigned short tid, StringRef s, const SourceLocation& loc)
     : tokenID_(tid), tokenStr_(s), sourceLoc_(loc)
   { }
 
@@ -127,11 +127,7 @@ private:
 };
 
 
-extern const Token globalEOFToken;
-
-
 }  // end namespace lexing
-
 }  // end namespace ohmu
 
 #endif

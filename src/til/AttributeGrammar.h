@@ -126,8 +126,8 @@ public:
   Substitution<Attr>& operator=(Substitution<Attr> &&S)      = default;
 
 private:
-  unsigned          NullVars;   //< Number of null variables
-  std::vector<Attr> VarAttrs;   //< Synthesized attributes for remaining vars.
+  unsigned          NullVars;   ///< Number of null variables
+  std::vector<Attr> VarAttrs;   ///< Synthesized attributes for remaining vars.
 };
 
 
@@ -249,9 +249,9 @@ public:
 protected:
   ScopeFrame(const ScopeFrame &F) = default;
 
-  unsigned                 NullVars;        //< vars with no attributes.
-  std::vector<VarMapEntry> VarMap;          //< map vars to values
-  std::vector<Attr>        InstructionMap;  //< map instrs to values
+  unsigned                 NullVars;        ///< vars with no attributes.
+  std::vector<VarMapEntry> VarMap;          ///< map vars to values
+  std::vector<Attr>        InstructionMap;  ///< map instrs to values
 };
 
 

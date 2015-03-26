@@ -689,7 +689,7 @@ public:
         << "Cannot find opcode for " << node.opcodeName() << ".";
       return false;
     }
-    node.setLangOpcode(op);
+    node.setLangOpcode(static_cast<unsigned short>(op));
     return true;
   }
 
