@@ -214,7 +214,8 @@ public:
   /// SExpr objects cannot be deleted.
   // This declaration is public to workaround a gcc bug that breaks building
   // with REQUIRES_EH=1.
-  // void operator delete(void *) = delete;
+  void operator delete(void *) = delete;
+
 
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
@@ -372,7 +373,13 @@ public:
 
   Future() : Instruction(COP_Future), Status(FS_pending),
              Result(nullptr), IPos(nullptr)  { }
-  virtual ~Future() { }   // eliminate virtual destructor warning.
+
+  virtual ~Future() { }   // Eliminate virtual destructor warning.
+
+  // We have to undelete this method, because we have a destructor.
+  void operator delete(void *Ptr) {
+    assert(false && "Cannot delete bump-allocated structures.");
+  }
 
 public:
   // Return the result of this future if it exists, otherwise return null.
