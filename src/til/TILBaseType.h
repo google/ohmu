@@ -190,6 +190,156 @@ inline BaseType BaseType::getBaseType<void*>() {
   return BaseType(BT_Pointer, getSizeCode(sizeof(void*)), 0);
 }
 
+
+/// Parse base type, and call F<Ty>, with Ty set to the static type.
+template< template<typename> class F >
+class BtBr {
+public:
+
+  /// Parse base type, and call F<Ty>(Args), with Ty set to the static type.
+  /// Return Default on failure.
+  template<class RTy, typename... ArgTypes >
+  static RTy branch(BaseType Bt, RTy Default, ArgTypes... Args) {
+    switch (Bt.Base) {
+    case BaseType::BT_Void:
+      break;
+    case BaseType::BT_Bool:
+      return F<bool>::action(Args...);
+    case BaseType::BT_Int: {
+      switch (Bt.Size) {
+      case BaseType::ST_8:
+        return F<int8_t>::action(Args...);
+      case BaseType::ST_16:
+        return F<int16_t>::action(Args...);
+      case BaseType::ST_32:
+        return F<int32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<int64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_UnsignedInt: {
+      switch (Bt.Size) {
+      case BaseType::ST_8:
+        return F<uint8_t>::action(Args...);
+      case BaseType::ST_16:
+        return F<uint16_t>::action(Args...);
+      case BaseType::ST_32:
+        return F<uint32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<uint64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_Float: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<float>::action(Args...);
+      case BaseType::ST_64:
+        return F<double>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_String:
+      return F<StringRef>::action(Args...);
+    case BaseType::BT_Pointer:
+      return F<void*>::action(Args...);
+    }
+    return Default;
+  }
+
+
+  /// Parse base type, and call F<Ty>(Args), with Ty set to the static type.
+  /// This version only parses numeric (int, and float) types,
+  /// and it only handles integer types have been promoted to a minimum size.
+  /// Returns Default on failure.
+  template<class RTy, typename... ArgTypes >
+  static RTy branchOnNumeric(BaseType Bt, RTy Default, ArgTypes... Args) {
+    switch (Bt.Base) {
+    case BaseType::BT_Int: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<int32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<int64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_UnsignedInt: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<uint32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<uint64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_Float: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<float>::action(Args...);
+      case BaseType::ST_64:
+        return F<double>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+    return Default;
+  }
+
+
+  /// Parse base type, and call F<Ty>(Args), with Ty set to the static type.
+  /// This version only parses the integer (signed and unsigned types),
+  /// and it only handles integer types have been promoted to a minimum size.
+  /// Returns Default on failure.
+  template<class RTy, typename... ArgTypes >
+  static RTy branchOnIntegral(BaseType Bt, RTy Default, ArgTypes... Args) {
+    switch (Bt.Base) {
+    case BaseType::BT_Int: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<int32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<int64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    case BaseType::BT_UnsignedInt: {
+      switch (Bt.Size) {
+      case BaseType::ST_32:
+        return F<uint32_t>::action(Args...);
+      case BaseType::ST_64:
+        return F<uint64_t>::action(Args...);
+      default:
+        break;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+    return Default;
+  }
+
+};
+
+
 }  // end namespace til
 }  // end namespace ohmu
 

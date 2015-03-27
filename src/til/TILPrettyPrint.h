@@ -150,6 +150,7 @@ protected:
     SS << E->baseType().getTypeName();
   }
 
+
   template<class T>
   void printLiteralT(const LiteralT<T> *E, StreamType &SS) {
     SS << E->value();
@@ -159,83 +160,39 @@ protected:
     SS << "'" << E->value() << "'";
   }
 
-  void printLiteral(const Literal *E, StreamType &SS) {
-    BaseType VT = E->baseType();
-    switch (VT.Base) {
-    case BaseType::BT_Void: {
-      SS << "void";
-      return;
-    }
-    case BaseType::BT_Bool: {
-      if (E->as<bool>()->value())
-        SS << "true";
-      else
-        SS << "false";
-      return;
-    }
-    case BaseType::BT_Int: {
-      switch (VT.Size) {
-      case BaseType::ST_8:
-        printLiteralT(E->as<int8_t>(), SS);
-        return;
-      case BaseType::ST_16:
-        printLiteralT(E->as<int16_t>(), SS);
-        return;
-      case BaseType::ST_32:
-        printLiteralT(E->as<int32_t>(), SS);
-        return;
-      case BaseType::ST_64:
-        printLiteralT(E->as<int64_t>(), SS);
-        return;
-      default:
-        break;
-      }
-      break;
-    }
-    case BaseType::BT_UnsignedInt: {
-      switch (VT.Size) {
-      case BaseType::ST_8:
-        printLiteralT(E->as<uint8_t>(), SS);
-        return;
-      case BaseType::ST_16:
-        printLiteralT(E->as<uint16_t>(), SS);
-        return;
-      case BaseType::ST_32:
-        printLiteralT(E->as<uint32_t>(), SS);
-        return;
-      case BaseType::ST_64:
-        printLiteralT(E->as<uint64_t>(), SS);
-        return;
-      default:
-        break;
-      }
-      break;
-    }
-    case BaseType::BT_Float: {
-      switch (VT.Size) {
-      case BaseType::ST_32:
-        printLiteralT(E->as<float>(), SS);
-        return;
-      case BaseType::ST_64:
-        printLiteralT(E->as<double>(), SS);
-        return;
-      default:
-        break;
-      }
-      break;
-    }
-    case BaseType::BT_String: {
-      SS << "\"";
-      printLiteralT(E->as<StringRef>(), SS);
-      SS << "\"";
-      return;
-    }
-    case BaseType::BT_Pointer: {
-      SS << "#ptr";
-      return;
-    }
-    }
+  void printLiteralT(const LiteralT<bool> *E, StreamType &SS) {
+    if (E->as<bool>()->value())
+      SS << "true";
+    else
+      SS << "false";
   }
+
+  void printLiteralT(const LiteralT<StringRef> *E, StreamType &SS) {
+    SS << "\"";
+    printLiteralT(E->as<StringRef>(), SS);
+    SS << "\"";
+  }
+
+  void printLiteralT(const LiteralT<void*> *E, StreamType &SS) {
+    if (E->value() == nullptr)
+      SS << "null";
+    else
+      SS << "#ptr";
+  }
+
+  template<class Ty>
+  class LiteralPrinter {
+  public:
+    static bool action(PrettyPrinter *Pr, const Literal *E, StreamType *SS) {
+      Pr->printLiteralT<Ty>(E->as<Ty>(), *SS);
+      return true;
+    }
+  };
+
+  void printLiteral(const Literal *E, StreamType &SS) {
+    BtBr<LiteralPrinter>::branch(E->baseType(), false, this, E, &SS);
+  }
+
 
   void printVariable(const Variable *E, StreamType &SS) {
     auto* Vd = E->variableDecl();

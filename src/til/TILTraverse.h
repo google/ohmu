@@ -81,7 +81,8 @@ public:
     // Detect weak references to other instructions in the CFG.
     if (Instruction *I = E->asCFGInstruction())
       self()->traverseWeak(I);
-    self()->traverse(E, TRV_Arg);
+    else
+      self()->traverse(E, TRV_Arg);
   }
 
   /// Starting point for a traversal.
@@ -235,74 +236,26 @@ void Traversal<S>::traverseScalarType(ScalarType *E) {
 }
 
 
+template<class S>
+class LitTraverser {
+public:
+
+  template<class Ty>
+  class Actor {
+  public:
+    static bool action(S* Visitor, Literal *E) {
+      Visitor->template reduceLiteralT<Ty>(E->as<Ty>());
+      return true;
+    }
+  };
+
+};
+
 template <class S>
 void Traversal<S>::traverseLiteral(Literal *E) {
-  switch (E->baseType().Base) {
-  case BaseType::BT_Void:
-    break;
-  case BaseType::BT_Bool:
-    self()->reduceLiteralT(E->as<bool>());
-    return;
-  case BaseType::BT_Int: {
-    switch (E->baseType().Size) {
-    case BaseType::ST_8:
-      self()->reduceLiteralT(E->as<int8_t>());
-      return;
-    case BaseType::ST_16:
-      self()->reduceLiteralT(E->as<int16_t>());
-      return;
-    case BaseType::ST_32:
-      self()->reduceLiteralT(E->as<int32_t>());
-      return;
-    case BaseType::ST_64:
-      self()->reduceLiteralT(E->as<int64_t>());
-      return;
-    default:
-      break;
-    }
-    break;
-  }
-  case BaseType::BT_UnsignedInt: {
-    switch (E->baseType().Size) {
-    case BaseType::ST_8:
-      self()->reduceLiteralT(E->as<uint8_t>());
-      return;
-    case BaseType::ST_16:
-      self()->reduceLiteralT(E->as<uint16_t>());
-      return;
-    case BaseType::ST_32:
-      self()->reduceLiteralT(E->as<uint32_t>());
-      return;
-    case BaseType::ST_64:
-      self()->reduceLiteralT(E->as<uint64_t>());
-      return;
-    default:
-      break;
-    }
-    break;
-  }
-  case BaseType::BT_Float: {
-    switch (E->baseType().Size) {
-    case BaseType::ST_32:
-      self()->reduceLiteralT(E->as<float>());
-      return;
-    case BaseType::ST_64:
-      self()->reduceLiteralT(E->as<double>());
-      return;
-    default:
-      break;
-    }
-    break;
-  }
-  case BaseType::BT_String:
-    self()->reduceLiteralT(E->as<StringRef>());
-    return;
-  case BaseType::BT_Pointer:
-    self()->reduceLiteralT(E->as<void*>());
-    return;
-  }
-  self()->reduceLiteral(E);
-  return;
+  if (!BtBr< LitTraverser<S>::template Actor >::branch(
+        E->baseType(), false, self(), E))
+    self()->reduceLiteral(E);
 }
 
 template <class S>

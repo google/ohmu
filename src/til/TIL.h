@@ -225,7 +225,7 @@ protected:
 
   const unsigned char Opcode;
   const unsigned char SubOpcode;
-  unsigned short Flags;
+  uint16_t Flags;
 
 private:
   SExpr() = delete;
@@ -547,7 +547,7 @@ class Code : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Code; }
 
-  enum CallingConvention : unsigned short {
+  enum CallingConvention : uint16_t {
     CallingConvention_C,
     CallingConvention_CPlusPlus,
     CallingConvention_OhmuInternal
@@ -612,7 +612,7 @@ class Slot : public SExpr {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
 
-  enum SlotKind : unsigned short {
+  enum SlotKind : uint16_t {
     SLT_Normal   = 0,
     SLT_Final    = 1,
     SLT_Override = 2
@@ -627,8 +627,8 @@ public:
   SExpr *definition() { return Definition.get(); }
   const SExpr *definition() const { return Definition.get(); }
 
-  unsigned modifiers() { return Flags; }
-  void     setModifiers(unsigned M) { Flags = static_cast<unsigned short>(M); }
+  uint16_t modifiers() { return Flags; }
+  void     setModifiers(uint16_t M) { Flags = M; }
 
   bool     hasModifier  (SlotKind K) { return (Flags & K) != 0; }
   void     setModifier  (SlotKind K) { Flags = Flags | K;  }
@@ -1057,7 +1057,7 @@ public:
   // In minimal SSA form, all Phi nodes are MultiVal.
   // During conversion to SSA, incomplete Phi nodes may be introduced, which
   // are later determined to be SingleVal, and are thus redundant.
-  enum Status : unsigned short {
+  enum Status : uint16_t {
     PH_MultiVal = 0, // Phi node has multiple distinct values.  (Normal)
     PH_SingleVal,    // Phi node has one distinct value, and can be eliminated
     PH_Incomplete    // Phi node is incomplete
