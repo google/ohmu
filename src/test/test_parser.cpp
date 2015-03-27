@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "test/Driver.h"
+#include "til/Bytecode.h"
 #include "til/VisitCFG.h"
 
 
@@ -57,6 +58,8 @@ int main(int argc, const char** argv) {
   // Find all of the CFGs.
   VisitCFG visitCFG;
   visitCFG.traverseAll(global.global());
+
+  BytecodeWriter::write(std::cout, global.global());
 
   std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
   return 0;
