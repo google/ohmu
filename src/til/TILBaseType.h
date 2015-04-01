@@ -92,9 +92,22 @@ struct BaseType {
     return false;
   }
 
-  /// Encode as 32-bit integer
-  unsigned asInt32() {
-    return (VectSize << 16) | (Size << 8) | Base;
+  /// Encode as 16-bit integer
+  uint16_t asUInt16() {
+    return static_cast<uint16_t>((VectSize << 16) | (Size << 4) | Base);
+  }
+
+  /// Encode as 8-bit integer, with a single bit indicating vector or not.
+  uint8_t asUInt8() {
+    uint8_t VectorBit = (VectSize <= 1) ? 0 : (1 << 7);
+    return static_cast<uint8_t>(VectorBit | (Size << 4) | Base);
+  }
+
+  // Set value from encoded 16-bit integer.
+  void fromUInt16(uint16_t V) {
+    Base     = static_cast<BaseCode>(V & 0xF);
+    Size     = static_cast<SizeCode>((V >> 4) & 0xF);
+    VectSize = static_cast<uint8_t> ((V >> 16) & 0xFF);
   }
 
   const char* getTypeName();
@@ -103,9 +116,9 @@ struct BaseType {
       : Base(B), Size(Sz), VectSize(Vs)
   { }
 
-  BaseCode      Base;
-  SizeCode      Size;
-  unsigned char VectSize;  // 0 for scalar, otherwise num elements in vector
+  BaseCode Base;
+  SizeCode Size;
+  uint8_t  VectSize;  // 0 for scalar, otherwise num elements in vector
 };
 
 

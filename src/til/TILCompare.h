@@ -115,7 +115,7 @@ typename C::CType Record::compare(const Record* E, C& Cmp) const {
 
 template <class C>
 typename C::CType ScalarType::compare(const ScalarType* E, C& Cmp) const {
-  return Cmp.compareIntegers(baseType().asInt32(), E->baseType().asInt32());
+  return Cmp.compareIntegers(baseType().asUInt16(), E->baseType().asUInt16());
 }
 
 

@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Test code for class in base.
+// Test code for classes in base.
 //
 //===----------------------------------------------------------------------===//
 
@@ -26,6 +26,12 @@
 #include <vector>
 
 using namespace ohmu;
+
+
+void error(const char* msg) {
+  std::cerr << msg;
+  assert(false && "Test failed.");
+}
 
 
 class UnMoveableItem {
@@ -46,12 +52,6 @@ private:
 private:
   unsigned uniqueHandle;
 };
-
-
-void error(const char* msg) {
-  std::cerr << msg;
-  assert(false && "Test failed.");
-}
 
 
 void testTreeArray() {
