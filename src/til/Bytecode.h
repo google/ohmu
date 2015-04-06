@@ -10,12 +10,14 @@
 #ifndef OHMU_TIL_BYTECODE_H
 #define OHMU_TIL_BYTECODE_H
 
+#include "CFGBuilder.h"
 #include "TIL.h"
 #include "TILTraverse.h"
 
 
 namespace ohmu {
 namespace til {
+
 
 /// Base class for bytecode readers and writers.
 /// Common information about opcodes and bit widths are stored here.
@@ -24,16 +26,21 @@ public:
   // Maximum size of a single record (e.g. AST node).
   static const int MaxRecordSize = (1 << 12);  // 4k
 
-  enum PsuedoOpcode : uint8_t {
+  enum PseudoOpcode : uint8_t {
     PSOP_Null = 0,
     PSOP_WeakInstrRef,
-    PSOP_NullptrLiteral,
-    PSOP_LastOp
+    PSOP_BBArgument,
+    PSOP_BBInstruction,
+    PSOP_EnterScope,
+    PSOP_ExitScope,
+    PSOP_EnterBlock,
+    PSOP_EnterCFG,
+    PSOP_Last
   };
 
   void getBitSize(uint32_t) { }  // trigger an error for unhandled types.
 
-  unsigned getBitSizeImpl(PsuedoOpcode)     { return 6; }
+  unsigned getBitSizeImpl(PseudoOpcode)     { return 6; }
   unsigned getBitSizeImpl(TIL_Opcode)       { return 6; }
   unsigned getBitSizeImpl(TIL_UnaryOpcode)  { return 6; }
   unsigned getBitSizeImpl(TIL_BinaryOpcode) { return 6; }
@@ -104,7 +111,7 @@ public:
 
 private:
   /// Returns the remaining size in the buffer
-  inline int length() { return BufferSize - Pos; }
+  int length() { return BufferSize - Pos; }
 
   /// Size of the buffer.  Default is 64k.
   static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
@@ -171,12 +178,11 @@ public:
 
   StringRef readString();
 
+  bool empty() { return Eof && length() <= 0; }
+
 private:
   /// Return the remaining data in the buffer.
   int length() { return BufferLen - Pos; }
-
-  /// Return true if we've reached the end of the stream.
-  bool eof()   { return Eof; }
 
   /// Size of the buffer.  Default is 64k.
   static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
@@ -190,8 +196,8 @@ private:
 
 
 
+/// Traverse a SExpr and serialize it.
 class BytecodeWriter : public Traversal<BytecodeWriter>,
-                       public DefaultScopeHandler,
                        public BytecodeBase {
 protected:
   typedef Traversal<BytecodeWriter> SuperTv;
@@ -199,40 +205,42 @@ protected:
   template<class T>
   void writeFlag(T Flag) { Writer->writeBits32(Flag, getBitSize<T>()); }
 
-  void writePseudoOpcode(PsuedoOpcode Op) { writeFlag(Op); }
+  void writePseudoOpcode(PseudoOpcode Psop) {
+    // std::cerr << "Psop: " << Psop << "\n";
+    writeFlag(Psop);
+  }
 
   void writeOpcode(TIL_Opcode Op) {
-    writeFlag(static_cast<TIL_Opcode>(static_cast<unsigned>(PSOP_LastOp) + Op));
+    // std::cerr << "Op: " << getOpcodeString(Op) << "\n";
+    unsigned Psop = static_cast<unsigned>(PSOP_Last) + Op;
+    writePseudoOpcode(static_cast<PseudoOpcode>(Psop));
   }
 
   void writeBaseType(BaseType Bt) {
     Writer->writeUInt8(Bt.asUInt8());
     if (Bt.VectSize >= 1)
-      Writer->writeBits32(Bt.VectSize, 4);
+      Writer->writeUInt8(Bt.VectSize);
   }
 
-  void writeLiteral(bool V)     { Writer->writeBool(V); }
+  void writeLitVal(bool V)      { Writer->writeBool(V); }
 
-  void writeLiteral(uint8_t  V) { Writer->writeUInt8(V);  }
-  void writeLiteral(uint16_t V) { Writer->writeUInt16(V); }
-  void writeLiteral(uint32_t V) { Writer->writeUInt32(V); }
-  void writeLiteral(uint64_t V) { Writer->writeUInt64(V); }
+  void writeLitVal(uint8_t  V)  { Writer->writeUInt8(V);  }
+  void writeLitVal(uint16_t V)  { Writer->writeUInt16(V); }
+  void writeLitVal(uint32_t V)  { Writer->writeUInt32(V); }
+  void writeLitVal(uint64_t V)  { Writer->writeUInt64(V); }
 
-  void writeLiteral(int8_t  V)  { Writer->writeInt8(V);  }
-  void writeLiteral(int16_t V)  { Writer->writeInt16(V); }
-  void writeLiteral(int32_t V)  { Writer->writeInt32(V); }
-  void writeLiteral(int64_t V)  { Writer->writeInt64(V); }
+  void writeLitVal(int8_t  V)   { Writer->writeInt8(V);  }
+  void writeLitVal(int16_t V)   { Writer->writeInt16(V); }
+  void writeLitVal(int32_t V)   { Writer->writeInt32(V); }
+  void writeLitVal(int64_t V)   { Writer->writeInt64(V); }
 
-  void writeLiteral(float  V)   { Writer->writeFloat(V);  }
-  void writeLiteral(double V)   { Writer->writeDouble(V); }
+  void writeLitVal(float  V)    { Writer->writeFloat(V);  }
+  void writeLitVal(double V)    { Writer->writeDouble(V); }
 
-  void writeLiteral(StringRef S) { Writer->writeString(S); }
+  void writeLitVal(StringRef S) { Writer->writeString(S); }
 
-  void writeLiteral(void* P) {
-    if (P == nullptr)
-      writePseudoOpcode(PSOP_NullptrLiteral);
-    else
-      writeOpcode(COP_Undefined);
+  void writeLitVal(void* P) {
+    assert(P == nullptr && "Cannot serialize non-null pointer literal.");
   }
 
 public:
@@ -244,11 +252,24 @@ public:
 
   template<class Ty>
   void reduceLiteralT(LiteralT<Ty>* E) {
-    writeLiteral( E->value() );
+    writeOpcode(COP_Literal);
+    writeBaseType(E->baseType());
+    writeLitVal(E->value());
   }
 
-  void reduceWeak(Instruction *I);
+  void enterScope(VarDecl *Vd);
+  void enterCFG  (SCFG *Cfg);
+  void enterBlock(BasicBlock *B);
+
+  void exitScope (VarDecl *Vd);
+  void exitCFG   (SCFG *Cfg)     { }
+  void exitBlock (BasicBlock *B) { }
+
   void reduceNull();
+  void reduceWeak(Instruction *E);
+  void reduceBBArgument(Phi *E);
+  void reduceBBInstruction(Instruction *E);
+
   void reduceVarDecl(VarDecl* E);
   void reduceFunction(Function *E);
   void reduceCode(Code *E) ;
@@ -285,6 +306,137 @@ public:
 
 private:
   ByteStreamWriterBase *Writer;
+};
+
+
+
+/// Deserialize a SExpr.
+class BytecodeReader : public BytecodeBase {
+protected:
+  template<class T>
+  T readFlag() { return static_cast<T>(Reader->readBits32(getBitSize<T>())); }
+
+  PseudoOpcode readPseudoOpcode() { return readFlag<PseudoOpcode>(); }
+
+  TIL_Opcode getOpcode(PseudoOpcode Psop) {
+    return static_cast<TIL_Opcode>(Psop - PSOP_Last);
+  }
+
+  BaseType readBaseType() {
+    BaseType Bt;
+    if (Bt.fromUInt8(Reader->readUInt8()))
+      Bt.VectSize = Reader->readUInt8();
+    return Bt;
+  }
+
+  bool      readLitVal(bool*)      { return Reader->readBool(); }
+
+  uint8_t   readLitVal(uint8_t*)   { return Reader->readUInt8();  }
+  uint16_t  readLitVal(uint16_t*)  { return Reader->readUInt16(); }
+  uint32_t  readLitVal(uint32_t*)  { return Reader->readUInt32(); }
+  uint64_t  readLitVal(uint64_t*)  { return Reader->readUInt64(); }
+
+  int8_t    readLitVal(int8_t*)    { return Reader->readInt8();  }
+  int16_t   readLitVal(int16_t*)   { return Reader->readInt16(); }
+  int32_t   readLitVal(int32_t*)   { return Reader->readInt32(); }
+  int64_t   readLitVal(int64_t*)   { return Reader->readInt64(); }
+
+  float     readLitVal(float*)     { return Reader->readFloat();  }
+  double    readLitVal(double*)    { return Reader->readDouble(); }
+  StringRef readLitVal(StringRef*) { return Reader->readString(); }
+  void*     readLitVal(void**)     { return nullptr; }
+
+  SExpr* arg(int i)     { return Stack[Stack.size()-1 - i]; }
+  void   push(SExpr* E) { Stack.push_back(E); }
+  void   drop(int n)    { Stack.resize(Stack.size() - n); }
+
+  ArrayRef<SExpr*> lastArgs(unsigned n) {
+    return ArrayRef<SExpr*>(&Stack[Stack.size() - n], n);
+  }
+
+  void fail(const char* Msg) {
+    std::cerr << Msg << "\n";
+    Success = false;
+  }
+
+  template<class T> class ReadLiteralFun;
+
+  /// Read an SExpr from the byte stream.
+  void readSExpr();
+
+  /// Read a SExpr, branching on the Opcode.
+  void readSExprByType(TIL_Opcode Op);
+
+  void enterScope();
+  void exitScope();
+  void enterBlock();
+  void enterCFG();
+
+  /// Get the VarDecl for the given variable index.
+  VarDecl* getVarDecl(unsigned Vidx);
+
+  /// Get the Block for the given BlockID.
+  /// Nargs is the expected number of arguments.
+  BasicBlock* getBlock(unsigned Bid, unsigned Nargs);
+
+  void readNull();
+  void readWeak();
+  void readBBArgument();
+  void readBBInstruction();
+
+  void readVarDecl();
+  void readFunction();
+  void readCode() ;
+  void readField();
+  void readSlot();
+  void readRecord();
+  void readScalarType();
+  void readSCFG();
+  void readBasicBlock();
+  void readLiteral();
+  void readVariable();
+  void readApply();
+  void readProject();
+  void readCall();
+  void readAlloc();
+  void readLoad();
+  void readStore();
+  void readArrayIndex();
+  void readArrayAdd();
+  void readUnaryOp();
+  void readBinaryOp();
+  void readCast();
+  void readPhi();
+  void readGoto();
+  void readBranch();
+  void readReturn();
+  void readFuture() { }        ///< Can't happen.
+  void readUndefined();
+  void readWildcard();
+  void readIdentifier();
+  void readLet();
+  void readIfThenElse();
+
+public:
+  SExpr* read();
+
+  bool success() { return Success; }
+
+  BytecodeReader(CFGBuilder& B, ByteStreamReaderBase* R)
+      : Builder(B), Reader(R), CurrentInstrID(0), Success(true) {
+    Vars.push_back(nullptr);  // indices start at 1.
+  }
+
+private:
+  CFGBuilder&            Builder;
+  ByteStreamReaderBase*  Reader;
+
+  unsigned                  CurrentInstrID;
+  bool                      Success;
+  std::vector<SExpr*>       Stack;
+  std::vector<VarDecl*>     Vars;
+  std::vector<BasicBlock*>  Blocks;
+  std::vector<Instruction*> Instrs;
 };
 
 

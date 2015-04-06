@@ -139,7 +139,6 @@ public:
   }
 
   void exitCFG(SCFG *Cfg) {
-    Builder.currentCFG()->renumber();
     Builder.endCFG();
     this->scope()->exitCFG();
   }
@@ -217,7 +216,7 @@ public:
     auto *Res = Builder.newRecord(Ns);
     for (unsigned i = 0; i < Ns; ++i) {
       Slot *S = cast<Slot>( this->attr(i).Exp );
-      Res->slots().emplace_back(arena(), S);
+      Res->addSlot(arena(), S);
     }
     this->resultAttr().Exp = Res;
   }

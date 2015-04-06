@@ -16,7 +16,11 @@
 //===----------------------------------------------------------------------===//
 
 
+
 #include "til/Bytecode.h"
+#include "til/CFGBuilder.h"
+#include "til/TILPrettyPrint.h"
+
 
 #include <memory>
 #include <iostream>
@@ -36,24 +40,24 @@ using namespace til;
 /// Simple writer that serializes to memory.
 class InMemoryWriter : public ByteStreamWriterBase {
 public:
-  InMemoryWriter(char* Buf) :  Pos(0), Buffer(Buf) { }
+  InMemoryWriter(char* Buf) :  TargetPos(0), TargetBuffer(Buf) { }
   virtual ~InMemoryWriter() { flush(); }
 
   /// Write a block of data to disk.
   virtual void writeData(const void *Buf, int64_t Size) override {
-    memcpy(Buffer + Pos, Buf, Size);
-    Pos += Size;
+    memcpy(TargetBuffer + TargetPos, Buf, Size);
+    TargetPos += Size;
   }
 
-  int length() { return Pos; }
+  int totalLength() { return TargetPos; }
 
   void dump() {
-    char* Buf  = Buffer;
-    int   Size = Pos;
+    char* Buf = TargetBuffer;
+    int   Sz  = TargetPos;
 
-    std::cout << "\n";
-    bool prevChar = true;
-    for (int64_t i = 0; i < Size; ++i) {
+    // bool prevChar = true;
+    for (int64_t i = 0; i < Sz; ++i) {
+      /*
       if (Buf[i] >= '0' && Buf[i] <= 'z') {
         if (!prevChar)
           std::cout << " ";
@@ -61,54 +65,60 @@ public:
         prevChar = true;
         continue;
       }
+      */
       unsigned val = static_cast<uint8_t>(Buf[i]);
       std::cout << " " << val;
-      prevChar = false;
+      // prevChar = false;
     }
     std::cout << "\n";
   }
 
 private:
-  int Pos;
-  char* Buffer;
+  int   TargetPos;
+  char* TargetBuffer;
 };
 
 
 /// Simple reader that serializes from memory.
 class InMemoryReader : public ByteStreamReaderBase {
 public:
-  InMemoryReader(char* Buf, int Sz) : Pos(0), Size(Sz), Buffer(Buf)  {
+  InMemoryReader(char* Buf, int Sz, MemRegionRef A)
+      : SourcePos(0), SourceSize(Sz), SourceBuffer(Buf), Arena(A)  {
     refill();
   }
 
   /// Write a block of data to disk.
   virtual int64_t readData(void *Buf, int64_t Sz) override {
-    if (Sz > length())
-      Sz = length();
-    memcpy(Buf, Buffer + Pos, Sz);
-    Pos += Sz;
+    if (Sz > totalLength())
+      Sz = totalLength();
+    memcpy(Buf, SourceBuffer + SourcePos, Sz);
+    SourcePos += Sz;
     return Sz;
   }
 
   virtual char* allocStringData(uint32_t Sz) override {
-    return static_cast<char*>( malloc(Sz + 1) );
+    return Arena.allocateT<char>(Sz + 1);
   }
 
 private:
-  int length() { return Size - Pos; }
+  int totalLength() { return SourceSize - SourcePos; }
 
-  int Pos;
-  int Size;
-  char* Buffer;
+  int   SourcePos;
+  int   SourceSize;
+  char* SourceBuffer;
+  MemRegionRef Arena;
 };
 
 
 void testByteStream() {
-  char* Buf = reinterpret_cast<char*>( malloc(1 << 16) );  // 64k buffer.
+  MemRegion    region;
+  MemRegionRef arena(&region);
+
+  char* buf = arena.allocateT<char>(1 << 16);  // 64k buffer.
   int len = 0;
 
   {
-    InMemoryWriter writer(Buf);
+    InMemoryWriter writer(buf);
 
     writer.writeBool(true);
     writer.writeBool(false);
@@ -137,12 +147,12 @@ void testByteStream() {
 
     writer.writeString("Done.");
     writer.flush();
-    len = writer.length();
+    len = writer.totalLength();
 
     // writer.dump();
   }
 
-  InMemoryReader reader(Buf, len);
+  InMemoryReader reader(buf, len, arena);
 
   bool b = reader.readBool();
   CHECK(b == true);
@@ -185,14 +195,12 @@ void testByteStream() {
 
   StringRef s = reader.readString();
   CHECK(s == "Hello ");
-  free( const_cast<char*>(s.data()) );
 
   u8 = reader.readUInt8();
   CHECK(u8 == '-');
 
   s = reader.readString();
   CHECK(s == "World!");
-  free( const_cast<char*>(s.data()) );
 
   int sign = 1;
   for (int i = 0; i < 5000; ++i) {
@@ -203,13 +211,170 @@ void testByteStream() {
 
   s = reader.readString();
   CHECK(s == "Done.");
-  free( const_cast<char*>(s.data()) );
-
-  free(Buf);
 }
+
+
+
+
+
+
+SExpr* makeSimpleExpr(CFGBuilder& bld) {
+  auto *e1 = bld.newLiteralT<int>(1);
+  auto *e2 = bld.newLiteralT<int>(2);
+  auto *e3 = bld.newBinaryOp(BOP_Add, e1, e2);
+  e3->setBaseType(BaseType::getBaseType<int>());
+  auto *e4 = bld.newLiteralT<int>(3);
+  auto *e5 = bld.newBinaryOp(BOP_Mul, e3, e4);
+  e5->setBaseType(BaseType::getBaseType<int>());
+  auto *e6 = bld.newUnaryOp(UOP_Negative, e5);
+  return e6;
+}
+
+
+SExpr* makeModule(CFGBuilder& bld) {
+  // declare self parameter for enclosing module
+  auto *self_vd = bld.newVarDecl(VarDecl::VK_SFun, "self", nullptr);
+  bld.enterScope(self_vd);
+  auto *self = bld.newVariable(self_vd);
+
+  // declare parameters for sum function
+  auto *int_ty = bld.newScalarType(BaseType::getBaseType<int>());
+  auto *vd_n = bld.newVarDecl(VarDecl::VK_Fun, "n", int_ty);
+  bld.enterScope(vd_n);
+  auto *n = bld.newVariable(vd_n);
+
+  // construct CFG for sum function
+  bld.beginCFG(nullptr);
+  auto *cfg = bld.currentCFG();
+
+  bld.beginBlock(cfg->entry());
+  auto *i      = bld.newLiteralT<int>(0);
+  auto *total  = bld.newLiteralT<int>(0);
+  auto *jfld   = bld.newField(int_ty, i);
+  auto *jptr   = bld.newAlloc(jfld, Alloc::AK_Local);
+  auto *label1 = bld.newBlock(2);
+  SExpr* args[2] = { i, total };
+  bld.newGoto(label1, ArrayRef<SExpr*>(args, 2));
+
+  bld.beginBlock(label1);
+  auto *iphi     = bld.currentBB()->arguments()[0];
+  auto *totalphi = bld.currentBB()->arguments()[1];
+  auto *cond     = bld.newBinaryOp(BOP_Leq, iphi, n);
+  cond->setBaseType(BaseType::getBaseType<bool>());
+  auto *label2   = bld.newBlock();
+  auto *label3   = bld.newBlock();
+  bld.newBranch(cond, label2, label3);
+
+  bld.beginBlock(label2);
+  auto *i2  = bld.newBinaryOp(BOP_Add, iphi, bld.newLiteralT<int>(1));
+  i2->setBaseType(BaseType::getBaseType<int>());
+  auto *jld = bld.newLoad(jptr);
+  jld->setBaseType(BaseType::getBaseType<int>());
+  auto *j2  = bld.newBinaryOp(BOP_Add, jld, bld.newLiteralT<int>(1));
+  j2->setBaseType(BaseType::getBaseType<int>());
+  bld.newStore(jptr, j2);
+  auto *total2    = bld.newBinaryOp(BOP_Add, totalphi, iphi);
+  total2->setBaseType(BaseType::getBaseType<int>());
+  SExpr* args2[2] = { i2, total2 };
+  bld.newGoto(label1, ArrayRef<SExpr*>(args2, 2));
+
+  bld.beginBlock(label3);
+  bld.newGoto(cfg->exit(), total2);
+
+  bld.endCFG();
+
+  // construct sum function
+  auto *sum_c   = bld.newCode(int_ty, cfg);
+  bld.exitScope();
+  auto *sum_f   = bld.newFunction(vd_n, sum_c);
+  auto *sum_slt = bld.newSlot("sum", sum_f);
+
+  // declare parameters for sum function
+  auto *vd_m = bld.newVarDecl(VarDecl::VK_Fun, "m", int_ty);
+  bld.enterScope(vd_m);
+  auto *m = bld.newVariable(vd_m);
+
+  auto *vd_tot = bld.newVarDecl(VarDecl::VK_Fun, "total", int_ty);
+  bld.enterScope(vd_tot);
+  auto *tot = bld.newVariable(vd_tot);
+
+  auto *ifcond = bld.newBinaryOp(BOP_Eq, m, bld.newLiteralT<int>(0));
+  ifcond->setBaseType(BaseType::getBaseType<int>());
+  auto *zero   = bld.newLiteralT<int>(0);
+
+  auto *m2   = bld.newBinaryOp(BOP_Sub, m, bld.newLiteralT<int>(1));
+  m2->setBaseType(BaseType::getBaseType<int>());
+  auto *tot2 = bld.newBinaryOp(BOP_Add, tot, m);
+  tot2->setBaseType(BaseType::getBaseType<int>());
+  auto *app1 = bld.newApply(self, nullptr, Apply::FAK_SApply);
+  auto *app2 = bld.newProject(app1, "sum2");
+  auto *app3 = bld.newApply(app2, m2);
+  auto *app4 = bld.newApply(app3, tot2);
+  auto *fcall = bld.newCall(app4);
+
+  auto *ife = bld.newIfThenElse(ifcond, zero, fcall);
+  auto *sum2_c   = bld.newCode(int_ty, ife);
+  bld.exitScope();
+  auto *sum2_f1  = bld.newFunction(vd_tot, sum2_c);
+  bld.exitScope();
+  auto *sum2_f2  = bld.newFunction(vd_m, sum2_f1);
+  auto *sum2_slt = bld.newSlot("sum2", sum2_f2);
+
+  // build enclosing record
+  auto *rec = bld.newRecord(2);
+  rec->addSlot(bld.arena(), sum_slt);
+  rec->addSlot(bld.arena(), sum2_slt);
+
+  // build enclosing module
+  bld.exitScope();
+  auto *mod = bld.newFunction(self_vd, rec);
+
+  return mod;
+}
+
+
+void testSerialization(CFGBuilder& bld, char* buf, SExpr *e) {
+  std::cout << "\n";
+  TILDebugPrinter::print(e, std::cout);
+  std::cout << "\n\n";
+
+  int len = 0;
+
+  InMemoryWriter writeStream(buf);
+  BytecodeWriter writer(&writeStream);
+
+  writer.traverseAll(e);
+  writeStream.flush();
+  len = writeStream.totalLength();
+  std::cout << "Output " << len << " bytes.\n";
+  writeStream.dump();
+  std::cout << "\n";
+
+  InMemoryReader readStream(buf, len, bld.arena());
+  BytecodeReader reader(bld, &readStream);
+  auto* e2 = reader.read();
+
+  if (e2) {
+    TILDebugPrinter::print(e2, std::cout);
+    std::cout << "\n\n";
+  }
+}
+
+
+void testSerialization() {
+  MemRegion    region;
+  MemRegionRef arena(&region);
+  CFGBuilder   builder(arena);
+  char* buf = arena.allocateT<char>(1 << 16);  // 64k buffer
+
+  testSerialization(builder, buf, makeSimpleExpr(builder));
+  testSerialization(builder, buf, makeModule(builder));
+}
+
 
 
 int main(int argc, const char** argv) {
   testByteStream();
+  testSerialization();
 }
 

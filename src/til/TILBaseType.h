@@ -92,15 +92,23 @@ struct BaseType {
     return false;
   }
 
+  /// Encode as 8-bit integer, with a single bit indicating vector or not.
+  uint8_t asUInt8() {
+    uint8_t VectorBit = (VectSize <= 1) ? 0 : (1 << 7);
+    return static_cast<uint8_t>(VectorBit | (Size << 4) | Base);
+  }
+
   /// Encode as 16-bit integer
   uint16_t asUInt16() {
     return static_cast<uint16_t>((VectSize << 16) | (Size << 4) | Base);
   }
 
-  /// Encode as 8-bit integer, with a single bit indicating vector or not.
-  uint8_t asUInt8() {
-    uint8_t VectorBit = (VectSize <= 1) ? 0 : (1 << 7);
-    return static_cast<uint8_t>(VectorBit | (Size << 4) | Base);
+  // Set value from 8-bit integer, and return true if the vector bit set.
+  bool fromUInt8(uint8_t V) {
+    Base = static_cast<BaseCode>(V & 0xF);
+    Size = static_cast<SizeCode>((V >> 4) & 0x7);
+    VectSize = 0;
+    return (V & 0x08) != 0;
   }
 
   // Set value from encoded 16-bit integer.
@@ -112,6 +120,7 @@ struct BaseType {
 
   const char* getTypeName();
 
+  BaseType() = default;
   BaseType(BaseCode B, SizeCode Sz, unsigned char Vs)
       : Base(B), Size(Sz), VectSize(Vs)
   { }
@@ -208,11 +217,12 @@ inline BaseType BaseType::getBaseType<void*>() {
 template< template<typename> class F >
 class BtBr {
 public:
+  typedef typename F<void>::ReturnType ReturnType;
 
   /// Parse base type, and call F<Ty>(Args), with Ty set to the static type.
   /// Return Default on failure.
-  template<class RTy, typename... ArgTypes >
-  static RTy branch(BaseType Bt, RTy Default, ArgTypes... Args) {
+  template<typename... ArgTypes >
+  static ReturnType branch(BaseType Bt, ArgTypes... Args) {
     switch (Bt.Base) {
     case BaseType::BT_Void:
       break;
@@ -264,7 +274,7 @@ public:
     case BaseType::BT_Pointer:
       return F<void*>::action(Args...);
     }
-    return Default;
+    return F<void>::defaultAction(Args...);
   }
 
 
@@ -272,8 +282,8 @@ public:
   /// This version only parses numeric (int, and float) types,
   /// and it only handles integer types have been promoted to a minimum size.
   /// Returns Default on failure.
-  template<class RTy, typename... ArgTypes >
-  static RTy branchOnNumeric(BaseType Bt, RTy Default, ArgTypes... Args) {
+  template<typename... ArgTypes >
+  static ReturnType branchOnNumeric(BaseType Bt, ArgTypes... Args) {
     switch (Bt.Base) {
     case BaseType::BT_Int: {
       switch (Bt.Size) {
@@ -311,7 +321,7 @@ public:
     default:
       break;
     }
-    return Default;
+    return F<void>::defaultAction(Args...);
   }
 
 
@@ -319,8 +329,8 @@ public:
   /// This version only parses the integer (signed and unsigned types),
   /// and it only handles integer types have been promoted to a minimum size.
   /// Returns Default on failure.
-  template<class RTy, typename... ArgTypes >
-  static RTy branchOnIntegral(BaseType Bt, RTy Default, ArgTypes... Args) {
+  template<typename... ArgTypes >
+  static ReturnType branchOnIntegral(BaseType Bt, ArgTypes... Args) {
     switch (Bt.Base) {
     case BaseType::BT_Int: {
       switch (Bt.Size) {
@@ -347,7 +357,7 @@ public:
     default:
       break;
     }
-    return Default;
+    return F<void>::defaultAction(Args...);
   }
 
 };

@@ -24,7 +24,17 @@
 namespace ohmu {
 namespace til {
 
-// Pretty printer for TIL expressions
+/// Helper class to automatically increment and decrement a counter.
+class AutoIncDec {
+public:
+  AutoIncDec(unsigned *P) : IPtr(P) { ++(*P); }
+  ~AutoIncDec() { --(*IPtr); }
+private:
+  unsigned *IPtr;
+};
+
+
+/// Pretty printer for TIL expressions
 template <typename Self, typename StreamType>
 class PrettyPrinter {
 protected:
@@ -114,6 +124,12 @@ protected:
 
 
   void printSExpr(const SExpr *E, StreamType &SS, unsigned P, bool Sub=true) {
+    AutoIncDec  Aid(&Depth);
+    if (Depth > MaxDepth) {
+      SS << "...";
+      return;
+    }
+
     if (!E) {
       self()->printNull(SS);
       return;
@@ -138,7 +154,6 @@ protected:
       self()->print##X(cast<X>(E), SS);                                    \
       return;
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
     }
   }
 
@@ -183,6 +198,13 @@ protected:
   template<class Ty>
   class LiteralPrinter {
   public:
+    typedef bool ReturnType;
+
+    static bool defaultAction(PrettyPrinter*, const Literal*, StreamType *SS) {
+      *SS << "void";
+      return false;
+    }
+
     static bool action(PrettyPrinter *Pr, const Literal *E, StreamType *SS) {
       Pr->printLiteralT<Ty>(E->as<Ty>(), *SS);
       return true;
@@ -190,9 +212,8 @@ protected:
   };
 
   void printLiteral(const Literal *E, StreamType &SS) {
-    BtBr<LiteralPrinter>::branch(E->baseType(), false, this, E, &SS);
+    BtBr<LiteralPrinter>::branch(E->baseType(), this, E, &SS);
   }
-
 
   void printVariable(const Variable *E, StreamType &SS) {
     auto* Vd = E->variableDecl();
@@ -601,7 +622,7 @@ protected:
 
 public:
   PrettyPrinter(bool V = false, bool CS = true)
-     : Verbose(V), CStyle(CS), Indent(0)
+     : Verbose(V), CStyle(CS), Indent(0), Depth(0)
   {}
 
   static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
@@ -610,9 +631,12 @@ public:
   }
 
 private:
+  const unsigned MaxDepth = 128;
+
   bool Verbose;  // Print out additional information
   bool CStyle;   // Print exprs in C-like syntax.
   unsigned Indent;
+  unsigned Depth;
 };
 
 

@@ -51,10 +51,10 @@ public:
 
   /// Default visit behavior.
   void reduceSExpr(SExpr* Orig) { }
-
   void reduceNull() { }
-
-  void reduceWeak(Instruction* E) { }
+  void reduceWeak(Instruction* Orig) { }
+  void reduceBBArgument(Phi *Orig) { }
+  void reduceBBInstruction(Instruction *Orig) { }
 
   template<class T>
   void reduceLiteralT(LiteralT<T>* E) { self()->reduceSExpr(E); }
@@ -63,8 +63,6 @@ public:
 #define TIL_OPCODE_DEF(X)                                                 \
   void reduce##X(X *E) { self()->reduceSExpr(E); }
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
-
 
 protected:
   bool Success;

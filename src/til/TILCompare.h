@@ -41,7 +41,6 @@ public:
     case COP_##X:                                                             \
       return cast<X>(E1)->compare(cast<X>(E2), *self());
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
     }
     return self()->falseResult();
   }

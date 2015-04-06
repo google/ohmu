@@ -56,7 +56,6 @@ public:
   }
 
   void exitCFG(SCFG *Cfg) {
-    Builder.currentCFG()->renumber();
     Builder.endCFG();
     this->scope()->exitCFG();
   }

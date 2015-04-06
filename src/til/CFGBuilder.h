@@ -81,10 +81,11 @@ public:
   /// Restore the previous emit flag.
   void restoreEmit(bool B) { CurrentState.EmitInstrs = B; }
 
-
+  /// Enter the scope of Nvd.
   void enterScope(VarDecl *Nvd);
-  void exitScope();
 
+  /// Exit the scope of the topmost variable.
+  void exitScope();
 
   /// Start working on the given CFG.
   /// If Cfg is null, then create a new one.
@@ -121,6 +122,9 @@ public:
     return new (Arena) Record(Arena, NSlots);
   }
 
+  ScalarType* newScalarType(BaseType Bt) {
+    return new (Arena) ScalarType(Bt);
+  }
   Literal* newLiteralVoid() {
     return new (Arena) Literal(BaseType::getBaseType<void>());
   }
@@ -197,6 +201,9 @@ public:
   }
   SExpr* newIfThenElse(SExpr* C, SExpr* T, SExpr* E) {
     return new (Arena) IfThenElse(C, T, E);
+  }
+  SExpr* newIdentifier(StringRef S) {
+    return new (Arena) Identifier(S);
   }
 
   /// Create a new basic block.

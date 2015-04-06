@@ -39,9 +39,6 @@ SCFG* SSAPass::reduceSCFG_End(SCFG* Scfg) {
   Pending.clear();
   BInfoMap.clear();
 
-  // Assign numbers to phi nodes.
-  Scfg->renumber();
-
   return InplaceReducer::reduceSCFG_End(Scfg);
 }
 
