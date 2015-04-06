@@ -370,7 +370,7 @@ void TypedEvaluator::reduceUnaryOp(UnaryOp *Orig) {
   }
 
   switch (Orig->unaryOpcode()) {
-    case UOP_Minus: {
+    case UOP_Negative: {
       if (!I0->baseType().isNumeric())
         diag().error("Operator requires a numeric type: ") << Orig;
       break;

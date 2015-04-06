@@ -16,7 +16,11 @@
 //===----------------------------------------------------------------------===//
 
 
+
 #include "til/Bytecode.h"
+#include "til/CFGBuilder.h"
+#include "til/TILPrettyPrint.h"
+
 
 #include <memory>
 #include <iostream>
@@ -36,24 +40,25 @@ using namespace til;
 /// Simple writer that serializes to memory.
 class InMemoryWriter : public ByteStreamWriterBase {
 public:
-  InMemoryWriter(char* Buf) :  Pos(0), Buffer(Buf) { }
+  InMemoryWriter(char* Buf) :  TargetPos(0), TargetBuffer(Buf) { }
   virtual ~InMemoryWriter() { flush(); }
 
   /// Write a block of data to disk.
   virtual void writeData(const void *Buf, int64_t Size) override {
-    memcpy(Buffer + Pos, Buf, Size);
-    Pos += Size;
+    memcpy(TargetBuffer + TargetPos, Buf, Size);
+    TargetPos += Size;
   }
 
-  int length() { return Pos; }
+  int totalLength() { return TargetPos; }
 
   void dump() {
-    char* Buf  = Buffer;
-    int   Size = Pos;
+    char* Buf = TargetBuffer;
+    int   Sz  = TargetPos;
 
     std::cout << "\n";
-    bool prevChar = true;
-    for (int64_t i = 0; i < Size; ++i) {
+    // bool prevChar = true;
+    for (int64_t i = 0; i < Sz; ++i) {
+      /*
       if (Buf[i] >= '0' && Buf[i] <= 'z') {
         if (!prevChar)
           std::cout << " ";
@@ -61,32 +66,34 @@ public:
         prevChar = true;
         continue;
       }
+      */
       unsigned val = static_cast<uint8_t>(Buf[i]);
       std::cout << " " << val;
-      prevChar = false;
+      // prevChar = false;
     }
     std::cout << "\n";
   }
 
 private:
-  int Pos;
-  char* Buffer;
+  int   TargetPos;
+  char* TargetBuffer;
 };
 
 
 /// Simple reader that serializes from memory.
 class InMemoryReader : public ByteStreamReaderBase {
 public:
-  InMemoryReader(char* Buf, int Sz) : Pos(0), Size(Sz), Buffer(Buf)  {
+  InMemoryReader(char* Buf, int Sz)
+      : SourcePos(0), SourceSize(Sz), SourceBuffer(Buf)  {
     refill();
   }
 
   /// Write a block of data to disk.
   virtual int64_t readData(void *Buf, int64_t Sz) override {
-    if (Sz > length())
-      Sz = length();
-    memcpy(Buf, Buffer + Pos, Sz);
-    Pos += Sz;
+    if (Sz > totalLength())
+      Sz = totalLength();
+    memcpy(Buf, SourceBuffer + SourcePos, Sz);
+    SourcePos += Sz;
     return Sz;
   }
 
@@ -95,11 +102,11 @@ public:
   }
 
 private:
-  int length() { return Size - Pos; }
+  int totalLength() { return SourceSize - SourcePos; }
 
-  int Pos;
-  int Size;
-  char* Buffer;
+  int   SourcePos;
+  int   SourceSize;
+  char* SourceBuffer;
 };
 
 
@@ -137,7 +144,7 @@ void testByteStream() {
 
     writer.writeString("Done.");
     writer.flush();
-    len = writer.length();
+    len = writer.totalLength();
 
     // writer.dump();
   }
@@ -209,7 +216,54 @@ void testByteStream() {
 }
 
 
+SExpr* makeSimpleExpr(CFGBuilder& Builder) {
+  auto *e1 = Builder.newLiteralT<int>(1);
+  auto *e2 = Builder.newLiteralT<int>(2);
+  auto *e3 = Builder.newBinaryOp(BOP_Add, e1, e2);
+  e3->setBaseType(BaseType::getBaseType<int>());
+  auto *e4 = Builder.newLiteralT<int>(3);
+  auto *e5 = Builder.newBinaryOp(BOP_Mul, e3, e4);
+  e5->setBaseType(BaseType::getBaseType<int>());
+  auto *e6 = Builder.newUnaryOp(UOP_Negative, e5);
+  return e6;
+}
+
+
+void testSerialization() {
+  MemRegion    Region;
+  MemRegionRef Arena(&Region);
+  CFGBuilder   Builder(Arena);
+
+  auto* e = makeSimpleExpr(Builder);
+  TILDebugPrinter::print(e, std::cout);
+
+  char* Buf = reinterpret_cast<char*>( malloc(1 << 16) );  // 64k buffer.
+  int len = 0;
+
+  InMemoryWriter writeStream(Buf);
+  BytecodeWriter writer(&writeStream);
+
+  writer.traverseAll(e);
+  writeStream.flush();
+  len = writeStream.totalLength();
+  std::cout << "\n";
+  std::cout << "Output " << len << " bytes.\n";
+  writeStream.dump();
+
+  InMemoryReader readStream(Buf, len);
+  BytecodeReader reader(Builder, &readStream);
+  auto* e2 = reader.read();
+
+  if (e2)
+    TILDebugPrinter::print(e2, std::cout);
+
+  free(Buf);
+}
+
+
+
 int main(int argc, const char** argv) {
   testByteStream();
+  testSerialization();
 }
 

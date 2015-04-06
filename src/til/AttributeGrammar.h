@@ -369,8 +369,7 @@ public:
 
   // Takes ownership of Sc
   AttributeGrammar(ScopeT* Sc)
-      : ScopeHandlerBase<ScopeT>(Sc), AttrFrame(0)
-  {
+      : ScopeHandlerBase<ScopeT>(Sc), AttrFrame(0) {
     // TODO: FIXME!  This is to prevent memory corruption.
     Attrs.reserve(100000);
   }
@@ -401,24 +400,23 @@ public:
 
     SuperTv::traverse(E, K);
 
-    if (K == TRV_Instr) {
-      Instruction *I = E->asCFGInstruction();
-      if (I)
-        self()->scope()->insertInstructionMap(I,
-          std::move(self()->resultAttr()));
-    }
-
     self()->scope()->exitSubExpr(K, Cstate);
     self()->restoreAttrFrame(Af);
   }
 
+  void reduceBBArgument(Phi *Ph) {
+    reduceBBInstruction(Ph);
+  }
+
+  void reduceBBInstruction(Instruction *I) {
+    self()->scope()->insertInstructionMap(I, std::move(self()->lastAttr()));
+  }
 
   void traverseWeak(Instruction* E) {
     unsigned Af = self()->pushAttrFrame();
     SuperTv::traverseWeak(E);
     self()->restoreAttrFrame(Af);
   }
-
 
   void traverseNull() {
     unsigned Af = self()->pushAttrFrame();

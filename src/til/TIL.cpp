@@ -88,7 +88,7 @@ StringRef getOpcodeString(TIL_Opcode Op) {
 
 StringRef getUnaryOpcodeString(TIL_UnaryOpcode Op) {
   switch (Op) {
-    case UOP_Minus:    return "-";
+    case UOP_Negative: return "-";
     case UOP_BitNot:   return "~";
     case UOP_LogicNot: return "!";
   }

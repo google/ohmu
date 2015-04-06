@@ -13,6 +13,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef TIL_OPCODE_FIRST
+  TIL_OPCODE_FIRST(VarDecl);
+#undef TIL_OPCODE_FIRST
+#endif
+
+#ifdef TIL_OPCODE_DEF
 
 // Declarations and definitions
 TIL_OPCODE_DEF(VarDecl)
@@ -64,3 +70,10 @@ TIL_OPCODE_DEF(Identifier)
 TIL_OPCODE_DEF(Let)
 TIL_OPCODE_DEF(IfThenElse)
 
+#undef TIL_OPCODE_DEF
+#endif // TIL_OPCODE_DEF
+
+#ifdef TIL_OPCODE_LAST
+  TIL_OPCODE_LAST(IfThenElse)
+#undef TIL_OPCODE_LAST
+#endif

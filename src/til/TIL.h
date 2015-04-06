@@ -74,12 +74,11 @@ namespace til {
 enum TIL_Opcode {
 #define TIL_OPCODE_DEF(X) COP_##X,
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
 };
 
 /// Opcode for unary arithmetic operations.
 enum TIL_UnaryOpcode : unsigned char {
-  UOP_Minus,        ///<  -
+  UOP_Negative,     ///<  -
   UOP_BitNot,       ///<  ~
   UOP_LogicNot      ///<  !
 };
@@ -146,9 +145,13 @@ enum TIL_CastOpcode : unsigned char {
   CAST_objToPtr         ///< convert smart pointer to pointer  (C++ only)
 };
 
-const TIL_Opcode       COP_Min  = COP_Future;
-const TIL_Opcode       COP_Max  = COP_Branch;
-const TIL_UnaryOpcode  UOP_Min  = UOP_Minus;
+#define TIL_OPCODE_FIRST(X) \
+  const TIL_Opcode COP_Min  = COP_##X;
+#define TIL_OPCODE_LAST(X) \
+  const TIL_Opcode COP_Max  = COP_##X;
+#include "TILOps.def"
+
+const TIL_UnaryOpcode  UOP_Min  = UOP_Negative;
 const TIL_UnaryOpcode  UOP_Max  = UOP_LogicNot;
 const TIL_BinaryOpcode BOP_Min  = BOP_Add;
 const TIL_BinaryOpcode BOP_Max  = BOP_LogicOr;
@@ -1260,11 +1263,18 @@ public:
   size_t blockID() const { return BlockID; }
   void setBlockID(size_t i) { BlockID = i; }
 
-  /// Returns the number of predecessors.
   size_t numArguments()    const { return Args.size(); }
   size_t numInstructions() const { return Instrs.size(); }
   size_t numPredecessors() const { return Predecessors.size(); }
   size_t numSuccessors()   const { return successors().size(); }
+
+  unsigned firstInstrID() {
+    if (Args.size() > 0)
+      return Args[0]->instrID();
+    else if (Instrs.size() > 0)
+      return Instrs[0]->instrID();
+    return 0;
+  }
 
   const SCFG* cfg() const { return CFGPtr; }
   SCFG* cfg() { return CFGPtr; }

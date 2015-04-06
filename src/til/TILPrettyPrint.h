@@ -138,7 +138,6 @@ protected:
       self()->print##X(cast<X>(E), SS);                                    \
       return;
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
     }
   }
 

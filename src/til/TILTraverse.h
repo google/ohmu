@@ -102,7 +102,6 @@ public:
 #define TIL_OPCODE_DEF(X)                                                 \
   void traverse##X(X *E);
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
 
 
 protected:
@@ -114,7 +113,6 @@ protected:
       self()->traverse##X(cast<X>(E));                                    \
       return;
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
     }
     self()->reduceNull();
   }
@@ -125,7 +123,6 @@ protected:
     return self()->traverse##X(E);                                        \
   }
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
 };
 
 
@@ -146,14 +143,21 @@ public:
 /// DefaultReducer implements empty versions of all of the reduce() methods
 /// for a traversal.
 class DefaultReducer {
+  /// Reduce a null SExpr
   void reduceNull() { }
 
-  void reduceWeak(Instruction* E) { }
+  /// Reduce a weak reference to a CFG Instruction
+  void reduceWeak(Instruction* Orig) { }
+
+  /// Reduce a basic block argument.
+  void reduceBBArgument(Phi *Orig) { }
+
+  /// Reduce a basic block instruction.
+  void reduceBBInstruction(Instruction *Orig) { }
 
 #define TIL_OPCODE_DEF(X)   \
   void reduce##X(X *E) { }
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
 };
 
 
@@ -371,11 +375,15 @@ void Traversal<S>::traverseReturn(Return *E) {
 template <class S>
 void Traversal<S>::traverseBasicBlock(BasicBlock *E) {
   self()->enterBlock(E);
-  for (Phi *A : E->arguments())
+  for (Phi *A : E->arguments()) {
     self()->traverse(A, TRV_Instr);
+    self()->reduceBBArgument(A);
+  }
 
-  for (Instruction *I : E->instructions())
+  for (Instruction *I : E->instructions()) {
     self()->traverse(I, TRV_Instr);
+    self()->reduceBBInstruction(I);
+  }
 
   self()->traverse(E->terminator(), TRV_Instr);
   self()->reduceBasicBlock(E);

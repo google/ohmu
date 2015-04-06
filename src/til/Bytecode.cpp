@@ -22,7 +22,7 @@ void ByteStreamWriterBase::flush() {
 
 
 void ByteStreamReaderBase::refill() {
-  if (eof())
+  if (Eof)
     return;
 
   if (Pos > 0) {  // Move remaining contents to start of buffer.
@@ -78,7 +78,7 @@ void ByteStreamReaderBase::readBytes(void *Data, int64_t Size) {
     Data = reinterpret_cast<char*>(Data) + len;
 
     if (Size >= (BufferSize >> 1)) {   // Don't buffer large reads.
-      if (eof()) {
+      if (Eof) {
         Error = true;
         return;
       }
@@ -275,11 +275,15 @@ void BytecodeReader::enterScope() {
 void BytecodeWriter::enterBlock(BasicBlock *B) {
   writePseudoOpcode(PSOP_EnterBlock);
   Writer->writeUInt32(B->blockID());
+  Writer->writeUInt32(B->firstInstrID());
+  Writer->writeUInt32(B->numArguments());
 }
 
 void BytecodeReader::enterBlock() {
   unsigned Bid = Reader->readUInt32();
-  Builder.beginBlock( getBlock(Bid) );
+  CurrentInstrID = Reader->readUInt32();
+  unsigned Nargs = Reader->readUInt32();
+  Builder.beginBlock( getBlock(Bid, Nargs) );
 }
 
 
@@ -307,7 +311,7 @@ VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
 }
 
 
-BasicBlock *BytecodeReader::getBlock(unsigned Bid) {
+BasicBlock *BytecodeReader::getBlock(unsigned Bid, unsigned Nargs) {
   if (Bid > Blocks.size()) {
     fail("Invalid block ID.");
     return nullptr;
@@ -315,12 +319,23 @@ BasicBlock *BytecodeReader::getBlock(unsigned Bid) {
 
   auto *Bb = Blocks[Bid];
   if (!Bb) {
-    Bb = Builder.newBlock();
+    Bb = Builder.newBlock(Nargs);
     Blocks[Bid] = Bb;
+  }
+  else if (Bb->numArguments() != Nargs) {
+    fail("Block has wrong number of arguments.");
   }
   return Bb;
 }
 
+
+void BytecodeWriter::reduceNull() {
+  writePseudoOpcode(PSOP_Null);
+}
+
+void BytecodeReader::readNull() {
+  push(nullptr);
+}
 
 
 void BytecodeWriter::reduceWeak(Instruction *I) {
@@ -338,12 +353,33 @@ void BytecodeReader::readWeak() {
 }
 
 
-void BytecodeWriter::reduceNull() {
-  writePseudoOpcode(PSOP_Null);
+void BytecodeWriter::reduceBBArgument(Phi *E) {
+  writePseudoOpcode(PSOP_BBArgument);
 }
 
-void BytecodeReader::readNull() {
-  push(nullptr);
+void BytecodeReader::readBBArgument() {
+  Phi *Ph = dyn_cast<Phi>(arg(0));
+  if (!Ph) {
+    fail("Expected Phi node.");
+    return;
+  }
+  Instrs[CurrentInstrID++] = Ph;
+  drop(1);
+}
+
+
+void BytecodeWriter::reduceBBInstruction(Instruction *E) {
+  writePseudoOpcode(PSOP_BBInstruction);
+}
+
+void BytecodeReader::readBBInstruction() {
+  Instruction *I = dyn_cast<Instruction>(arg(0));
+  if (!I) {
+    fail("Expected instruction.");
+    return;
+  }
+  Instrs[CurrentInstrID++] = I;
+  drop(1);
 }
 
 
@@ -470,7 +506,7 @@ void BytecodeReader::readBasicBlock() {
 
 void BytecodeWriter::reduceLiteral(Literal *E) {
   writeOpcode(COP_Literal);
-  writeBaseType(E->baseType());
+  writeBaseType(BaseType::getBaseType<void>());
 }
 
 
@@ -517,7 +553,7 @@ void BytecodeWriter::reduceApply(Apply *E) {
 }
 
 void BytecodeReader::readApply() {
-  auto Ak = Reader->readFlag<Apply::ApplyKind>();
+  auto Ak = readFlag<Apply::ApplyKind>();
   auto *E = Builder.newApply(arg(0), arg(1), Ak);
   drop(2);
   push(E);
@@ -598,8 +634,8 @@ void BytecodeWriter::reduceArrayAdd(ArrayAdd *E) {
   writeOpcode(COP_ArrayAdd);
 }
 
-void BytecodeReader::readArrayIndex() {
-  auto *E = Builder.newArrayIndex(arg(1), arg(0));
+void BytecodeReader::readArrayAdd() {
+  auto *E = Builder.newArrayAdd(arg(1), arg(0));
   drop(2);
   push(E);
 }
@@ -613,7 +649,9 @@ void BytecodeWriter::reduceUnaryOp(UnaryOp *E) {
 
 void BytecodeReader::readUnaryOp() {
   auto Uop = readFlag<TIL_UnaryOpcode>();
+  auto Bt  = readBaseType();
   auto *E = Builder.newUnaryOp(Uop, arg(0));
+  E->setBaseType(Bt);
   drop(1);
   push(E);
 }
@@ -627,7 +665,9 @@ void BytecodeWriter::reduceBinaryOp(BinaryOp *E) {
 
 void BytecodeReader::readBinaryOp() {
   auto Bop = readFlag<TIL_BinaryOpcode>();
+  auto Bt  = readBaseType();
   auto *E = Builder.newBinaryOp(Bop, arg(1), arg(0));
+  E->setBaseType(Bt);
   drop(2);
   push(E);
 }
@@ -639,34 +679,31 @@ void BytecodeWriter::reduceCast(Cast *E) {
   writeBaseType(E->baseType());
 }
 
-void BytecodeReader::readBinaryOp() {
+void BytecodeReader::readCast() {
   auto Cop = readFlag<TIL_CastOpcode>();
-  auto *E = Builder.newCastOp(Cop, arg(0));
+  auto Bt  = readBaseType();
+  auto *E = Builder.newCast(Cop, arg(0));
+  E->setBaseType(Bt);
   drop(1);
   push(E);
 }
 
 
-void BytecodeWriter::reducePhi(Phi *E) {
-  writeOpcode(COP_Phi);
-}
+void BytecodeWriter::reducePhi(Phi *E) { /* Handled by reduceGoto. */ }
 
-void BytecodeWriter::readPhi() {
-  auto *E = Builder.newPhi();
-  push(E);
-}
+void BytecodeReader::readPhi() { /* Handled by readGoto. */ }
 
 
 void BytecodeWriter::reduceGoto(Goto *E) {
   writeOpcode(COP_Goto);
-  Writer->writeUInt32(E->targetBlock()->arguments().size());
+  Writer->writeUInt32(E->targetBlock()->numArguments());
   Writer->writeUInt32(E->targetBlock()->blockID());
 }
 
 void BytecodeReader::readGoto() {
   unsigned Nargs = Reader->readUInt32();
   unsigned Bid   = Reader->readUInt32();
-  BasicBlock *Bb = getBlock(Bid);
+  BasicBlock *Bb = getBlock(Bid, Nargs);
   Builder.newGoto(Bb, lastArgs(Nargs));
   drop(Nargs);
   // No need to push terminator
@@ -682,8 +719,8 @@ void BytecodeWriter::reduceBranch(Branch *E) {
 void BytecodeReader::readBranch() {
   unsigned ThenBid = Reader->readUInt32();
   unsigned ElseBid = Reader->readUInt32();
-  BasicBlock *Bbt = getBlock(ThenBid);
-  BasicBlock *Bbe = getBlock(ElseBid);
+  BasicBlock *Bbt = getBlock(ThenBid, 0);
+  BasicBlock *Bbe = getBlock(ElseBid, 0);
   Builder.newBranch(arg(0), Bbt, Bbe);
   drop(1);
   // No need to push terminator
@@ -759,23 +796,43 @@ void BytecodeReader::readIfThenElse() {
 
 void BytecodeReader::readSExpr() {
   auto Psop = readPseudoOpcode();
+  std::cerr << "PSOP: " << Psop << "\n";
   switch (Psop) {
-    case PSOP_Null:         readNull();    break;
-    case PSOP_WeakInstrRef: readWeak();    break;
-    case PSOP_EnterScope:   enterScope();  break;
-    case PSOP_EnterBlock:   enterBlock();  break;
-    case PSOP_EnterCFG:     enterCFG();    break;
-    case PSOP_LastOp:       readSExprByType(getOpcode(Psop));  break;
+    case PSOP_Null:          readNull();          break;
+    case PSOP_WeakInstrRef:  readWeak();          break;
+    case PSOP_BBArgument:    readBBArgument();    break;
+    case PSOP_BBInstruction: readBBInstruction(); break;
+    case PSOP_EnterScope:    enterScope();        break;
+    case PSOP_EnterBlock:    enterBlock();        break;
+    case PSOP_EnterCFG:      enterCFG();          break;
+    default:
+      readSExprByType(getOpcode(Psop));  break;
   }
+  Reader->endRecord();
 }
 
 void BytecodeReader::readSExprByType(TIL_Opcode op) {
+  std::cerr << "OP: " << getOpcodeString(op) << "\n";
   switch(op) {
 #define TIL_OPCODE_DEF(X) \
     case COP_##X: read##X(); break;
 #include "TILOps.def"
-#undef TIL_OPCODE_DEF
   }
+}
+
+
+SExpr* BytecodeReader::read() {
+  while (!Reader->empty())
+    readSExpr();
+  if (Stack.size() == 0) {
+    fail("Empty stack.");
+    return nullptr;
+  }
+  if (Stack.size() > 1) {
+    fail("Too many arguments on stack.");
+    return Stack[Stack.size() - 1];
+  }
+  return Stack[0];
 }
 
 

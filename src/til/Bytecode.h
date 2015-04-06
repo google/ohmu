@@ -29,6 +29,8 @@ public:
   enum PseudoOpcode : uint8_t {
     PSOP_Null = 0,
     PSOP_WeakInstrRef,
+    PSOP_BBArgument,
+    PSOP_BBInstruction,
     PSOP_EnterScope,
     PSOP_EnterBlock,
     PSOP_EnterCFG,
@@ -108,7 +110,7 @@ public:
 
 private:
   /// Returns the remaining size in the buffer
-  inline int length() { return BufferSize - Pos; }
+  int length() { return BufferSize - Pos; }
 
   /// Size of the buffer.  Default is 64k.
   static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
@@ -175,12 +177,11 @@ public:
 
   StringRef readString();
 
+  bool empty() { return Eof && length() <= 0; }
+
 private:
   /// Return the remaining data in the buffer.
   int length() { return BufferLen - Pos; }
-
-  /// Return true if we've reached the end of the stream.
-  bool eof()   { return Eof; }
 
   /// Size of the buffer.  Default is 64k.
   static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
@@ -206,7 +207,9 @@ protected:
   void writePseudoOpcode(PseudoOpcode Op) { writeFlag(Op); }
 
   void writeOpcode(TIL_Opcode Op) {
+    std::cerr << "Op: " << getOpcodeString(Op) << "\n";
     unsigned Psop = static_cast<unsigned>(PSOP_LastOp) + Op;
+    std::cerr << "Psop: " << Psop << "\n";
     writePseudoOpcode(static_cast<PseudoOpcode>(Psop));
   }
 
@@ -246,6 +249,7 @@ public:
 
   template<class Ty>
   void reduceLiteralT(LiteralT<Ty>* E) {
+    writeOpcode(COP_Literal);
     writeBaseType(E->baseType());
     writeLitVal(E->value());
   }
@@ -258,8 +262,11 @@ public:
   void exitCFG   (SCFG *Cfg)     { }
   void exitBlock (BasicBlock *B) { }
 
-  void reduceWeak(Instruction *I);
   void reduceNull();
+  void reduceWeak(Instruction *E);
+  void reduceBBArgument(Phi *E);
+  void reduceBBInstruction(Instruction *E);
+
   void reduceVarDecl(VarDecl* E);
   void reduceFunction(Function *E);
   void reduceCode(Code *E) ;
@@ -341,12 +348,14 @@ protected:
   void   drop(int n)    { Stack.resize(Stack.size() - n); }
 
   ArrayRef<SExpr*> lastArgs(unsigned n) {
-    return ArrayRef(&Stack[Stack.size() - n], n);
+    return ArrayRef<SExpr*>(&Stack[Stack.size() - n], n);
   }
 
-  void fail(const char* Msg) { }
+  void fail(const char* Msg) {
+    std::cerr << Msg << "\n";
+    Success = false;
+  }
 
-public:
   template<class T> class ReadLiteralFun;
 
   /// Read an SExpr from the byte stream.
@@ -359,11 +368,18 @@ public:
   void enterBlock();
   void enterCFG();
 
-  VarDecl*    getVarDecl(unsigned Vidx);
-  BasicBlock* getBlock  (unsigned Bid);
+  /// Get the VarDecl for the given variable index.
+  VarDecl* getVarDecl(unsigned Vidx);
 
-  void readWeak();
+  /// Get the Block for the given BlockID.
+  /// Nargs is the expected number of arguments.
+  BasicBlock* getBlock(unsigned Bid, unsigned Nargs);
+
   void readNull();
+  void readWeak();
+  void readBBArgument();
+  void readBBInstruction();
+
   void readVarDecl();
   void readFunction();
   void readCode() ;
@@ -397,11 +413,22 @@ public:
   void readLet();
   void readIfThenElse();
 
-private:
-  CFGBuilder             Builder;
-  ByteStreamReaderBase*  Reader;
-  std::vector<SExpr*>    Stack;
+public:
+  SExpr* read();
 
+  bool success() { return Success; }
+
+  BytecodeReader(CFGBuilder& B, ByteStreamReaderBase* R)
+      : Builder(B), Reader(R), CurrentInstrID(0), Success(true)
+  { }
+
+private:
+  CFGBuilder&            Builder;
+  ByteStreamReaderBase*  Reader;
+
+  unsigned                  CurrentInstrID;
+  bool                      Success;
+  std::vector<SExpr*>       Stack;
   std::vector<VarDecl*>     Vars;
   std::vector<BasicBlock*>  Blocks;
   std::vector<Instruction*> Instrs;

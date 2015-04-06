@@ -201,6 +201,9 @@ public:
   SExpr* newIfThenElse(SExpr* C, SExpr* T, SExpr* E) {
     return new (Arena) IfThenElse(C, T, E);
   }
+  SExpr* newIdentifier(StringRef S) {
+    return new (Arena) Identifier(S);
+  }
 
   /// Create a new basic block.
   /// If Nargs > 0, will create new Phi nodes for arguments.
