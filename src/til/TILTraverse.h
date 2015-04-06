@@ -239,22 +239,24 @@ void Traversal<S>::traverseScalarType(ScalarType *E) {
 template<class S>
 class LitTraverser {
 public:
-
   template<class Ty>
   class Actor {
   public:
+    typedef bool ReturnType;
+    static bool defaultAction(S* Visitor, Literal *E) {
+      return false;
+    }
     static bool action(S* Visitor, Literal *E) {
       Visitor->template reduceLiteralT<Ty>(E->as<Ty>());
       return true;
     }
   };
-
 };
 
 template <class S>
 void Traversal<S>::traverseLiteral(Literal *E) {
-  if (!BtBr< LitTraverser<S>::template Actor >::branch(
-        E->baseType(), false, self(), E))
+  if (!BtBr< LitTraverser<S>::template Actor >::
+        branch(E->baseType(), self(), E))
     self()->reduceLiteral(E);
 }
 

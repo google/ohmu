@@ -183,6 +183,13 @@ protected:
   template<class Ty>
   class LiteralPrinter {
   public:
+    typedef bool ReturnType;
+
+    static bool defaultAction(PrettyPrinter*, const Literal*, StreamType *SS) {
+      *SS << "void";
+      return false;
+    }
+
     static bool action(PrettyPrinter *Pr, const Literal *E, StreamType *SS) {
       Pr->printLiteralT<Ty>(E->as<Ty>(), *SS);
       return true;
@@ -190,9 +197,8 @@ protected:
   };
 
   void printLiteral(const Literal *E, StreamType &SS) {
-    BtBr<LiteralPrinter>::branch(E->baseType(), false, this, E, &SS);
+    BtBr<LiteralPrinter>::branch(E->baseType(), this, E, &SS);
   }
-
 
   void printVariable(const Variable *E, StreamType &SS) {
     auto* Vd = E->variableDecl();

@@ -657,6 +657,8 @@ public:
   SlotArray& slots() { return Slots; }
   const SlotArray& slots() const { return Slots; }
 
+  void addSlot(MemRegionRef A, Slot *S) { Slots.emplace_back(A, S); }
+
   Slot* findSlot(StringRef S);
 
   DECLARE_TRAVERSE_AND_COMPARE(Record)
@@ -1259,6 +1261,8 @@ public:
   void setBlockID(size_t i) { BlockID = i; }
 
   /// Returns the number of predecessors.
+  size_t numArguments()    const { return Args.size(); }
+  size_t numInstructions() const { return Instrs.size(); }
   size_t numPredecessors() const { return Predecessors.size(); }
   size_t numSuccessors()   const { return successors().size(); }
 

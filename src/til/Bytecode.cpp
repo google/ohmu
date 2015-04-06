@@ -258,10 +258,83 @@ StringRef ByteStreamReaderBase::readString() {
 
 /** BytecodeWriter and BytecodeReader **/
 
+void BytecodeWriter::enterScope(VarDecl *Vd) {
+  writePseudoOpcode(PSOP_EnterScope);
+}
+
+void BytecodeReader::enterScope() {
+  auto *Vd = dyn_cast<VarDecl>(arg(0));
+  if (!Vd || Vars.size() == Vd->varIndex()) {
+    fail("Invalid variable declaration.");
+    return;
+  }
+  Vars.push_back(Vd);
+}
+
+
+void BytecodeWriter::enterBlock(BasicBlock *B) {
+  writePseudoOpcode(PSOP_EnterBlock);
+  Writer->writeUInt32(B->blockID());
+}
+
+void BytecodeReader::enterBlock() {
+  unsigned Bid = Reader->readUInt32();
+  Builder.beginBlock( getBlock(Bid) );
+}
+
+
+void BytecodeWriter::enterCFG(SCFG *Cfg) {
+  writePseudoOpcode(PSOP_EnterCFG);
+  Writer->writeUInt32(Cfg->numBlocks());
+  Writer->writeUInt32(Cfg->numInstructions());
+}
+
+void BytecodeReader::enterCFG() {
+  unsigned Nb = Reader->readUInt32();
+  unsigned Ni = Reader->readUInt32();
+  Builder.beginCFG(nullptr);
+  Blocks.resize(Nb, nullptr);
+  Instrs.resize(Ni, nullptr);
+}
+
+
+VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
+  if (Vidx > Vars.size()) {
+    fail("Invalid variable ID.");
+    return nullptr;
+  }
+  return Vars[Vidx];
+}
+
+
+BasicBlock *BytecodeReader::getBlock(unsigned Bid) {
+  if (Bid > Blocks.size()) {
+    fail("Invalid block ID.");
+    return nullptr;
+  }
+
+  auto *Bb = Blocks[Bid];
+  if (!Bb) {
+    Bb = Builder.newBlock();
+    Blocks[Bid] = Bb;
+  }
+  return Bb;
+}
+
+
 
 void BytecodeWriter::reduceWeak(Instruction *I) {
   writePseudoOpcode(PSOP_WeakInstrRef);
   Writer->writeUInt32(I->instrID());
+}
+
+void BytecodeReader::readWeak() {
+  unsigned i = Reader->readUInt32();
+  if (i > Instrs.size()) {
+    fail("Invalid instruction ID.");
+    return;
+  }
+  push(Instrs[i]);
 }
 
 
@@ -269,11 +342,26 @@ void BytecodeWriter::reduceNull() {
   writePseudoOpcode(PSOP_Null);
 }
 
+void BytecodeReader::readNull() {
+  push(nullptr);
+}
+
 
 void BytecodeWriter::reduceVarDecl(VarDecl* E) {
   writeOpcode(COP_VarDecl);
   writeFlag(E->kind());
   Writer->writeUInt32(E->varIndex());
+  Writer->writeString(E->varName());
+}
+
+void BytecodeReader::readVarDecl() {
+  auto K = readFlag<VarDecl::VariableKind>();
+  unsigned Id = Reader->readUInt32();
+  StringRef Nm = Reader->readString();
+  auto *E = Builder.newVarDecl(K, Nm, arg(0));  // TODO: enter Scope?
+  E->setVarIndex(Id);
+  drop(1);
+  push(E);
 }
 
 
@@ -281,10 +369,25 @@ void BytecodeWriter::reduceFunction(Function *E) {
   writeOpcode(COP_Function);
 }
 
+void BytecodeReader::readFunction() {
+  auto *E = Builder.newFunction(dyn_cast<VarDecl>(arg(1)), arg(0));
+  drop(2);
+  push(E);
+}
+
+
 
 void BytecodeWriter::reduceCode(Code *E) {
   writeOpcode(COP_Code);
   writeFlag(E->callingConvention());
+}
+
+void BytecodeReader::readCode() {
+  auto Cc = readFlag<Code::CallingConvention>();
+  auto *E = Builder.newCode(arg(1), arg(0));
+  E->setCallingConvention(Cc);
+  drop(2);
+  push(E);
 }
 
 
@@ -292,10 +395,26 @@ void BytecodeWriter::reduceField(Field *E) {
   writeOpcode(COP_Field);
 }
 
+void BytecodeReader::readField() {
+  auto *E = Builder.newField(arg(1), arg(0));
+  drop(2);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceSlot(Slot *E) {
   writeOpcode(COP_Slot);
   Writer->writeUInt16(E->modifiers());
+  Writer->writeString(E->slotName());
+}
+
+void BytecodeReader::readSlot() {
+  uint16_t Mods = Reader->readUInt16();
+  StringRef S = Reader->readString();
+  auto *E = Builder.newSlot(S, arg(0));
+  E->setModifiers(Mods);
+  drop(1);
+  push(E);
 }
 
 
@@ -304,24 +423,48 @@ void BytecodeWriter::reduceRecord(Record *E) {
   Writer->writeUInt32(E->slots().size());
 }
 
+void BytecodeReader::readRecord() {
+  unsigned Sz = Reader->readUInt32();
+  auto *E = Builder.newRecord(Sz);
+  for (int i = Sz-1; i >= 0; --i) {
+    auto *Slt = dyn_cast<Slot>(arg(i));
+    E->addSlot(Builder.arena(), Slt);
+  }
+  drop(Sz);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceScalarType(ScalarType *E) {
   writeOpcode(COP_ScalarType);
   writeBaseType(E->baseType());
 }
 
+void BytecodeReader::readScalarType() {
+  BaseType Bt = readBaseType();
+  auto *E = Builder.newScalarType(Bt);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceSCFG(SCFG *E) {
   writeOpcode(COP_SCFG);
-  Writer->writeUInt32(E->numBlocks());
+}
+
+void BytecodeReader::readSCFG() {
+  Builder.endCFG();
+  Blocks.clear();
+  Instrs.clear();
 }
 
 
 void BytecodeWriter::reduceBasicBlock(BasicBlock *E) {
   writeOpcode(COP_BasicBlock);
-  Writer->writeUInt32(E->blockID());
-  Writer->writeUInt32(E->arguments().size());
-  Writer->writeUInt32(E->instructions().size());
+}
+
+void BytecodeReader::readBasicBlock() {
+  if (Builder.currentBB())
+    Builder.endBlock(nullptr);
 }
 
 
@@ -331,9 +474,40 @@ void BytecodeWriter::reduceLiteral(Literal *E) {
 }
 
 
+template<class T>
+class BytecodeReader::ReadLiteralFun {
+public:
+  typedef bool ReturnType;
+
+  static bool defaultAction(BytecodeReader *R) {
+    auto *E = R->Builder.newLiteralVoid();
+    R->push(E);
+    return false;
+  }
+
+  static bool action(BytecodeReader* R) {
+    auto *E = R->Builder.newLiteralT<T>(
+        R->readLitVal(static_cast<T*>(nullptr)) );
+    R->push(E);
+    return true;
+  }
+};
+
+void BytecodeReader::readLiteral() {
+  BaseType Bt = readBaseType();
+  BtBr<ReadLiteralFun>::branch(Bt, this);
+}
+
+
 void BytecodeWriter::reduceVariable(Variable *E) {
   writeOpcode(COP_Variable);
   Writer->writeUInt32(E->variableDecl()->varIndex());
+}
+
+void BytecodeReader::readVariable() {
+  unsigned Vidx = Reader->readUInt32();
+  auto *E = Builder.newVariable( getVarDecl(Vidx) );
+  push(E);
 }
 
 
@@ -342,15 +516,35 @@ void BytecodeWriter::reduceApply(Apply *E) {
   writeFlag(E->applyKind());
 }
 
+void BytecodeReader::readApply() {
+  auto Ak = Reader->readFlag<Apply::ApplyKind>();
+  auto *E = Builder.newApply(arg(0), arg(1), Ak);
+  drop(2);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceProject(Project *E) {
   writeOpcode(COP_Project);
   Writer->writeString(E->slotName());
 }
 
+void BytecodeReader::readProject() {
+  StringRef Nm = Reader->readString();
+  auto *E = Builder.newProject(arg(0), Nm);
+  drop(1);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceCall(Call *E) {
   writeOpcode(COP_Call);
+}
+
+void BytecodeReader::readCall() {
+  auto *E = Builder.newCall(arg(0));
+  drop(1);
+  push(E);
 }
 
 
@@ -359,9 +553,22 @@ void BytecodeWriter::reduceAlloc(Alloc *E) {
   writeFlag(E->allocKind());
 }
 
+void BytecodeReader::readAlloc() {
+  auto Ak = readFlag<Alloc::AllocKind>();
+  auto *E = Builder.newAlloc(arg(0), Ak);
+  drop(1);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceLoad(Load *E) {
   writeOpcode(COP_Load);
+}
+
+void BytecodeReader::readLoad() {
+  auto *E = Builder.newLoad(arg(0));
+  drop(1);
+  push(E);
 }
 
 
@@ -369,14 +576,32 @@ void BytecodeWriter::reduceStore(Store *E) {
   writeOpcode(COP_Store);
 }
 
+void BytecodeReader::readStore() {
+  auto *E = Builder.newStore(arg(1), arg(0));
+  drop(2);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceArrayIndex(ArrayIndex *E) {
   writeOpcode(COP_ArrayIndex);
 }
 
+void BytecodeReader::readArrayIndex() {
+  auto *E = Builder.newArrayIndex(arg(1), arg(0));
+  drop(2);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceArrayAdd(ArrayAdd *E) {
   writeOpcode(COP_ArrayAdd);
+}
+
+void BytecodeReader::readArrayIndex() {
+  auto *E = Builder.newArrayIndex(arg(1), arg(0));
+  drop(2);
+  push(E);
 }
 
 
@@ -386,11 +611,25 @@ void BytecodeWriter::reduceUnaryOp(UnaryOp *E) {
   writeBaseType(E->baseType());
 }
 
+void BytecodeReader::readUnaryOp() {
+  auto Uop = readFlag<TIL_UnaryOpcode>();
+  auto *E = Builder.newUnaryOp(Uop, arg(0));
+  drop(1);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceBinaryOp(BinaryOp *E) {
   writeOpcode(COP_BinaryOp);
   writeFlag(E->binaryOpcode());
   writeBaseType(E->baseType());
+}
+
+void BytecodeReader::readBinaryOp() {
+  auto Bop = readFlag<TIL_BinaryOpcode>();
+  auto *E = Builder.newBinaryOp(Bop, arg(1), arg(0));
+  drop(2);
+  push(E);
 }
 
 
@@ -400,9 +639,21 @@ void BytecodeWriter::reduceCast(Cast *E) {
   writeBaseType(E->baseType());
 }
 
+void BytecodeReader::readBinaryOp() {
+  auto Cop = readFlag<TIL_CastOpcode>();
+  auto *E = Builder.newCastOp(Cop, arg(0));
+  drop(1);
+  push(E);
+}
+
 
 void BytecodeWriter::reducePhi(Phi *E) {
   writeOpcode(COP_Phi);
+}
+
+void BytecodeWriter::readPhi() {
+  auto *E = Builder.newPhi();
+  push(E);
 }
 
 
@@ -412,6 +663,15 @@ void BytecodeWriter::reduceGoto(Goto *E) {
   Writer->writeUInt32(E->targetBlock()->blockID());
 }
 
+void BytecodeReader::readGoto() {
+  unsigned Nargs = Reader->readUInt32();
+  unsigned Bid   = Reader->readUInt32();
+  BasicBlock *Bb = getBlock(Bid);
+  Builder.newGoto(Bb, lastArgs(Nargs));
+  drop(Nargs);
+  // No need to push terminator
+}
+
 
 void BytecodeWriter::reduceBranch(Branch *E) {
   writeOpcode(COP_Branch);
@@ -419,9 +679,25 @@ void BytecodeWriter::reduceBranch(Branch *E) {
   Writer->writeUInt32(E->elseBlock()->blockID());
 }
 
+void BytecodeReader::readBranch() {
+  unsigned ThenBid = Reader->readUInt32();
+  unsigned ElseBid = Reader->readUInt32();
+  BasicBlock *Bbt = getBlock(ThenBid);
+  BasicBlock *Bbe = getBlock(ElseBid);
+  Builder.newBranch(arg(0), Bbt, Bbe);
+  drop(1);
+  // No need to push terminator
+}
+
 
 void BytecodeWriter::reduceReturn(Return *E) {
   writeOpcode(COP_Return);
+}
+
+void BytecodeReader::readReturn() {
+  Builder.newReturn(arg(0));
+  drop(1);
+  // No need to push terminator
 }
 
 
@@ -429,9 +705,19 @@ void BytecodeWriter::reduceUndefined(Undefined *E) {
   writeOpcode(COP_Undefined);
 }
 
+void BytecodeReader::readUndefined() {
+  auto *E = Builder.newUndefined();
+  push(E);
+}
+
 
 void BytecodeWriter::reduceWildcard(Wildcard *E) {
   writeOpcode(COP_Wildcard);
+}
+
+void BytecodeReader::readWildcard() {
+  auto *E = Builder.newWildcard();
+  push(E);
 }
 
 
@@ -440,9 +726,22 @@ void BytecodeWriter::reduceIdentifier(Identifier *E) {
   Writer->writeString(E->idString());
 }
 
+void BytecodeReader::readIdentifier() {
+  StringRef S = Reader->readString();
+  auto *E = Builder.newIdentifier(S);
+  push(E);
+}
+
 
 void BytecodeWriter::reduceLet(Let *E) {
   writeOpcode(COP_Let);
+}
+
+void BytecodeReader::readLet() {
+  auto* Vd = dyn_cast<VarDecl>(arg(1));
+  auto *E = Builder.newLet(Vd, arg(0));
+  drop(2);
+  push(E);
 }
 
 
@@ -450,6 +749,37 @@ void BytecodeWriter::reduceIfThenElse(IfThenElse *E) {
   writeOpcode(COP_IfThenElse);
 }
 
+void BytecodeReader::readIfThenElse() {
+  auto *E = Builder.newIfThenElse(arg(2), arg(1), arg(0));
+  drop(3);
+  push(E);
+}
+
+
+
+void BytecodeReader::readSExpr() {
+  auto Psop = readPseudoOpcode();
+  switch (Psop) {
+    case PSOP_Null:         readNull();    break;
+    case PSOP_WeakInstrRef: readWeak();    break;
+    case PSOP_EnterScope:   enterScope();  break;
+    case PSOP_EnterBlock:   enterBlock();  break;
+    case PSOP_EnterCFG:     enterCFG();    break;
+    case PSOP_LastOp:       readSExprByType(getOpcode(Psop));  break;
+  }
+}
+
+void BytecodeReader::readSExprByType(TIL_Opcode op) {
+  switch(op) {
+#define TIL_OPCODE_DEF(X) \
+    case COP_##X: read##X(); break;
+#include "TILOps.def"
+#undef TIL_OPCODE_DEF
+  }
+}
+
 
 }  // end namespace til
 }  // end namespace ohmu
+
+

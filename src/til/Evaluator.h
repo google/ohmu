@@ -30,6 +30,10 @@ namespace til {
 #define DEFINE_BINARY_OP_CLASS(CName, OP, RTy)                                \
 template<class Ty1>                                                           \
 struct CName {                                                                \
+  typedef Literal* ReturnType;                                                \
+  static Literal* defaultAction(MemRegionRef A, Literal*, Literal*) {         \
+    return nullptr;                                                           \
+  }                                                                           \
   static LiteralT<RTy>* action(MemRegionRef A, Literal* E0, Literal* E1) {    \
     return new (A) LiteralT<RTy>(E0->as<Ty1>()->value()  OP                   \
                                  E1->as<Ty1>()->value());                     \
@@ -67,42 +71,39 @@ DEFINE_BINARY_OP_CLASS(LogicOr,  ||,  Ty1)
 
 Literal* evaluateBinaryOp(TIL_BinaryOpcode Op, BaseType Bt, MemRegionRef A,
                           Literal* E0, Literal* E1) {
-  // default return value, which helps the code below infer the right type.
-  Literal* Def = nullptr;
-
   switch (Op) {
     case BOP_Add:
-      return BtBr<opclass::Add>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Add>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Sub:
-      return BtBr<opclass::Sub>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Sub>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Mul:
-      return BtBr<opclass::Mul>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Mul>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Div:
-      return BtBr<opclass::Div>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Div>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Rem:
-      return BtBr<opclass::Rem>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Rem>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_Shl:
-      return BtBr<opclass::Shl>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Shl>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_Shr:
-      return BtBr<opclass::Shr>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Shr>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_BitAnd:
-      return BtBr<opclass::BitAnd>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::BitAnd>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_BitXor:
-      return BtBr<opclass::BitXor>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::BitXor>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_BitOr:
-      return BtBr<opclass::BitOr>::branchOnIntegral(Bt, Def, A, E0, E1);
+      return BtBr<opclass::BitOr>::branchOnIntegral(Bt, A, E0, E1);
     case BOP_Eq:
-      return BtBr<opclass::Eq>::branch(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Eq>::branch(Bt, A, E0, E1);
     case BOP_Neq:
-      return BtBr<opclass::Neq>::branch(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Neq>::branch(Bt, A, E0, E1);
     case BOP_Lt:
-      return BtBr<opclass::Lt>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Lt>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Leq:
-      return BtBr<opclass::Leq>::branchOnNumeric(Bt, Def, A, E0, E1);
+      return BtBr<opclass::Leq>::branchOnNumeric(Bt, A, E0, E1);
     case BOP_Gt:
-      return BtBr<opclass::Lt>::branchOnNumeric(Bt, Def, A, E1, E0);
+      return BtBr<opclass::Lt>::branchOnNumeric(Bt, A, E1, E0);
     case BOP_Geq:
-      return BtBr<opclass::Leq>::branchOnNumeric(Bt, Def, A, E1, E0);
+      return BtBr<opclass::Leq>::branchOnNumeric(Bt, A, E1, E0);
     case BOP_LogicAnd:
       return opclass::LogicAnd<bool>::action(A, E0, E1);
     case BOP_LogicOr:

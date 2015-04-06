@@ -121,6 +121,9 @@ public:
     return new (Arena) Record(Arena, NSlots);
   }
 
+  ScalarType* newScalarType(BaseType Bt) {
+    return new (Arena) ScalarType(Bt);
+  }
   Literal* newLiteralVoid() {
     return new (Arena) Literal(BaseType::getBaseType<void>());
   }
