@@ -284,6 +284,11 @@ void BytecodeReader::enterBlock() {
   CurrentInstrID = Reader->readUInt32();
   unsigned Nargs = Reader->readUInt32();
   Builder.beginBlock( getBlock(Bid, Nargs) );
+
+  // Register phi nodes in Instrs array.
+  auto *Bb = Builder.currentBB();
+  for (unsigned i = 0, n = Bb->numArguments(); i < n; ++i)
+    Instrs[CurrentInstrID++] = Bb->arguments()[i];
 }
 
 
@@ -353,19 +358,9 @@ void BytecodeReader::readWeak() {
 }
 
 
-void BytecodeWriter::reduceBBArgument(Phi *E) {
-  writePseudoOpcode(PSOP_BBArgument);
-}
+void BytecodeWriter::reduceBBArgument(Phi *E) { }
 
-void BytecodeReader::readBBArgument() {
-  Phi *Ph = dyn_cast<Phi>(arg(0));
-  if (!Ph) {
-    fail("Expected Phi node.");
-    return;
-  }
-  Instrs[CurrentInstrID++] = Ph;
-  drop(1);
-}
+void BytecodeReader::readBBArgument() { }
 
 
 void BytecodeWriter::reduceBBInstruction(Instruction *E) {
@@ -796,7 +791,8 @@ void BytecodeReader::readIfThenElse() {
 
 void BytecodeReader::readSExpr() {
   auto Psop = readPseudoOpcode();
-  std::cerr << "PSOP: " << Psop << "\n";
+  if (Psop < PSOP_Last)
+    std::cerr << "Psop: " << Psop << "\n";
   switch (Psop) {
     case PSOP_Null:          readNull();          break;
     case PSOP_WeakInstrRef:  readWeak();          break;
@@ -812,7 +808,7 @@ void BytecodeReader::readSExpr() {
 }
 
 void BytecodeReader::readSExprByType(TIL_Opcode op) {
-  std::cerr << "OP: " << getOpcodeString(op) << "\n";
+  std::cerr << "Op: " << getOpcodeString(op) << "\n";
   switch(op) {
 #define TIL_OPCODE_DEF(X) \
     case COP_##X: read##X(); break;

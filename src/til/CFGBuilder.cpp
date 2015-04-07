@@ -60,6 +60,8 @@ void CFGBuilder::endCFG() {
   assert(CurrentCFG && "Not inside a CFG.");
   // assert(!CurrentBB && "Never finished the last block.");
 
+  CurrentCFG->renumber();
+
   CurrentState.EmitInstrs = false;
   CurrentCFG = nullptr;
 }

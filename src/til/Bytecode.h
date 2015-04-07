@@ -34,7 +34,7 @@ public:
     PSOP_EnterScope,
     PSOP_EnterBlock,
     PSOP_EnterCFG,
-    PSOP_LastOp
+    PSOP_Last
   };
 
   void getBitSize(uint32_t) { }  // trigger an error for unhandled types.
@@ -204,12 +204,14 @@ protected:
   template<class T>
   void writeFlag(T Flag) { Writer->writeBits32(Flag, getBitSize<T>()); }
 
-  void writePseudoOpcode(PseudoOpcode Op) { writeFlag(Op); }
+  void writePseudoOpcode(PseudoOpcode Psop) {
+    std::cerr << "Psop: " << Psop << "\n";
+    writeFlag(Psop);
+  }
 
   void writeOpcode(TIL_Opcode Op) {
     std::cerr << "Op: " << getOpcodeString(Op) << "\n";
-    unsigned Psop = static_cast<unsigned>(PSOP_LastOp) + Op;
-    std::cerr << "Psop: " << Psop << "\n";
+    unsigned Psop = static_cast<unsigned>(PSOP_Last) + Op;
     writePseudoOpcode(static_cast<PseudoOpcode>(Psop));
   }
 
@@ -316,7 +318,7 @@ protected:
   PseudoOpcode readPseudoOpcode() { return readFlag<PseudoOpcode>(); }
 
   TIL_Opcode getOpcode(PseudoOpcode Psop) {
-    return static_cast<TIL_Opcode>(Psop - PSOP_LastOp);
+    return static_cast<TIL_Opcode>(Psop - PSOP_Last);
   }
 
   BaseType readBaseType() {

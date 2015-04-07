@@ -216,26 +216,10 @@ void testByteStream() {
 }
 
 
-SExpr* makeSimpleExpr(CFGBuilder& Builder) {
-  auto *e1 = Builder.newLiteralT<int>(1);
-  auto *e2 = Builder.newLiteralT<int>(2);
-  auto *e3 = Builder.newBinaryOp(BOP_Add, e1, e2);
-  e3->setBaseType(BaseType::getBaseType<int>());
-  auto *e4 = Builder.newLiteralT<int>(3);
-  auto *e5 = Builder.newBinaryOp(BOP_Mul, e3, e4);
-  e5->setBaseType(BaseType::getBaseType<int>());
-  auto *e6 = Builder.newUnaryOp(UOP_Negative, e5);
-  return e6;
-}
-
-
-void testSerialization() {
-  MemRegion    Region;
-  MemRegionRef Arena(&Region);
-  CFGBuilder   Builder(Arena);
-
-  auto* e = makeSimpleExpr(Builder);
+void testSerialization(CFGBuilder& bld, SExpr *e) {
+  std::cout << "\n\n";
   TILDebugPrinter::print(e, std::cout);
+  std::cout << "\n";
 
   char* Buf = reinterpret_cast<char*>( malloc(1 << 16) );  // 64k buffer.
   int len = 0;
@@ -251,13 +235,74 @@ void testSerialization() {
   writeStream.dump();
 
   InMemoryReader readStream(Buf, len);
-  BytecodeReader reader(Builder, &readStream);
+  BytecodeReader reader(bld, &readStream);
   auto* e2 = reader.read();
 
   if (e2)
     TILDebugPrinter::print(e2, std::cout);
 
   free(Buf);
+}
+
+
+
+SExpr* makeSimpleExpr(CFGBuilder& bld) {
+  auto *e1 = bld.newLiteralT<int>(1);
+  auto *e2 = bld.newLiteralT<int>(2);
+  auto *e3 = bld.newBinaryOp(BOP_Add, e1, e2);
+  e3->setBaseType(BaseType::getBaseType<int>());
+  auto *e4 = bld.newLiteralT<int>(3);
+  auto *e5 = bld.newBinaryOp(BOP_Mul, e3, e4);
+  e5->setBaseType(BaseType::getBaseType<int>());
+  auto *e6 = bld.newUnaryOp(UOP_Negative, e5);
+  return e6;
+}
+
+
+SExpr* makeCFG(CFGBuilder& bld) {
+  bld.beginCFG(nullptr);
+  auto *cfg = bld.currentCFG();
+
+  bld.beginBlock(cfg->entry());
+  auto *n      = bld.newLiteralT<int>(100);
+  auto *i      = bld.newLiteralT<int>(0);
+  auto *total  = bld.newLiteralT<int>(0);
+  auto *label1 = bld.newBlock(2);
+  SExpr* args[2] = { i, total };
+  bld.newGoto(label1, ArrayRef<SExpr*>(args, 2));
+
+  bld.beginBlock(label1);
+  auto *iphi     = bld.currentBB()->arguments()[0];
+  auto *totalphi = bld.currentBB()->arguments()[1];
+  auto *cond     = bld.newBinaryOp(BOP_Leq, iphi, n);
+  cond->setBaseType(BaseType::getBaseType<bool>());
+  auto *label2   = bld.newBlock();
+  auto *label3   = bld.newBlock();
+  bld.newBranch(cond, label2, label3);
+
+  bld.beginBlock(label2);
+  auto *i2       = bld.newBinaryOp(BOP_Add, iphi, bld.newLiteralT<int>(1));
+  i2->setBaseType(BaseType::getBaseType<int>());
+  auto *total2   = bld.newBinaryOp(BOP_Add, totalphi, iphi);
+  total2->setBaseType(BaseType::getBaseType<int>());
+  SExpr* args2[2] = { i2, total2 };
+  bld.newGoto(label1, ArrayRef<SExpr*>(args2, 2));
+
+  bld.beginBlock(label3);
+  bld.newGoto(cfg->exit(), total2);
+
+  bld.endCFG();
+  return cfg;
+}
+
+
+void testSerialization() {
+  MemRegion    region;
+  MemRegionRef arena(&region);
+  CFGBuilder   builder(arena);
+
+  testSerialization(builder, makeSimpleExpr(builder));
+  testSerialization(builder, makeCFG(builder));
 }
 
 
