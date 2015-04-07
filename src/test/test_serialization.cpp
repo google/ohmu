@@ -281,9 +281,9 @@ SExpr* makeCFG(CFGBuilder& bld) {
   bld.newBranch(cond, label2, label3);
 
   bld.beginBlock(label2);
-  auto *i2       = bld.newBinaryOp(BOP_Add, iphi, bld.newLiteralT<int>(1));
+  auto *i2        = bld.newBinaryOp(BOP_Add, iphi, bld.newLiteralT<int>(1));
   i2->setBaseType(BaseType::getBaseType<int>());
-  auto *total2   = bld.newBinaryOp(BOP_Add, totalphi, iphi);
+  auto *total2    = bld.newBinaryOp(BOP_Add, totalphi, iphi);
   total2->setBaseType(BaseType::getBaseType<int>());
   SExpr* args2[2] = { i2, total2 };
   bld.newGoto(label1, ArrayRef<SExpr*>(args2, 2));

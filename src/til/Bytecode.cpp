@@ -296,14 +296,20 @@ void BytecodeWriter::enterCFG(SCFG *Cfg) {
   writePseudoOpcode(PSOP_EnterCFG);
   Writer->writeUInt32(Cfg->numBlocks());
   Writer->writeUInt32(Cfg->numInstructions());
+  Writer->writeUInt32(Cfg->entry()->blockID());
+  Writer->writeUInt32(Cfg->exit()->blockID());
 }
 
 void BytecodeReader::enterCFG() {
-  unsigned Nb = Reader->readUInt32();
-  unsigned Ni = Reader->readUInt32();
+  unsigned Nb  = Reader->readUInt32();
+  unsigned Ni  = Reader->readUInt32();
+  unsigned Eid = Reader->readUInt32();
+  unsigned Xid = Reader->readUInt32();
   Builder.beginCFG(nullptr);
   Blocks.resize(Nb, nullptr);
   Instrs.resize(Ni, nullptr);
+  Blocks[Eid] = Builder.currentCFG()->entry();
+  Blocks[Xid] = Builder.currentCFG()->exit();
 }
 
 
@@ -483,9 +489,11 @@ void BytecodeWriter::reduceSCFG(SCFG *E) {
 }
 
 void BytecodeReader::readSCFG() {
+  auto *E = Builder.currentCFG();
   Builder.endCFG();
   Blocks.clear();
   Instrs.clear();
+  push(E);
 }
 
 
@@ -570,10 +578,13 @@ void BytecodeReader::readProject() {
 
 void BytecodeWriter::reduceCall(Call *E) {
   writeOpcode(COP_Call);
+  writeBaseType(E->baseType());
 }
 
 void BytecodeReader::readCall() {
+  auto Bt = readBaseType();
   auto *E = Builder.newCall(arg(0));
+  E->setBaseType(Bt);
   drop(1);
   push(E);
 }
@@ -594,10 +605,13 @@ void BytecodeReader::readAlloc() {
 
 void BytecodeWriter::reduceLoad(Load *E) {
   writeOpcode(COP_Load);
+  writeBaseType(E->baseType());
 }
 
 void BytecodeReader::readLoad() {
+  auto Bt = readBaseType();
   auto *E = Builder.newLoad(arg(0));
+  E->setBaseType(Bt);
   drop(1);
   push(E);
 }

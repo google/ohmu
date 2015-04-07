@@ -24,7 +24,17 @@
 namespace ohmu {
 namespace til {
 
-// Pretty printer for TIL expressions
+/// Helper class to automatically increment and decrement a counter.
+class AutoIncDec {
+public:
+  AutoIncDec(unsigned *P) : IPtr(P) { ++(*P); }
+  ~AutoIncDec() { --(*IPtr); }
+private:
+  unsigned *IPtr;
+};
+
+
+/// Pretty printer for TIL expressions
 template <typename Self, typename StreamType>
 class PrettyPrinter {
 protected:
@@ -114,6 +124,12 @@ protected:
 
 
   void printSExpr(const SExpr *E, StreamType &SS, unsigned P, bool Sub=true) {
+    AutoIncDec  Aid(&Depth);
+    if (Depth > MaxDepth) {
+      SS << "...";
+      return;
+    }
+
     if (!E) {
       self()->printNull(SS);
       return;
@@ -606,7 +622,7 @@ protected:
 
 public:
   PrettyPrinter(bool V = false, bool CS = true)
-     : Verbose(V), CStyle(CS), Indent(0)
+     : Verbose(V), CStyle(CS), Indent(0), Depth(0)
   {}
 
   static void print(const SExpr *E, StreamType &SS, bool Sub=false) {
@@ -615,9 +631,12 @@ public:
   }
 
 private:
+  const unsigned MaxDepth = 128;
+
   bool Verbose;  // Print out additional information
   bool CStyle;   // Print exprs in C-like syntax.
   unsigned Indent;
+  unsigned Depth;
 };
 
 

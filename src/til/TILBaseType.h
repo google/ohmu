@@ -107,6 +107,7 @@ struct BaseType {
   bool fromUInt8(uint8_t V) {
     Base = static_cast<BaseCode>(V & 0xF);
     Size = static_cast<SizeCode>((V >> 4) & 0x7);
+    VectSize = 0;
     return (V & 0x08) != 0;
   }
 
