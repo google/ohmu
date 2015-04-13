@@ -68,8 +68,9 @@ private:
 /// variables.  Each variable has a deBruin index, which is used to look up the
 /// substitution for that variable.  A common pattern that occurs when doing
 /// type checking or inlining of functions within a nested context, is for
-/// the first 'n' variables to be substituted for themselves; this is a null
-/// substitution.
+/// the first 'n' variables to be substituted for themselves.  A substitution
+/// of a variable for itself is a null substitution; and we provide special
+/// handling which optimizes for that case.
 template<class Attr>
 class Substitution {
 public:
@@ -140,7 +141,7 @@ private:
 /// Scopes are often used in conjunction with substitutions, so the same
 /// concepts of null mapping apply here.
 ///
-template<class Attr, typename ExprStateT=int>
+template<class Attr, typename LocStateT=bool>
 class ScopeFrame {
 public:
   struct VarMapEntry {
@@ -154,13 +155,16 @@ public:
   };
 
 public:
+  /// Lightweight state that is saved and restored in each subexpression.
+  typedef LocStateT LocationState;
+
   /// Change state to enter a sub-expression.
   /// Subclasses should override it.
-  ExprStateT enterSubExpr(TraversalKind K) { return ExprStateT(); }
+  LocationState enterSubExpr(TraversalKind K) { return LocationState(); }
 
   /// Restore state when exiting a sub-expression.
   /// Subclasses should override it.
-  void exitSubExpr(TraversalKind K, ExprStateT S) { }
+  void exitSubExpr(TraversalKind K, LocationState S) { }
 
   /// Return the number of variables with a null mapping.
   /// Variables with deBruin index < nullVars() have no synthesized attribute.
@@ -179,14 +183,14 @@ public:
     return VarMap[i-NullVars].VarAttr;
   }
 
-  /// Return the attribute for the variable declared by Orig.
-  Attr& lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
-
   /// Return the VarDecl -> Attr map entry for the i^th variable.
-  VarMapEntry& entry(unsigned i) {
+  VarMapEntry& varEntry(unsigned i) {
     assert(i >= NullVars && i < numVars() && "Index out of bounds.");
     return VarMap[i-NullVars];
   }
+
+  /// Return the attribute for the variable declared by Orig.
+  Attr& lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
 
   /// Return whatever the given instruction maps to during CFG rewriting.
   Attr& lookupInstr(Instruction *Orig) {
@@ -231,6 +235,9 @@ public:
   /// Create a copy of this scope.  (Used for lazy rewriting)
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
+  /// Default constructor.
+  ScopeFrame() : NullVars(1) { }  // deBruin index 0 is reserved
+
   /// Create a new scope where the first Nv variables have a null substitution.
   ScopeFrame(unsigned Nv) : NullVars(Nv) { }
 
@@ -243,15 +250,14 @@ public:
     Subst.clear();
   }
 
-  /// Default constructor.
-  ScopeFrame() : NullVars(1) { }  // deBruin index 0 is reserved
+  virtual ~ScopeFrame() { }
 
 protected:
   ScopeFrame(const ScopeFrame &F) = default;
 
   unsigned                 NullVars;        ///< vars with no attributes.
-  std::vector<VarMapEntry> VarMap;          ///< map vars to values
-  std::vector<Attr>        InstructionMap;  ///< map instrs to values
+  std::vector<VarMapEntry> VarMap;          ///< map vars to attributes
+  std::vector<Attr>        InstructionMap;  ///< map instrs to attributes
 };
 
 
@@ -271,6 +277,25 @@ public:
 
   // Restore an earlier context.
   void restoreScope(ScopeT* OldScope) { ScopePtr = OldScope; }
+
+  /*** ScopeHandler Routines ***/
+
+  typedef typename ScopeT::LocationState LocationState;
+  LocationState enterSubExpr(TraversalKind K) {
+    return this->scope()->enterSubExpr(K);
+  }
+  void exitSubExpr(TraversalKind K, LocationState S) {
+    this->scope()->exitSubExpr(K, S);
+  }
+
+  void enterScope(VarDecl *Vd)   { this->scope()->enterScope(Vd);   }
+  void exitScope (VarDecl *Vd)   { this->scope()->exitScope();      }
+  void enterCFG  (SCFG *Cfg)     { this->scope()->enterCFG(Cfg);    }
+  void exitCFG   (SCFG *Cfg)     { this->scope()->exitSCFG();       }
+  void enterBlock(BasicBlock *B) { /* Override in derived class. */ }
+  void exitBlock (BasicBlock *B) { /* Override in derived class. */ }
+
+  /*** Constructor and destructor ***/
 
   ScopeHandlerBase() : ScopePtr(nullptr) { }
 
@@ -357,20 +382,12 @@ public:
   bool emptyAttrs() { return Attrs.empty(); }
 
 
-  void enterScope(VarDecl *Vd)   { /* Override in derived class. */ }
-  void exitScope (VarDecl *Vd)   { /* Override in derived class. */ }
-  void enterCFG  (SCFG *Cfg)     { this->scope()->enterCFG(Cfg); }
-  void exitCFG   (SCFG *Cfg)     { this->scope()->exitSCFG(Cfg); }
-  void enterBlock(BasicBlock *B) { /* Override in derived class. */ }
-  void exitBlock (BasicBlock *B) { /* Override in derived class. */ }
-
-
   AttributeGrammar() : AttrFrame(0)  { }
 
   // Takes ownership of Sc
   AttributeGrammar(ScopeT* Sc)
       : ScopeHandlerBase<ScopeT>(Sc), AttrFrame(0) {
-    // TODO: FIXME!  This is to prevent memory corruption.
+    // TODO: FIXME!  Resizing may cause memory corruption.
     Attrs.reserve(100000);
   }
   ~AttributeGrammar() override { }
@@ -396,11 +413,7 @@ public:
   void traverse(T* E, TraversalKind K) {
     // we override traverse to manage contexts and attribute frames.
     unsigned Af = self()->pushAttrFrame();
-    auto Cstate = self()->scope()->enterSubExpr(K);
-
     SuperTv::traverse(E, K);
-
-    self()->scope()->exitSubExpr(K, Cstate);
     self()->restoreAttrFrame(Af);
   }
 

@@ -43,7 +43,7 @@ public:
   CopyAttr& operator=(const CopyAttr &A) = default;
   CopyAttr& operator=(CopyAttr &&A)      = default;
 
-  SExpr* Exp;    // This is the rewritten term.
+  SExpr* Exp;    ///< This is the residual, or rewritten term.
 };
 
 
@@ -114,13 +114,13 @@ public:
   MemRegionRef& arena() { return Builder.arena(); }
 
   void enterScope(VarDecl *Vd) {
-    // enterScope must be called after reduceVarDecl()
+    // enterScope must be called immediately after reduceVarDecl()
     auto* Nvd = cast<VarDecl>( this->lastAttr().Exp );
     auto* Nv  = Builder.newVariable(Nvd);
 
     // Variables that point to Orig will be replaced with Nv.
-    this->scope()->enterScope(Vd, Attr(Nv));
     Builder.enterScope(Nvd);
+    this->scope()->enterScope(Vd, Attr(Nv));
   }
 
   void exitScope(VarDecl *Vd) {
@@ -130,10 +130,12 @@ public:
 
   void enterCFG(SCFG *Cfg) {
     if (Cfg) {
+      // We are rewriting a CFG to a CFG.
       Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
       this->scope()->enterCFG(Cfg, Builder.currentCFG());
     }
     else {
+      // We are converting an ordinary term to a CFG.
       Builder.beginCFG(nullptr);
     }
   }
@@ -144,7 +146,7 @@ public:
   }
 
   void enterBlock(BasicBlock *B) {
-    Builder.beginBlock( getBasicBlock(B) );
+    Builder.beginBlock( lookupBlock(B) );
   }
 
   void exitBlock(BasicBlock *B) {
@@ -154,11 +156,10 @@ public:
   }
 
   /// Find the basic block that Orig maps to, or create a new one.
-  BasicBlock* getBasicBlock(BasicBlock *Orig) {
+  BasicBlock* lookupBlock(BasicBlock *Orig) {
     auto *B2 = this->scope()->lookupBlock(Orig);
     if (!B2) {
-      // Create new block, and add all of its Phi nodes to InstructionMap.
-      // This has to be done before we process a Goto.
+      // Create new blocks on demand.
       unsigned Nargs = Orig->arguments().size();
       B2 = Builder.newBlock(Nargs, Orig->numPredecessors());
       this->scope()->insertBlockMap(Orig, B2);
@@ -304,12 +305,12 @@ public:
     this->resultAttr().Exp = Builder.newCast(Orig->castOpcode(), E0);
   }
 
-  // Phi nodes are created and added to InstructionMap by getBasicBlock().
+  // Phi nodes are created and added to InstructionMap by lookupBlock().
   // Passes which alter Phi nodes must also set OverwriteArguments to true.
   void reducePhi(Phi *Orig) { }
 
   void reduceGoto(Goto *Orig) {
-    BasicBlock *B = getBasicBlock(Orig->targetBlock());
+    BasicBlock *B = lookupBlock(Orig->targetBlock());
     unsigned Idx = B->addPredecessor(Builder.currentBB());
     Goto *Res = new (arena()) Goto(B, Idx);
 
@@ -328,8 +329,8 @@ public:
 
   void reduceBranch(Branch *Orig) {
     auto *C = this->attr(0).Exp;
-    BasicBlock *B0 = getBasicBlock(Orig->thenBlock());
-    BasicBlock *B1 = getBasicBlock(Orig->elseBlock());
+    BasicBlock *B0 = lookupBlock(Orig->thenBlock());
+    BasicBlock *B1 = lookupBlock(Orig->elseBlock());
     this->resultAttr().Exp = Builder.newBranch(C, B0, B1);
   }
 

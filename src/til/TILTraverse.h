@@ -89,10 +89,12 @@ public:
   /// Override this method to traverse SExprs of arbitrary type.
   template <class T>
   void traverse(T *E, TraversalKind K) {
+    auto Cstate = self()->enterSubExpr(K);
     traverseByType(E, K);
+    self()->exitSubExpr(K, Cstate);
   }
 
-  /// Invoked by SExpr classes to traverse weak arguments;
+  /// Invoked by SExpr classes to traverse weak arguments
   void traverseWeak(Instruction *E) { self()->reduceWeak(E); }
 
   /// Invoked by SExpr classes to handle null members.
@@ -131,18 +133,24 @@ protected:
 /// enter/exit routines for traversals.
 class DefaultScopeHandler {
 public:
-  void enterScope(VarDecl *Vd)   { }
-  void exitScope (VarDecl *Vd)   { }
-  void enterCFG  (SCFG *Cfg)     { }
-  void exitCFG   (SCFG *Cfg)     { }
-  void enterBlock(BasicBlock *B) { }
-  void exitBlock (BasicBlock *B) { }
+  /// This type represents a lightweight state that can be saved and restored
+  /// when entering each subexpression.
+  typedef bool LocationState;
+
+  LocationState enterSubExpr(TraversalKind K) { return false; }
+  void exitSubExpr(TraversalKind K, LocationState S) { }
+  void enterScope (VarDecl *Vd)   { }
+  void exitScope  (VarDecl *Vd)   { }
+  void enterCFG   (SCFG *Cfg)     { }
+  void exitCFG    (SCFG *Cfg)     { }
+  void enterBlock (BasicBlock *B) { }
+  void exitBlock  (BasicBlock *B) { }
 };
 
 
-/// DefaultReducer implements empty versions of all of the reduce() methods
-/// for a traversal.
-class DefaultReducer {
+/// DefaultReducerBase implements empty versions of the nonstandard
+/// reduceX() methods -- those where X is not the name of a TIL class.
+class DefaultReducerBase {
   /// Reduce a null SExpr
   void reduceNull() { }
 
@@ -154,7 +162,11 @@ class DefaultReducer {
 
   /// Reduce a basic block instruction.
   void reduceBBInstruction(Instruction *Orig) { }
+};
 
+
+/// DefaultReducer implements empty versions of all of the reduceX() methods.
+class DefaultReducer : public DefaultReducerBase {
 #define TIL_OPCODE_DEF(X)   \
   void reduce##X(X *E) { }
 #include "TILOps.def"

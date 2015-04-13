@@ -517,7 +517,7 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
   StringRef Idstr = Orig->idString();
 
   for (unsigned i = scope()->numVars()-1; i >= scope()->nullVars(); --i) {
-    auto& Entry = scope()->entry(i);
+    auto& Entry = scope()->varEntry(i);
     VarDecl *Vd = Entry.VDecl;
     if (!Vd)
       continue;
@@ -788,7 +788,7 @@ void TypedEvaluator::traverseNestedCode(Code* Orig) {
   auto* Ns = scope()->clone();
   for (unsigned i=0; i < Nargs; ++i) {
     // TODO: (FIXME) Hack to deal with self-variables.
-    auto &Entry = Ns->entry(Vidx + i);
+    auto &Entry = Ns->varEntry(Vidx + i);
     if (Entry.VDecl->kind() == VarDecl::VK_SFun)
       continue;
     assert(Entry.VDecl->kind() != VarDecl::VK_Let);

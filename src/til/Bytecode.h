@@ -257,6 +257,10 @@ public:
     writeLitVal(E->value());
   }
 
+  typedef bool LocationState;
+  bool enterSubExpr(TraversalKind K) { return false; }
+  void exitSubExpr(TraversalKind K, LocationState S) { }
+
   void enterScope(VarDecl *Vd);
   void enterCFG  (SCFG *Cfg);
   void enterBlock(BasicBlock *B);

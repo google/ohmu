@@ -41,8 +41,8 @@ public:
     auto* Nv  = Builder.newVariable(Nvd);
 
     // Variables that point to Orig will be replaced with Nv.
-    this->scope()->enterScope(Vd, Attr(Nv));
     Builder.enterScope(Nvd);
+    this->scope()->enterScope(Vd, Attr(Nv));
   }
 
   void exitScope(VarDecl *Vd) {
@@ -51,7 +51,7 @@ public:
   }
 
   void enterCFG(SCFG *Cfg) {
-    Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
+    Builder.beginCFG(Cfg);
     this->scope()->enterCFG(Cfg, Builder.currentCFG());
   }
 
@@ -71,7 +71,7 @@ public:
   }
 
   /// Find the basic block that Orig maps to, or create a new one.
-  BasicBlock* getBasicBlock(BasicBlock *Orig) { return Orig; }
+  BasicBlock* lookupBasicBlock(BasicBlock *Orig) { return Orig; }
 
   /*--- Reduce Methods ---*/
 
