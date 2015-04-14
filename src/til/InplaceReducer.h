@@ -20,7 +20,6 @@
 #define OHMU_TIL_INPLACEREDUCER_H
 
 #include "AttributeGrammar.h"
-#include "CopyReducer.h"
 #include "CFGBuilder.h"
 
 
@@ -32,7 +31,7 @@ namespace til  {
 /// modifies the original return in-place, and returns a pointer to the
 /// original term.  It is intended to be used as a basic class for destructive
 /// in-place transformations, such as SSA conversion.
-template<class Attr = CopyAttr, class ScopeT = CopyScope<Attr>>
+template<class Attr = CopyAttr, class ScopeT = ScopeFrame<Attr>>
 class InplaceReducer : public AttributeGrammar<Attr, ScopeT> {
 public:
   void enterScope(VarDecl *Vd) {
@@ -61,7 +60,7 @@ public:
   }
 
   void enterBlock(BasicBlock *B) {
-    Builder.beginBlock( getBasicBlock(B) );
+    Builder.beginBlock(B);
   }
 
   void exitBlock(BasicBlock *B) {
@@ -69,9 +68,6 @@ public:
     if (Builder.currentBB())
       Builder.endBlock(nullptr);
   }
-
-  /// Find the basic block that Orig maps to, or create a new one.
-  BasicBlock* lookupBasicBlock(BasicBlock *Orig) { return Orig; }
 
   /*--- Reduce Methods ---*/
 
@@ -81,7 +77,15 @@ public:
 
   void reduceWeak(Instruction *Orig) {
     // Map weak references to rewritten instructions.
-    this->resultAttr().Exp = this->scope()->lookupInstr(Orig).Exp;
+    this->resultAttr() = this->scope()->instr(Orig->instrID());
+  }
+
+  void reduceBBArgument(Phi *Ph) {
+    this->scope()->insertInstructionMap(Ph, std::move(this->lastAttr()));
+  }
+
+  void reduceBBInstruction(Instruction *I) {
+    this->scope()->insertInstructionMap(I, std::move(this->lastAttr()));
   }
 
   void reduceVarDecl(VarDecl *Orig) {
@@ -141,7 +145,15 @@ public:
   }
 
   void reduceVariable(Variable *Orig) {
-    this->resultAttr() = Orig;
+    unsigned Idx = Orig->variableDecl()->varIndex();
+    if (this->scope()->isNull(Idx)) {
+      // Null substitution: just copy the variable.
+      this->resultAttr().Exp = Attr( Orig );
+    }
+    else {
+      // Substitute for variable.
+      this->resultAttr() = this->scope()->var(Idx);
+    }
   }
 
   void reduceApply(Apply *Orig) {
@@ -221,13 +233,15 @@ public:
 
   void reduceGoto(Goto *Orig) {
     BasicBlock *B = Orig->targetBlock();
+    unsigned Idx = Orig->phiIndex();
 
     // All "arguments" to the Goto should have been pushed onto the stack.
     // Write them to their appropriate Phi nodes.
     assert(B->arguments().size() == this->numAttrs());
     unsigned i = 0;
     for (Phi *Ph : B->arguments()) {
-      Builder.setPhiArgument(Ph, this->attr(i).Exp, Idx);
+      if (Ph)
+        Builder.setPhiArgument(Ph, this->attr(i).Exp, Idx);
       ++i;
     }
 
@@ -237,13 +251,15 @@ public:
 
   void reduceBranch(Branch *Orig) {
     auto *E0 = this->attr(0).Exp;
-    Orig->rewrite(E0);
+    BasicBlock *B0 = Orig->thenBlock();
+    BasicBlock *B1 = Orig->elseBlock();
+    Orig->rewrite(E0, B0, B1);
     Builder.endBlock(Orig);
   }
 
   void reduceReturn(Return *Orig) {
     auto *E0 = this->attr(0).Exp;
-    Orig->rewrite(E0, E1);
+    Orig->rewrite(E0);
     Builder.endBlock(Orig);
   }
 

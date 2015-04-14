@@ -63,59 +63,88 @@ private:
 };
 
 
+/// Synthesized attributes use for term rewriting.
+class CopyAttr {
+public:
+  CopyAttr() : Exp(nullptr) { }
+  explicit CopyAttr(SExpr* E) : Exp(E) { }
+
+  CopyAttr(const CopyAttr &A) = default;
+  CopyAttr(CopyAttr &&A)      = default;
+
+  CopyAttr& operator=(const CopyAttr &A) = default;
+  CopyAttr& operator=(CopyAttr &&A)      = default;
+
+  SExpr* Exp;    ///< This is the residual, or rewritten term.
+};
+
+
 
 /// A Substitution stores a list of terms that will be substituted for free
 /// variables.  Each variable has a deBruin index, which is used to look up the
-/// substitution for that variable.  A common pattern that occurs when doing
-/// type checking or inlining of functions within a nested context, is for
-/// the first 'n' variables to be substituted for themselves.  A substitution
-/// of a variable for itself is a null substitution; and we provide special
-/// handling which optimizes for that case.
+/// substitution for that variable.  Note that a "substitution" involves not
+/// just the term, but all synthesized attributes for the term.
+///
+/// A common pattern that occurs when doing type checking or inlining of
+/// functions within a nested context, is for the first 'n' variables to be
+/// substituted for themselves.  A substitution of a variable for itself is a
+/// null substitution; and we provide special handling which optimizes for that
+/// case.
 template<class Attr>
 class Substitution {
 public:
-  unsigned nullVars()    const { return NullVars; }
-  unsigned numVarAttrs() const { return VarAttrs.size(); }
-  unsigned size()        const { return NullVars + VarAttrs.size(); }
-  bool     empty()       const { return size() == 0; }
+  /// Return number of initial "null" substitutions.
+  unsigned numNullVars() const { return NullVars; }
 
+  /// Return number of substitutions (after the initial 'n' null)
+  unsigned numSubstVars() const { return VarAttrs.size(); }
+
+  /// Return total number of variables (null and substituted)
+  unsigned size() const { return NullVars + VarAttrs.size(); }
+
+  /// Return true if this is an empty substitution
+  bool empty() const { return size() == 0; }
+
+  /// Return true if the i^th variable has a null substitution.
+  bool isNull(unsigned i) { return i < NullVars; }
+
+  /// Return the substitution for the i^th variable, which cannot be null.
   Attr& var(unsigned i) {
     assert(i >= NullVars && i < size() && "Index out of bounds.");
     return VarAttrs[i-NullVars];
   }
 
+  /// Return the list of non-null substitutions.
   std::vector<Attr>& varAttrs() { return VarAttrs; }
 
-  bool isNull(unsigned Idx) { return Idx < NullVars; }
-
+  /// Push a new substitution onto the end.
   void push_back(const Attr& At) {
     assert(NullVars > 0);   // Index 0 is reserved.
     VarAttrs.push_back(At);
   }
+
+  /// Push a new substitution onto the end.
   void push_back(Attr&& At) {
     assert(NullVars > 0);   // Index 0 is reserved.
     VarAttrs.push_back(std::move(At));
   }
 
+  /// Pop the last substitution off of the end.
+  void pop_back() {
+    assert(VarAttrs.size() > 0);
+    VarAttrs.pop_back();
+  }
+
+  /// Clear all substitutions, including null ones.
   void clear() {
     NullVars = 0;
     VarAttrs.clear();
   }
 
+  /// Initialize first Nv variables to null.
   void init(unsigned Nv) {
     assert(empty() && "Already initialized.");
     NullVars = Nv;
-  }
-
-  /// Create a substitution from the variable mapping in S.
-  template<class ScopeT>
-  void initFromScope(ScopeT* S) {
-    assert(empty() && "Already initialized.");
-    NullVars = S->nullVars();
-    unsigned n = S->numVars();
-    for (unsigned i = NullVars; i < n; ++i) {
-      VarAttrs.push_back(S->var(i));
-    }
   }
 
   Substitution() : NullVars(0) { }
@@ -126,35 +155,30 @@ public:
   Substitution<Attr>& operator=(const Substitution<Attr> &S) = default;
   Substitution<Attr>& operator=(Substitution<Attr> &&S)      = default;
 
-private:
+protected:
   unsigned          NullVars;   ///< Number of null variables
   std::vector<Attr> VarAttrs;   ///< Synthesized attributes for remaining vars.
 };
 
 
 
-/// A ScopeFrame maps variables in the lexical context to synthesized
-/// attributes.  In particular, it tracks attributes for:
-/// (1) Ordinary variables (i.e. function parameters).
-/// (2) Instructions (which are essentially let-variables.)
-///
-/// Scopes are often used in conjunction with substitutions, so the same
-/// concepts of null mapping apply here.
-///
+/// A ScopeFrame is a Substitution with additional information to more
+/// fully track lexical scope.  In particular:
+///  - It also tracks variable declarations in the current scope
+///  - It stores substitutions for instruction IDs in a CFG.
 template<class Attr, typename LocStateT=bool>
-class ScopeFrame {
+class ScopeFrame  {
 public:
-  struct VarMapEntry {
-    VarMapEntry() : VDecl(nullptr) { }
-    VarMapEntry(VarDecl* Vd, Attr &&Va)
-        : VDecl(Vd), VarAttr(std::move(Va))
-    { }
+  const Substitution<Attr>& substitution() { return Subst; }
 
-    VarDecl* VDecl;     // VarDecl in original term
-    Attr     VarAttr;   // The attribute associated with the VarDecl.
-  };
+  unsigned numNullVars()  const { return Subst.numNullVars(); }
+  unsigned numSubstVars() const { return Subst.numSubstVars(); }
+  unsigned size()         const { return Subst.size(); }
+  bool     empty()        const { return Subst.empty(); }
+  bool     isNull(unsigned i)   { return Subst.isNull(i); }
+  Attr&    var(unsigned i)      { return Subst.var(i); }
 
-public:
+
   /// Lightweight state that is saved and restored in each subexpression.
   typedef LocStateT LocationState;
 
@@ -166,98 +190,78 @@ public:
   /// Subclasses should override it.
   void exitSubExpr(TraversalKind K, LocationState S) { }
 
-  /// Return the number of variables with a null mapping.
-  /// Variables with deBruin index < nullVars() have no synthesized attribute.
-  unsigned nullVars() const { return NullVars; }
-
-  /// Return the number of variables in the context.
-  unsigned numVars() const { return NullVars + VarMap.size(); }
-
-  /// Return true if the variable with index Idx has a null mapping.
-  bool isNull(unsigned Idx) { return Idx < NullVars; }
-
-  /// Return the attribute for the i^th variable (VarDecl) in the scope
-  /// Note that var(0) is reserved; 0 denotes an undefined variable.
-  Attr& var(unsigned i) {
-    assert(i >= NullVars && i < numVars() && "Index out of bounds.");
-    return VarMap[i-NullVars].VarAttr;
-  }
-
-  /// Return the VarDecl -> Attr map entry for the i^th variable.
-  VarMapEntry& varEntry(unsigned i) {
-    assert(i >= NullVars && i < numVars() && "Index out of bounds.");
-    return VarMap[i-NullVars];
-  }
-
-  /// Return the attribute for the variable declared by Orig.
-  Attr& lookupVar(VarDecl *Orig) { return var(Orig->varIndex()); }
-
-  /// Return whatever the given instruction maps to during CFG rewriting.
-  Attr& lookupInstr(Instruction *Orig) {
-    return InstructionMap[Orig->instrID()];
-  }
-
-  /// Enter a function scope (or apply a function), by mapping Orig -> E.
+  /// Enter a function scope (or apply a function), by mapping Orig -> At.
   void enterScope(VarDecl *Orig, Attr&& At) {
     // Assign indices to variables if they haven't been assigned yet.
     if (Orig) {
       // TODO: FIXME!  Orig should always be specified.
       if (Orig->varIndex() == 0)
-        Orig->setVarIndex(VarMap.size());
+        Orig->setVarIndex(size());
       else
-        assert(Orig->varIndex() == VarMap.size() && "De Bruijn index mismatch.");
+        assert(Orig->varIndex() == size() && "De Bruijn index mismatch.");
     }
-    VarMap.push_back(VarMapEntry(Orig, std::move(At)));
+
+    Subst.push_back( std::move(At) );
+    VarDeclMap.push_back(Orig);
   }
 
-  /// Exit a function scope.
   void exitScope() {
-    VarMap.pop_back();
+    Subst.pop_back();
+    VarDeclMap.pop_back();
   }
 
-  /// Enter a CFG, which will initialize the instruction and block maps.
   void enterCFG(SCFG *Orig) {
     assert(InstructionMap.size() == 0 && "No support for nested CFGs");
     InstructionMap.resize(Orig->numInstructions());
   }
 
-  /// Exit the CFG, which will clear the maps.
   void exitCFG() {
     InstructionMap.clear();
   }
 
+  void enterBlock(BasicBlock* B) { }
+  void exitBlock() { }
+
+  /// Return the declaration for the i^th variable.
+  VarDecl* varDecl(unsigned i) {
+    if (i < numNullVars())
+      return nullptr;
+    return VarDeclMap[i - numNullVars()];
+  }
+
+  /// Return the substitution for the i^th instruction.
+  Attr& instr(unsigned i) { return InstructionMap[i]; }
+
   /// Add a new instruction to the map.
   void insertInstructionMap(Instruction *Orig, Attr&& At) {
-    if (Orig->instrID() > 0)
-      InstructionMap[Orig->instrID()] = std::move(At);
+    assert(Orig->instrID() > 0 && "Invalid instruction.");
+    InstructionMap[Orig->instrID()] = std::move(At);
   }
 
   /// Create a copy of this scope.  (Used for lazy rewriting)
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
   /// Default constructor.
-  ScopeFrame() : NullVars(1) { }  // deBruin index 0 is reserved
+  ScopeFrame() : Subst(1) { }  // deBruin index 0 is reserved
 
   /// Create a new scope where the first Nv variables have a null substitution.
-  ScopeFrame(unsigned Nv) : NullVars(Nv) { }
+  ScopeFrame(unsigned Nv) : Subst(Nv) { }
 
   /// Create a new scope from a substitution.
-  ScopeFrame(Substitution<Attr>&& Subst) : NullVars(Subst.nullVars()) {
-    assert(Subst.nullVars() > 0 && "Substitution cannot be empty.");
-    for (unsigned i=NullVars,n=Subst.size(); i < n; ++i) {
-      VarMap.emplace_back(nullptr, std::move(Subst.var(i)));
-    }
-    Subst.clear();
+  ScopeFrame(Substitution<Attr>&& S) : Subst(std::move(S)) {
+    for (unsigned i = 0, n = Subst.size(); i < n; ++i)
+      VarDeclMap.push_back(nullptr);
   }
 
   virtual ~ScopeFrame() { }
 
 protected:
   ScopeFrame(const ScopeFrame &F) = default;
+  ScopeFrame(ScopeFrame &&F)      = default;
 
-  unsigned                 NullVars;        ///< vars with no attributes.
-  std::vector<VarMapEntry> VarMap;          ///< map vars to attributes
-  std::vector<Attr>        InstructionMap;  ///< map instrs to attributes
+  Substitution<Attr>     Subst;
+  std::vector<VarDecl*>  VarDeclMap;      ///< map indices to VarDecls
+  std::vector<Attr>      InstructionMap;  ///< map instrs to attributes
 };
 
 
@@ -288,12 +292,12 @@ public:
     this->scope()->exitSubExpr(K, S);
   }
 
-  void enterScope(VarDecl *Vd)   { this->scope()->enterScope(Vd);   }
-  void exitScope (VarDecl *Vd)   { this->scope()->exitScope();      }
-  void enterCFG  (SCFG *Cfg)     { this->scope()->enterCFG(Cfg);    }
-  void exitCFG   (SCFG *Cfg)     { this->scope()->exitSCFG();       }
-  void enterBlock(BasicBlock *B) { /* Override in derived class. */ }
-  void exitBlock (BasicBlock *B) { /* Override in derived class. */ }
+  void enterScope(VarDecl *Vd)   { this->scope()->enterScope(Vd); }
+  void exitScope (VarDecl *Vd)   { this->scope()->exitScope();    }
+  void enterCFG  (SCFG *Cfg)     { this->scope()->enterCFG(Cfg);  }
+  void exitCFG   (SCFG *Cfg)     { this->scope()->exitSCFG();     }
+  void enterBlock(BasicBlock *B) { this->scope()->enterBlock(B);  }
+  void exitBlock (BasicBlock *B) { this->scope()->exitBlock();    }
 
   /*** Constructor and destructor ***/
 
@@ -415,14 +419,6 @@ public:
     unsigned Af = self()->pushAttrFrame();
     SuperTv::traverse(E, K);
     self()->restoreAttrFrame(Af);
-  }
-
-  void reduceBBArgument(Phi *Ph) {
-    reduceBBInstruction(Ph);
-  }
-
-  void reduceBBInstruction(Instruction *I) {
-    self()->scope()->insertInstructionMap(I, std::move(self()->lastAttr()));
   }
 
   void traverseWeak(Instruction* E) {

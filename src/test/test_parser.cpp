@@ -18,6 +18,7 @@
 #include "test/Driver.h"
 #include "til/Bytecode.h"
 #include "til/VisitCFG.h"
+#include "til/InplaceReducer.h"
 
 
 using namespace ohmu;
@@ -28,33 +29,6 @@ using namespace ohmu::til;
 void printSExpr(SExpr* e) {
   TILDebugPrinter::print(e, std::cout);
 }
-
-
-class MyByteStreamWriter : public ByteStreamWriterBase {
-public:
-  /// Write a block of data to disk.
-  virtual void writeData(const void *Buffer, int64_t Size) override {
-    auto* Buf = reinterpret_cast<const uint8_t*>(Buffer);
-
-    std::cout << "\n";
-    bool prevChar = true;
-    for (int64_t i = 0; i < Size; ++i) {
-      if (Buf[i] >= '0' && Buf[i] <= 'z') {
-        if (!prevChar)
-          std::cout << " ";
-        std::cout << Buf[i];
-        prevChar = true;
-        continue;
-      }
-      std::cout << " " << static_cast<int>(Buf[i]);
-      prevChar = false;
-    }
-    std::cout << "\n";
-  }
-
-  virtual ~MyByteStreamWriter() { flush(); }
-};
-
 
 
 int main(int argc, const char** argv) {
@@ -84,10 +58,6 @@ int main(int argc, const char** argv) {
   // Find all of the CFGs.
   VisitCFG visitCFG;
   visitCFG.traverseAll(global.global());
-
-  MyByteStreamWriter writer;
-  BytecodeWriter bwriter(&writer);
-  bwriter.traverseAll( global.global() );
 
   std::cout << "\n\nNumber of CFGs: " << visitCFG.cfgs().size() << "\n\n";
   return 0;

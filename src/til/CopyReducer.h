@@ -31,29 +31,13 @@ namespace ohmu {
 namespace til  {
 
 
-/// Synthesized attribute used for term rewriting.
-class CopyAttr {
-public:
-  CopyAttr() : Exp(nullptr) { }
-  explicit CopyAttr(SExpr* E) : Exp(E) { }
-
-  CopyAttr(const CopyAttr &A) = default;
-  CopyAttr(CopyAttr &&A)      = default;
-
-  CopyAttr& operator=(const CopyAttr &A) = default;
-  CopyAttr& operator=(CopyAttr &&A)      = default;
-
-  SExpr* Exp;    ///< This is the residual, or rewritten term.
-};
-
-
 
 /// A CopyScope maintains a map from blocks to rewritten blocks in
 /// addition to the variable maps maintained by ScopeFrame.
-template<class Attr, typename ExprStateT=int>
-class CopyScope : public ScopeFrame<Attr, ExprStateT> {
+template<class Attr, typename LocStateT=int>
+class CopyScope : public ScopeFrame<Attr, LocStateT> {
 public:
-  typedef ScopeFrame<Attr, ExprStateT> Super;
+  typedef ScopeFrame<Attr, LocStateT> Super;
 
   /// Return the block that Orig maps to in CFG rewriting.
   BasicBlock* lookupBlock(BasicBlock *Orig) {
@@ -74,7 +58,7 @@ public:
     BlockMap.clear();
   }
 
-  // Add B to BlockMap, and add its arguments to InstructionMap
+  // Add B to BlockMap, and add its arguments to the instruction map
   void insertBlockMap(BasicBlock *Orig, BasicBlock *B) {
     this->BlockMap[Orig->blockID()] = B;
 
@@ -85,7 +69,7 @@ public:
     for (unsigned i = 0; i < Nargs; ++i) {
       Phi *Ph = Orig->arguments()[i];
       if (Ph && Ph->instrID() > 0)
-        this->InstructionMap[Ph->instrID()] = Attr(B->arguments()[i]);
+        this->insertInstructionMap(Ph, Attr( B->arguments()[i] ));
     }
   }
 
@@ -175,7 +159,14 @@ public:
   }
 
   void reduceWeak(Instruction *Orig) {
-    this->resultAttr().Exp = this->scope()->lookupInstr(Orig).Exp;
+    unsigned Idx = Orig->instrID();
+    this->resultAttr() = this->scope()->instr(Idx);
+  }
+
+  void reduceBBArgument(Phi *Ph) { }  // Arguments are handled in lookupBlock
+
+  void reduceBBInstruction(Instruction *I) {
+    this->scope()->insertInstructionMap(I, std::move(this->lastAttr()));
   }
 
   void reduceVarDecl(VarDecl *Orig) {
@@ -237,8 +228,15 @@ public:
   }
 
   void reduceVariable(Variable *Orig) {
-    // Perform variable substitution.
-    this->resultAttr() = this->scope()->lookupVar(Orig->variableDecl());
+    unsigned Idx = Orig->variableDecl()->varIndex();
+    if (this->scope()->isNull(Idx)) {
+      // Null substitution: just copy the variable.
+      this->resultAttr() = Attr( Builder.newVariable(Orig->variableDecl()) );
+    }
+    else {
+      // Substitute for variable.
+      this->resultAttr() = this->scope()->var(Idx);
+    }
   }
 
   void reduceApply(Apply *Orig) {
@@ -305,8 +303,7 @@ public:
     this->resultAttr().Exp = Builder.newCast(Orig->castOpcode(), E0);
   }
 
-  // Phi nodes are created and added to InstructionMap by lookupBlock().
-  // Passes which alter Phi nodes must also set OverwriteArguments to true.
+  // Phi nodes are created in lookupBlock().
   void reducePhi(Phi *Orig) { }
 
   void reduceGoto(Goto *Orig) {

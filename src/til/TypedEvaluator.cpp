@@ -168,7 +168,7 @@ void TypedEvaluator::promoteVariable(Variable *V) {
 void TypedEvaluator::reduceVariable(Variable *Orig) {
   unsigned Idx = Orig->variableDecl()->varIndex();
 
-  if (Idx < scope()->nullVars()) {
+  if (scope()->isNull(Idx)) {
     // No substitution, so just promote the variable.
     promoteVariable(Orig);
     return;
@@ -516,27 +516,28 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
 
   StringRef Idstr = Orig->idString();
 
-  for (unsigned i = scope()->numVars()-1; i >= scope()->nullVars(); --i) {
-    auto& Entry = scope()->varEntry(i);
-    VarDecl *Vd = Entry.VDecl;
+  for (unsigned i = scope()->size() - 1; i > 0; --i) {
+    VarDecl *Vd = scope()->varDecl(i);
     if (!Vd)
       continue;
 
     // First check to see if the identifier refers to a named variable.
     if (Vd->varName() == Idstr) {
-      if (Entry.VarAttr.TypeExpr) {
+      auto &At = scope()->var(i);
+      if (At.TypeExpr) {
         // If we have a substitution with a type, return that.
-        Res = Entry.VarAttr;
+        Res = At;
         return;
       }
-      if (Variable *V = dyn_cast_or_null<Variable>(Entry.VarAttr.Exp)) {
+      if (Variable *V = dyn_cast_or_null<Variable>(At.Exp)) {
+        // If it maps to a variable, promote it.
         promoteVariable(V);
         return;
       }
-      if (Instruction* I = dyn_cast<Instruction>(Entry.VarAttr.Exp)) {
+      if (Instruction* I = dyn_cast<Instruction>(At.Exp)) {
         // If the substitution is a simply-typed expression, then return it.
         if (I->baseType().isSimple()) {
-          Res = Entry.VarAttr;
+          Res = At;
           return;
         }
       }
@@ -545,9 +546,9 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
     }
     // Otherwise look up slot names in enclosing records.
     else if (Vd->kind() == VarDecl::VK_SFun) {
-      // Map identifiers to slots for record self-variables.
+      auto &At = scope()->var(i);
 
-      auto* Sv = dyn_cast_or_null<Variable>(Entry.VarAttr.Exp);
+      auto* Sv = dyn_cast_or_null<Variable>(At.Exp);
       if (!Sv)
         continue;
       auto* Svd = Sv->variableDecl();
@@ -606,7 +607,7 @@ void TypedEvaluator::traverseFunction(Function *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    Res.Subst.initFromScope(scope());
+    Res.Subst    = scope()->substitution();
     return;
   }
   SuperTv::traverseFunction(Orig);
@@ -621,7 +622,7 @@ void TypedEvaluator::traverseRecord(Record *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    Res.Subst.initFromScope(scope());
+    Res.Subst    = scope()->substitution();
     return;
   }
   SuperTv::traverseRecord(Orig);
@@ -636,7 +637,7 @@ void TypedEvaluator::traverseCode(Code *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    Res.Subst.initFromScope(scope());
+    Res.Subst    = scope()->substitution();
     return;
   }
 
@@ -672,7 +673,7 @@ void TypedEvaluator::traverseField(Field *Orig) {
     Res.Exp      = nullptr;
     Res.Rel      = TypedCopyAttr::BT_Equivalent;
     Res.TypeExpr = Orig;
-    Res.Subst.initFromScope(scope());
+    Res.Subst    = scope()->substitution();
     return;
   }
   SuperTv::traverseField(Orig);
@@ -782,18 +783,18 @@ void TypedEvaluator::traverseNestedCode(Code* Orig) {
   // Create a new scope, where args point to phi nodes in the new block.
   unsigned Nargs = Builder.deBruinIndex() -
       Builder.deBruinIndexOfEnclosingNestedFunction();
-  unsigned Vidx  = scope()->numVars() - Nargs;
+  unsigned Vidx = scope()->size() - Nargs;
 
   auto* Nb = Builder.newBlock(Nargs);
   auto* Ns = scope()->clone();
   for (unsigned i=0; i < Nargs; ++i) {
     // TODO: (FIXME) Hack to deal with self-variables.
-    auto &Entry = Ns->varEntry(Vidx + i);
-    if (Entry.VDecl->kind() == VarDecl::VK_SFun)
+    auto *Vd = Ns->varDecl(Vidx + i);
+    if (!Vd || Vd->kind() == VarDecl::VK_SFun)
       continue;
-    assert(Entry.VDecl->kind() != VarDecl::VK_Let);
+    assert(Vd->kind() != VarDecl::VK_Let);
 
-    auto &At    = Entry.VarAttr;
+    auto &At    = Ns->var(i);
     At.Exp      = Nb->arguments()[i];
     At.Rel      = TypedCopyAttr::BT_Equivalent;
     At.TypeExpr = Nb->arguments()[i];
@@ -834,7 +835,7 @@ bool TypedEvaluator::reduceNestedCall(Call* Orig, Code* C) {
     Res.Exp = Builder.newUndefined();
     return true;
   }
-  if (Ca.Subst.numVarAttrs() != Pb->Block->arguments().size()) {
+  if (Ca.Subst.numSubstVars() != Pb->Block->arguments().size()) {
     diag().error("Invalid number of arguments to function call.") << Orig;
     Res.Exp = Builder.newUndefined();
     return true;

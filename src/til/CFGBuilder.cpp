@@ -61,7 +61,6 @@ void CFGBuilder::endCFG() {
   // assert(!CurrentBB && "Never finished the last block.");
 
   CurrentCFG->renumber();
-
   CurrentState.EmitInstrs = false;
   CurrentCFG = nullptr;
 }
@@ -159,10 +158,6 @@ void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
     Diag.error("Invalid argument to Phi node: ") << E;
     return;
   }
-
-  // Set the Phi argument.
-  if (!OverwriteInstructions)
-    assert(!Ph->values()[Idx].get() && "We already handled this node.");
 
   Ph->values().resize(Arena, Idx+1, nullptr);  // Make room if we need to.
   Ph->values()[Idx].reset(I);
