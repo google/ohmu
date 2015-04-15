@@ -453,9 +453,12 @@ public:
   /// Factory method to create a future in the current context.
   /// Default implementation works for LazyFuture; override for other types.
   FutureType* makeFuture(SExpr *E) {
+    CFGBuilder::BuilderState Bs = self()->Builder.currentState();
+    // We need to turn off emit in a lazy or type position;
+    // it's easiest to do that here.
+    Bs.EmitInstrs = false;
     auto *F = new (self()->arena())
-      FutureType(self(), E, self()->scope()->clone(),
-                 self()->Builder.currentState());
+      FutureType(self(), E, self()->scope()->clone(), Bs);
     FutureQueue.push(F);
     return F;
   }

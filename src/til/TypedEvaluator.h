@@ -192,16 +192,8 @@ private:
 public:
   DiagnosticEmitter& diag() { return Builder.diag(); }
 
-  void enterCFG(SCFG *Cfg) {
-    Super::enterCFG(Cfg);
-    scope()->setCurrentContinuation(Builder.currentCFG()->exit());
-    Builder.beginBlock(Builder.currentCFG()->entry());
-  }
-
-  void exitCFG(SCFG *Cfg) {
-    processPendingBlocks();
-    Super::exitCFG(Cfg);
-  }
+  void enterCFG(SCFG *Cfg);
+  void exitCFG(SCFG *Cfg);
 
   /** reduceX(...) methods */
 
@@ -210,18 +202,19 @@ public:
   template<class T>
   void reduceLiteralT(LiteralT<T> *Orig);
 
-  void reduceFunction(Function   *Orig);
-  void reduceRecord  (Record     *Orig);
-  void reduceCode    (Code       *Orig);
-  void reduceField   (Field      *Orig);
+  void reduceFunction(Function  *Orig);
+  void reduceRecord  (Record    *Orig);
+  void reduceCode    (Code      *Orig);
+  void reduceField   (Field     *Orig);
 
-  void reduceVariable(Variable   *Orig);
-  void reduceProject (Project    *Orig);
-  void reduceApply   (Apply      *Orig);
-  void reduceCall    (Call       *Orig);
-  void reduceLoad    (Load       *Orig);
-  void reduceUnaryOp (UnaryOp    *Orig);
-  void reduceBinaryOp(BinaryOp   *Orig);
+  void reduceVariable(Variable  *Orig);
+  void reduceProject (Project   *Orig);
+  void reduceApply   (Apply     *Orig);
+  void reduceCall    (Call      *Orig);
+  void reduceAlloc   (Alloc     *Orig);
+  void reduceLoad    (Load      *Orig);
+  void reduceUnaryOp (UnaryOp   *Orig);
+  void reduceBinaryOp(BinaryOp  *Orig);
 
   void reduceIdentifier(Identifier *Orig);
 
@@ -243,6 +236,7 @@ public:
 private:
   friend class CFGFuture;
 
+  void reduceVarSubstitution(unsigned Vidx);
   void evaluateTypeExpr(TypedCopyAttr &At);
   void computeAttrType (TypedCopyAttr &At, SExpr *E);
   void promoteVariable (Variable *V);

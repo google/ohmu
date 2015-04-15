@@ -78,8 +78,10 @@ public:
   /// Invoked by SExpr classes to traverse possibly weak members.
   /// Do not override.
   void traverseArg(SExpr *E) {
+    if (!E)
+      self()->traverseNull();
     // Detect weak references to other instructions in the CFG.
-    if (Instruction *I = E->asCFGInstruction())
+    else if (Instruction *I = E->asCFGInstruction())
       self()->traverseWeak(I);
     else
       self()->traverse(E, TRV_Arg);
@@ -226,7 +228,7 @@ template <class S>
 void Traversal<S>::traverseField(Field *E) {
   self()->traverse(E->range(), TRV_Type);
   if (E->body())
-    self()->traverse(E->body(),  TRV_Lazy);
+    self()->traverse(E->body(), TRV_Decl);
   else
     self()->traverseNull();
   self()->reduceField(E);

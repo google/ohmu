@@ -16,11 +16,42 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "TypedEvaluator.h"
 #include "Evaluator.h"
+#include "SSAPass.h"
+#include "TypedEvaluator.h"
+
 
 namespace ohmu {
 namespace til  {
+
+
+void TypedEvaluator::enterCFG(SCFG *Cfg) {
+  Super::enterCFG(Cfg);
+  scope()->setCurrentContinuation(Builder.currentCFG()->exit());
+  Builder.beginBlock(Builder.currentCFG()->entry());
+}
+
+
+void TypedEvaluator::exitCFG(SCFG *Cfg) {
+  auto* ncfg = Builder.currentCFG();
+  processPendingBlocks();
+  Super::exitCFG(Cfg);
+
+  ncfg->computeNormalForm();
+
+  std::cout << "Lowered CFG: \n";
+  TILDebugPrinter::print(ncfg, std::cout);
+
+  std::cout << "Convert to SSA: \n";
+  SSAPass ssaPass(Builder.arena());
+  // indices start at 1, so we push debruin-1 onto the stack.
+  ssaPass.scope()->enterNullScope(Builder.deBruinIndex()-1);
+  // TODO: also enter builder scope
+  ssaPass.traverseAll(ncfg);
+
+  TILDebugPrinter::print(ncfg, std::cout);
+}
+
 
 
 static TypedCopyAttr::Relation
@@ -154,13 +185,39 @@ void TypedEvaluator::promoteVariable(Variable *V) {
   // V is a variable in the output scope.
   // Thus, we need to create a new scope to evaluate the variable type,
   // with null substitutions for anything that V depends on.
-  // TODO: optimize for this common case where the scope is empty.
 
   unsigned Vidx = V->variableDecl()->varIndex();
   ScopeCPS Ns(Vidx);
   auto* S = switchScope(&Ns);
   computeAttrType(Res, V->variableDecl()->definition());
   restoreScope(S);
+}
+
+
+
+/// Shared code between reduceVariable and reduceIdentifier
+void TypedEvaluator::reduceVarSubstitution(unsigned Vidx) {
+  // We substitute for variables, so look up the substitution.
+  auto& At = scope()->var( Vidx );
+  if (At.TypeExpr) {
+    // If we have a typed substitution, then return it.
+    resultAttr() = At;
+    return;
+  }
+  if (Variable* V = dyn_cast_or_null<Variable>(At.Exp)) {
+    // If the substitution maps to another variable, then promote that one.
+    promoteVariable(V);
+    return;
+  }
+  if (Instruction* I = dyn_cast<Instruction>(At.Exp)) {
+    // If the substitution is a simply-typed expression or phi node,
+    // then return it.
+    if (I->baseType().isSimple() || I->opcode() == COP_Phi) {
+      resultAttr() = At;
+      return;
+    }
+  }
+  assert(false && "Invalid substitution.");
 }
 
 
@@ -173,29 +230,8 @@ void TypedEvaluator::reduceVariable(Variable *Orig) {
     promoteVariable(Orig);
     return;
   }
-  else {
-    // We substitute for variables, so look up the substitution.
-    auto& At = scope()->var( Orig->variableDecl()->varIndex() );
-    if (At.TypeExpr) {
-      // If we have a typed substitution, then return it.
-      resultAttr() = At;
-      return;
-    }
-    if (Variable* V = dyn_cast_or_null<Variable>(At.Exp)) {
-      // If the substitution maps to another variable, then promote that one.
-      promoteVariable(V);
-      return;
-    }
-    if (Instruction* I = dyn_cast<Instruction>(At.Exp)) {
-      // If the substitution is a simply-typed expression, then return it.
-      if (I->baseType().isSimple()) {
-        resultAttr() = At;
-        return;
-      }
-    }
-  }
-  // Otherwise we have an untyped expression, which should never happen.
-  assert(false && "Invalid Substitution.");
+
+  reduceVarSubstitution(Orig->variableDecl()->varIndex());
 }
 
 
@@ -331,6 +367,23 @@ void TypedEvaluator::reduceCall(Call *Orig) {
 
 
 
+void TypedEvaluator::reduceAlloc(Alloc *Orig) {
+  auto& Res = resultAttr();
+  auto* Ve = attr(0).Exp;
+
+  if (!Ve->isValue()) {
+    diag().error("Argument to alloc is not a value: ") << Ve;
+    Ve = Builder.newUndefined();
+  }
+
+  Res.Exp = Builder.newAlloc(Ve, Orig->allocKind());
+  Res.TypeExpr = Ve;
+  Res.Rel = TypedCopyAttr::BT_Type;
+  Res.Subst.init( Builder.deBruinIndex() );
+}
+
+
+
 void TypedEvaluator::reduceLoad(Load *Orig) {
   auto& Res = resultAttr();
   auto& Fa  = attr(0);
@@ -344,6 +397,9 @@ void TypedEvaluator::reduceLoad(Load *Orig) {
     Res.Exp = Builder.newUndefined();
     return;
   }
+
+  if (Future *Fut = dyn_cast<Future>(F->range()))
+    Fut->force();
 
   Res.TypeExpr = F->range();
   Res.Rel      = TypedCopyAttr::BT_Type;
@@ -523,25 +579,7 @@ void TypedEvaluator::reduceIdentifier(Identifier *Orig) {
 
     // First check to see if the identifier refers to a named variable.
     if (Vd->varName() == Idstr) {
-      auto &At = scope()->var(i);
-      if (At.TypeExpr) {
-        // If we have a substitution with a type, return that.
-        Res = At;
-        return;
-      }
-      if (Variable *V = dyn_cast_or_null<Variable>(At.Exp)) {
-        // If it maps to a variable, promote it.
-        promoteVariable(V);
-        return;
-      }
-      if (Instruction* I = dyn_cast<Instruction>(At.Exp)) {
-        // If the substitution is a simply-typed expression, then return it.
-        if (I->baseType().isSimple()) {
-          Res = At;
-          return;
-        }
-      }
-      assert(false && "Invalid substitution.");
+      reduceVarSubstitution(i);
       return;
     }
     // Otherwise look up slot names in enclosing records.
@@ -794,7 +832,7 @@ void TypedEvaluator::traverseNestedCode(Code* Orig) {
       continue;
     assert(Vd->kind() != VarDecl::VK_Let);
 
-    auto &At    = Ns->var(i);
+    auto &At    = Ns->var(Vidx + i);
     At.Exp      = Nb->arguments()[i];
     At.Rel      = TypedCopyAttr::BT_Equivalent;
     At.TypeExpr = Nb->arguments()[i];

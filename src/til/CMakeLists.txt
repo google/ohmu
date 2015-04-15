@@ -4,7 +4,7 @@ add_library(til STATIC
   Bytecode.cpp
   CFGBuilder.cpp
   Global.cpp
-#  SSAPass.cpp
+  SSAPass.cpp
   TIL.cpp
   TypedEvaluator.cpp
 )

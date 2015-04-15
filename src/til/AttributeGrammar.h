@@ -117,6 +117,12 @@ public:
   /// Return the list of non-null substitutions.
   std::vector<Attr>& varAttrs() { return VarAttrs; }
 
+  /// Push n null substitutions.  This Substitution must be entirely null.
+  void push_back_null(unsigned n) {
+    assert(VarAttrs.size() == 0);
+    NullVars += n;
+  }
+
   /// Push a new substitution onto the end.
   void push_back(const Attr& At) {
     assert(NullVars > 0);   // Index 0 is reserved.
@@ -131,8 +137,12 @@ public:
 
   /// Pop the last substitution off of the end.
   void pop_back() {
-    assert(VarAttrs.size() > 0);
-    VarAttrs.pop_back();
+    if (VarAttrs.size() > 0) {
+      VarAttrs.pop_back();
+      return;
+    }
+    assert(NullVars > 0 && "Empty Substitution");
+    --NullVars;
   }
 
   /// Clear all substitutions, including null ones.
@@ -205,6 +215,13 @@ public:
     VarDeclMap.push_back(Orig);
   }
 
+  /// Enter scope of n null substitutions.
+  void enterNullScope(unsigned n) {
+    Subst.push_back_null(n);
+    for (unsigned i = 0; i < n; ++i)
+      VarDeclMap.push_back(nullptr);
+  }
+
   void exitScope() {
     Subst.pop_back();
     VarDeclMap.pop_back();
@@ -223,11 +240,7 @@ public:
   void exitBlock() { }
 
   /// Return the declaration for the i^th variable.
-  VarDecl* varDecl(unsigned i) {
-    if (i < numNullVars())
-      return nullptr;
-    return VarDeclMap[i - numNullVars()];
-  }
+  VarDecl* varDecl(unsigned i) { return VarDeclMap[i]; }
 
   /// Return the substitution for the i^th instruction.
   Attr& instr(unsigned i) { return InstructionMap[i]; }
@@ -242,10 +255,9 @@ public:
   ScopeFrame* clone() { return new ScopeFrame(*this); }
 
   /// Default constructor.
-  ScopeFrame() : Subst(1) { }  // deBruin index 0 is reserved
-
-  /// Create a new scope where the first Nv variables have a null substitution.
-  ScopeFrame(unsigned Nv) : Subst(Nv) { }
+  ScopeFrame() : Subst(1) {
+    VarDeclMap.push_back(nullptr);  // deBruin index 0 is reserved
+  }
 
   /// Create a new scope from a substitution.
   ScopeFrame(Substitution<Attr>&& S) : Subst(std::move(S)) {

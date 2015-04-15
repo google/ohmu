@@ -466,7 +466,7 @@ protected:
     if (!E) {
       if (Verbose) {
         self()->newline(SS);
-        SS << "null;\n";
+        SS << "null;";
       }
       return;
     }

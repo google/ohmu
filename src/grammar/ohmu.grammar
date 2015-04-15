@@ -189,7 +189,8 @@ statement ::=
                 |                                            { e1 }
                 )
   | "let"    s= %TK_Identifier e1=letbody  ";" e2=statement  { (let s e1 e2) }
-  | "var"    s= %TK_Identifier "=" e1=expr ";" e2=statement  { (let s (alloc e1) e2) }
+  | "var"    s= %TK_Identifier ":" t1=expr "=" e1=expr ";" e2=statement  
+             { (let s (alloc (field t1 e1)) e2) }
   ;
 
 

@@ -18,7 +18,6 @@
 #include "test/Driver.h"
 #include "til/Bytecode.h"
 #include "til/VisitCFG.h"
-#include "til/InplaceReducer.h"
 
 
 using namespace ohmu;

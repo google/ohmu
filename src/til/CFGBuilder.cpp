@@ -80,7 +80,7 @@ void CFGBuilder::beginBlock(BasicBlock *B) {
 
 void CFGBuilder::endBlock(Terminator *Term) {
   assert(CurrentBB && "No current block.");
-  assert((OverwriteInstructions || CurrentBB->instructions().size() == 0) &&
+  assert((CurrentBB->instructions().size() == 0 || OverwriteInstructions) &&
          "Already finished block.");
 
   // Ovewrite existing arguments with CurrentArgs, if requested.
