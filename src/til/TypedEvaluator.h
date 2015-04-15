@@ -192,16 +192,8 @@ private:
 public:
   DiagnosticEmitter& diag() { return Builder.diag(); }
 
-  void enterCFG(SCFG *Cfg) {
-    Super::enterCFG(Cfg);
-    scope()->setCurrentContinuation(Builder.currentCFG()->exit());
-    Builder.beginBlock(Builder.currentCFG()->entry());
-  }
-
-  void exitCFG(SCFG *Cfg) {
-    processPendingBlocks();
-    Super::exitCFG(Cfg);
-  }
+  void enterCFG(SCFG *Cfg);
+  void exitCFG(SCFG *Cfg);
 
   /** reduceX(...) methods */
 

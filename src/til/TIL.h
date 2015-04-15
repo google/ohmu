@@ -219,7 +219,6 @@ public:
   // with REQUIRES_EH=1.
   void operator delete(void *) = delete;
 
-
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
     : Opcode(Op), SubOpcode(SubOp), Flags(0) {}

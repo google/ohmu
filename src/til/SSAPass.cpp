@@ -24,47 +24,108 @@
 namespace ohmu {
 namespace til  {
 
-
-SCFG* SSAPass::reduceSCFG_Begin(SCFG &Orig) {
-  InplaceReducer::reduceSCFG_Begin(Orig);
-  BInfoMap.resize(CurrentCFG->numBlocks());
-  return &Orig;
+void SSAPass::enterCFG(SCFG *Cfg) {
+  InplaceReducer::enterCFG(Cfg);
+  BInfoMap.resize(Builder.currentCFG()->numBlocks());
 }
 
 
-SCFG* SSAPass::reduceSCFG_End(SCFG* Scfg) {
+void SSAPass::exitCFG(SCFG *Cfg) {
   replacePendingLoads();
+  CurrBB = nullptr;
 
   // TODO: clear the Future arena.
   Pending.clear();
   BInfoMap.clear();
 
-  return InplaceReducer::reduceSCFG_End(Scfg);
+  InplaceReducer::exitCFG(Cfg);
 }
 
 
-BasicBlock* SSAPass::reduceBasicBlockBegin(BasicBlock &Orig) {
-  InplaceReducer::reduceBasicBlockBegin(Orig);
+void SSAPass::enterBlock(BasicBlock *B) {
+  InplaceReducer::enterBlock(B);
+
+  auto* Cbb = Builder.currentBB();
 
   // Warning -- adding blocks to BlockInfo will invalidate CurrentVarMap.
-  CurrentVarMap = &BInfoMap[CurrentBB->blockID()].AllocVarMap;
+  CurrentVarMap = &BInfoMap[Cbb->blockID()].AllocVarMap;
 
   // Initialize variable map to the size of the dominator's map.
   // Local variables in the dominator are in scope.
   unsigned PSize = 0;
-  if (CurrentBB->parent())
-    PSize = BInfoMap[CurrentBB->parent()->blockID()].AllocVarMap.size();
+  if (Cbb->parent())
+    PSize = BInfoMap[Cbb->parent()->blockID()].AllocVarMap.size();
   CurrentVarMap->resize(PSize, nullptr);
-
-  return &Orig;
 }
+
+
+void SSAPass::exitBlock(BasicBlock *B) {
+
+}
+
+
+void SSAPass::reduceAlloc(Alloc *Orig) {
+  assert(Orig->instrID() > 0 && "Alloc must be a top-level instruction.");
+  auto* E0 = attr(0).Exp;
+
+  if (Builder.currentBB()) {
+    // Add alloc to current var map.
+    Orig->setAllocID(CurrentVarMap->size());
+    CurrentVarMap->push_back(E0);
+    resultAttr().Exp = nullptr;   // Remove instruction
+    return;
+  }
+  Super::reduceAlloc(Orig);
+}
+
+
+void SSAPass::reduceStore(Store *Orig) {
+  auto* E0 = attr(0).Exp;
+  auto* E1 = attr(1).Exp;
+
+  if (Builder.currentBB()) {
+    auto* A = dyn_cast<Alloc>(E0);
+    if (A) {
+      // Update current var map.
+      CurrentVarMap->at(A->allocID()) = E1;
+      resultAttr().Exp = nullptr;   // Remove instruction
+      return;
+    }
+  }
+  Super::reduceStore(Orig);
+}
+
+
+void SSAPass::reduceLoad(Load *Orig) {
+  auto* E0 = attr(0).Exp;
+
+  if (Builder.currentBB()) {
+    auto* A = dyn_cast_or_null<Alloc>(E0);
+    if (A) {
+      if (auto *Av = CurrentVarMap->at(A->allocID())) {
+        // Replace load with value from current var map.
+        resultAttr().Exp = Av;
+        return;
+      }
+      else {
+        // Replace load with future
+        auto *F = new (FutArena) FutureLoad(Orig, A);
+        Pending.push_back(F);
+        resultAttr().Exp = F;
+        return;
+      }
+    }
+  }
+  Super::reduceLoad(Orig);
+}
+
 
 
 // This is the second pass of the SSA conversion, which looks up values for
 // all loads, and replaces the loads.
 void SSAPass::replacePendingLoads() {
   // Second pass:  Go back and replace all loads with phi nodes or values.
-  CurrentBB = CurrentCFG->entry();
+  CurrBB = Builder.currentCFG()->entry();
 
   for (auto *F : Pending) {
     SExpr *E = F->maybeGetResult();
@@ -72,63 +133,19 @@ void SSAPass::replacePendingLoads() {
       Load  *L = F->LoadInstr;
       Alloc *A = F->AllocInstr;
       BasicBlock *B = L->block();
-      if (B != CurrentBB) {
+      if (B != CurrBB) {
         // We've switched to a new block.  Clear the cache.
         VarMapCache.clear();
         unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
         VarMapCache.resize(MSize, nullptr);
-        CurrentBB = B;
+        CurrBB = B;
       }
-      E = lookupInPredecessors(L->block(), A->allocID());
+      E = lookupInPredecessors(B, A->allocID());
       F->setResult(E);
     }
   }
   VarMapCache.clear();
-};
-
-
-
-SExpr* SSAPass::reduceAlloc(Alloc &Orig, SExpr* E0) {
-  if (CurrentBB) {
-    // Add alloc to current var map.
-    Orig.setAllocID(CurrentVarMap->size());
-    CurrentVarMap->push_back(E0);
-  }
-  // Note: the instruction gets removed, since we don't add it.
-  return &Orig;
 }
-
-
-SExpr* SSAPass::reduceStore(Store &Orig, SExpr* E0, SExpr* E1) {
-  if (CurrentBB) {
-    // Update current var map.
-    if (auto* A = dyn_cast<Alloc>(E0)) {
-      CurrentVarMap->at(A->allocID()) = E1;
-      return E1;
-    }
-  }
-  // Note: the instruction gets removed, since we don't add it.
-  return &Orig;
-}
-
-
-SExpr* SSAPass::reduceLoad(Load &Orig, SExpr* E0) {
-  if (CurrentBB) {
-    // Replace load with value from current var map.
-    if (auto* A = dyn_cast_or_null<Alloc>(E0)) {
-      if (auto *Av = CurrentVarMap->at(A->allocID()))
-        return Av;
-      else {
-        auto *F = new (FutArena) FutureLoad(&Orig, A);
-        Pending.push_back(F);
-        return F;
-      }
-    }
-  }
-  // Note: the instruction gets removed, since we don't add it.
-  return &Orig;
-}
-
 
 
 SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
@@ -136,9 +153,8 @@ SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
   if (!E)
     return nullptr;
 
-  // The cached value may be an incomplete and temporary Phi node,
-  // that was later eliminated.
-  // If so, grab the real value and update the cache.
+  // The cached value may be an incomplete and temporary Phi node, that was
+  // later eliminated. If so, grab the real value and update the cache.
   if (auto *Ph = dyn_cast<Phi>(E)) {
     if (Ph->status() == Phi::PH_SingleVal) {
       E = Ph->values()[0].get();
@@ -151,10 +167,10 @@ SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
 
 Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
   // Values don't match, so make a new phi node.
-  auto *Ph = new (Arena) Phi(Arena, numPreds);
+  auto *Ph = new (arena()) Phi(arena(), numPreds);
   // Fill it with the original value E
   for (unsigned j = 0; j < i; ++j)
-    Ph->values().emplace_back(Arena, E);
+    Ph->values().emplace_back(arena(), E);
   if (Instruction *I = dyn_cast<Instruction>(E))
     Ph->setBaseType(I->baseType());
   return Ph;
@@ -163,18 +179,18 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 
 // Lookup value of local variable at the beginning of basic block B
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
-  if (B == CurrentBB) {
+  if (B == CurrBB) {
     // See if we have a cached value at the start of the current block.
     if (SExpr* E = VarMapCache[LvarID])
       return E;
   }
 
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
-  SExpr* E  = nullptr;   //< The first value we find.
-  SExpr* E2 = nullptr;   //< The second distinct value we find.
-  Phi*   Ph = nullptr;   //< The Phi node we created (if any)
-  bool Incomplete = false;                //< Is Ph incomplete?
-  bool SetInBlock = LvarMap->at(LvarID);  //< Is var set within this block?
+  SExpr* E  = nullptr;   // The first value we find.
+  SExpr* E2 = nullptr;   // The second distinct value we find.
+  Phi*   Ph = nullptr;   // The Phi node we created (if any)
+  bool Incomplete = false;                // Is Ph incomplete?
+  bool SetInBlock = LvarMap->at(LvarID);  // Is var set within this block?
   unsigned i = 0;
 
   for (auto &P : B->predecessors()) {
@@ -199,7 +215,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
 
     if (Ph) {
       // We already have a phi node, so just copy E2 into it.
-      Ph->values().emplace_back(Arena, E2);
+      Ph->values().emplace_back(arena(), E2);
       // If E2 is different, then mark the Phi node as complete.
       if (E2 != Ph && E2 != E)
         Incomplete = false;
@@ -207,7 +223,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
     else if (E2 != E) {
       // Values don't match, so we need a phi node.
       Ph = makeNewPhiNode(i, E, B->numPredecessors());
-      Ph->values().emplace_back(Arena, E2);
+      Ph->values().emplace_back(arena(), E2);
       Incomplete = false;
     }
     ++i;
@@ -230,8 +246,9 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
   }
 
   // Cache the result to avoid creating duplicate phi nodes.
-  if (B == CurrentBB)
+  if (B == CurrBB) {
     VarMapCache[LvarID] = E;
+  }
   return E;
 }
 

@@ -31,37 +31,38 @@ namespace til  {
 // Map from local variables (allocID) to their definitions (SExpr*).
 typedef std::vector<SExpr*> LocalVarMap;
 
+// Maintain a variable map for each basic block.
 struct SSABlockInfo {
   LocalVarMap AllocVarMap;
 };
 
 
-class SSAPass : public InplaceReducer,
-                public Traversal<SSAPass, SExprReducerMap> {
+class SSAPass : public InplaceReducer<CopyAttr>,
+                public AGTraversal<SSAPass> {
 public:
   static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
     SSAPass Pass(A);
     Pass.traverseAll(Scfg);
   }
 
-  SCFG* reduceSCFG_Begin(SCFG &Orig);
-  SCFG* reduceSCFG_End(SCFG* Scfg);
+  void enterCFG(SCFG *Cfg);
+  void exitCFG(SCFG *Cfg);
+  void enterBlock(BasicBlock *B);
+  void exitBlock(BasicBlock *B);
 
-  BasicBlock* reduceBasicBlockBegin(BasicBlock &Orig);
-
-  SExpr* reduceAlloc(Alloc &Orig, SExpr* E0);
-  SExpr* reduceStore(Store &Orig, SExpr* E0, SExpr* E1);
-  SExpr* reduceLoad(Load &Orig, SExpr* E0);
+  void reduceAlloc(Alloc *Orig);
+  void reduceStore(Store *Orig);
+  void reduceLoad (Load  *Orig);
 
 protected:
   // A load instruction that needs to be rewritten.
   class FutureLoad : public Future {
   public:
     FutureLoad(Load* L, Alloc* A) : LoadInstr(L), AllocInstr(A) { }
-    ~FutureLoad() LLVM_DELETED_FUNCTION;
+    virtual ~FutureLoad() { }
 
     /// We don't use evaluate(); FutureLoads are forced manually.
-    SExpr* evaluate() override { return nullptr; }
+    virtual SExpr* evaluate() override { return nullptr; }
 
     Load  *LoadInstr;
     Alloc *AllocInstr;
@@ -83,21 +84,29 @@ protected:
   void replacePendingLoads();
 
 public:
-  SSAPass(MemRegionRef A) : InplaceReducer(A), CurrentVarMap(nullptr) {
+  SSAPass(MemRegionRef A)
+      : InplaceReducer(A), CurrentVarMap(nullptr), CurrBB(nullptr) {
     FutArena.setRegion(&FutRegion);
+    // We only add new Phi nodes.
+    Builder.setOverwriteMode(true, false);
   }
 
 private:
+  typedef InplaceReducer<CopyAttr> Super;
+  typedef Traversal<SSAPass>       SuperTv;
+
   SSAPass() = delete;
 
-  MemRegion    FutRegion; //< Allocate futures in region for immediate delete.
+  MemRegion    FutRegion;  ///< Put fFutures in region for immediate deletion.
   MemRegionRef FutArena;
 
   LocalVarMap* CurrentVarMap;
 
-  std::vector<SSABlockInfo> BInfoMap;  //< Side table for basic blocks.
-  std::vector<FutureLoad*>  Pending;   //< Loads that need to be rewritten.
+  std::vector<SSABlockInfo> BInfoMap;  ///< Side table for basic blocks.
+  std::vector<FutureLoad*>  Pending;   ///< Loads that need to be rewritten.
   LocalVarMap VarMapCache;
+
+  BasicBlock* CurrBB;
 };
 
 

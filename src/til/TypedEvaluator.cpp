@@ -16,11 +16,35 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "TypedEvaluator.h"
 #include "Evaluator.h"
+#include "SSAPass.h"
+#include "TypedEvaluator.h"
+
 
 namespace ohmu {
 namespace til  {
+
+
+void TypedEvaluator::enterCFG(SCFG *Cfg) {
+  Super::enterCFG(Cfg);
+  scope()->setCurrentContinuation(Builder.currentCFG()->exit());
+  Builder.beginBlock(Builder.currentCFG()->entry());
+}
+
+
+void TypedEvaluator::exitCFG(SCFG *Cfg) {
+  auto* ncfg = Builder.currentCFG();
+  processPendingBlocks();
+  Super::exitCFG(Cfg);
+
+  std::cout << "Lowered CFG: \n";
+  TILDebugPrinter::print(ncfg, std::cout);
+
+  std::cout << "Convert to SSA: \n";
+  SSAPass::ssaTransform(ncfg, Builder.arena());
+  TILDebugPrinter::print(ncfg, std::cout);
+}
+
 
 
 static TypedCopyAttr::Relation

@@ -45,6 +45,17 @@ public:
   SCFG*        currentCFG() { return CurrentCFG; }
   BasicBlock*  currentBB()  { return CurrentBB;  }
 
+  bool overwriteInstructions() const { return OverwriteInstructions; }
+  bool overwriteArguments()    const { return OverwriteArguments;    }
+
+  /// Set the overwrite mode when doing in-place rewrites of an existing CFG.
+  /// If Instrs is true, added instructions will overwrite existing ones.
+  /// If Args is true, added Phi nodes will overwrite existing ones.
+  void setOverwriteMode(bool Instrs, bool Args = false) {
+    OverwriteArguments    = Args;
+    OverwriteInstructions = Instrs;
+  }
+
   /// Return true if we are in a CFG, and emitting instructions.
   bool emitInstrs() { return CurrentState.EmitInstrs; }
 
@@ -228,8 +239,8 @@ public:
     : OverwriteArguments(false), OverwriteInstructions(false),
       CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
   { }
-  CFGBuilder(MemRegionRef A)
-    : Arena(A), OverwriteArguments(false), OverwriteInstructions(false),
+  CFGBuilder(MemRegionRef A, bool Inplace = false)
+    : Arena(A), OverwriteArguments(false), OverwriteInstructions(Inplace),
       CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
   { }
   virtual ~CFGBuilder() { }
@@ -257,7 +268,8 @@ inline T* CFGBuilder::addInstr(T* I) {
 
   if (I->block() == nullptr)
     I->setBlock(CurrentBB);        // Mark I as having been added.
-  assert(I->block() == CurrentBB);
+  else
+    assert(I->block() == CurrentBB && "Same argument in multiple blocks.");
   CurrentInstrs.push_back(I);
   return I;
 }
@@ -268,7 +280,8 @@ inline Phi* CFGBuilder::addArg(Phi* A) {
 
   if (A->block() == nullptr)
     A->setBlock(CurrentBB);        // Mark A as having been added
-  assert(A->block() == CurrentBB && "Invalid argument.");
+  else
+    assert(A->block() == CurrentBB && "Same instruction in multiple blocks.");
   CurrentArgs.push_back(A);
   return A;
 }

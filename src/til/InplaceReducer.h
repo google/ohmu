@@ -34,6 +34,8 @@ namespace til  {
 template<class Attr = CopyAttr, class ScopeT = ScopeFrame<Attr>>
 class InplaceReducer : public AttributeGrammar<Attr, ScopeT> {
 public:
+  MemRegionRef& arena() { return Builder.arena(); }
+
   void enterScope(VarDecl *Vd) {
     // enterScope must be called after reduceVarDecl()
     auto* Nvd = cast<VarDecl>( this->lastAttr().Exp );
@@ -51,7 +53,7 @@ public:
 
   void enterCFG(SCFG *Cfg) {
     Builder.beginCFG(Cfg);
-    this->scope()->enterCFG(Cfg, Builder.currentCFG());
+    this->scope()->enterCFG(Cfg);
   }
 
   void exitCFG(SCFG *Cfg) {
@@ -81,10 +83,14 @@ public:
   }
 
   void reduceBBArgument(Phi *Ph) {
+    if (Builder.overwriteArguments())
+      Builder.addArg(Ph);
     this->scope()->insertInstructionMap(Ph, std::move(this->lastAttr()));
   }
 
   void reduceBBInstruction(Instruction *I) {
+    if (Builder.overwriteInstructions())
+      Builder.addInstr(I);
     this->scope()->insertInstructionMap(I, std::move(this->lastAttr()));
   }
 
@@ -126,7 +132,7 @@ public:
     assert(Ns == Orig->slots().size());
     for (unsigned i = 0; i < Ns; ++i) {
       Slot *S = cast<Slot>( this->attr(i).Exp );
-      Orig->slots()[i] = S;
+      Orig->slots()[i].reset(S);
     }
     this->resultAttr().Exp = Orig;
   }
@@ -148,7 +154,7 @@ public:
     unsigned Idx = Orig->variableDecl()->varIndex();
     if (this->scope()->isNull(Idx)) {
       // Null substitution: just copy the variable.
-      this->resultAttr().Exp = Attr( Orig );
+      this->resultAttr() = Attr( Orig );
     }
     else {
       // Substitute for variable.
@@ -300,11 +306,13 @@ public:
 
 public:
   InplaceReducer()
-    : AttributeGrammar<Attr, ScopeT>(new ScopeT())
-  { }
+      : AttributeGrammar<Attr, ScopeT>(new ScopeT()) {
+    Builder.setOverwriteMode(true, true);
+  }
   InplaceReducer(MemRegionRef A)
-    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A)
-  { }
+      : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A) {
+    Builder.setOverwriteMode(true, true);
+  }
 
 protected:
   CFGBuilder Builder;
