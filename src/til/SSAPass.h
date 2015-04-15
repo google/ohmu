@@ -40,11 +40,6 @@ struct SSABlockInfo {
 class SSAPass : public InplaceReducer<CopyAttr>,
                 public AGTraversal<SSAPass> {
 public:
-  static void ssaTransform(SCFG* Scfg, MemRegionRef A) {
-    SSAPass Pass(A);
-    Pass.traverseAll(Scfg);
-  }
-
   void enterCFG(SCFG *Cfg);
   void exitCFG(SCFG *Cfg);
   void enterBlock(BasicBlock *B);

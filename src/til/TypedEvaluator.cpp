@@ -37,11 +37,18 @@ void TypedEvaluator::exitCFG(SCFG *Cfg) {
   processPendingBlocks();
   Super::exitCFG(Cfg);
 
+  ncfg->computeNormalForm();
+
   std::cout << "Lowered CFG: \n";
   TILDebugPrinter::print(ncfg, std::cout);
 
   std::cout << "Convert to SSA: \n";
-  SSAPass::ssaTransform(ncfg, Builder.arena());
+  SSAPass ssaPass(Builder.arena());
+  // indices start at 1, so we push debruin-1 onto the stack.
+  ssaPass.scope()->enterNullScope(Builder.deBruinIndex()-1);
+  // TODO: also enter builder scope
+  ssaPass.traverseAll(ncfg);
+
   TILDebugPrinter::print(ncfg, std::cout);
 }
 
@@ -818,7 +825,7 @@ void TypedEvaluator::traverseNestedCode(Code* Orig) {
       continue;
     assert(Vd->kind() != VarDecl::VK_Let);
 
-    auto &At    = Ns->var(i);
+    auto &At    = Ns->var(Vidx + i);
     At.Exp      = Nb->arguments()[i];
     At.Rel      = TypedCopyAttr::BT_Equivalent;
     At.TypeExpr = Nb->arguments()[i];
