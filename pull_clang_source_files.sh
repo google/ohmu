@@ -16,7 +16,10 @@ cp -v "$CLANG_INC"/TILPrettyPrint.h    src/til/
 cp -v "$CLANG_INC"/CFGBuilder.h        src/til/
 cp -v "$CLANG_INC"/AttributeGrammar.h  src/til/
 cp -v "$CLANG_INC"/CopyReducer.h       src/til/
+cp -v "$CLANG_INC"/InplaceReducer.h    src/til/
+cp -v "$CLANG_INC"/SSAPass.h           src/til/
 
 cp -v "$CLANG_LIB"/TIL.cpp             src/til/
 cp -v "$CLANG_LIB"/CFGBuilder.cpp      src/til/
+cp -v "$CLANG_LIB"/SSAPass.cpp         src/til/
 

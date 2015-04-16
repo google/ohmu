@@ -16,6 +16,9 @@ diff -u "$CLANG_INC"/TILPrettyPrint.h    src/til/TILPrettyPrint.h
 diff -u "$CLANG_INC"/CFGBuilder.h        src/til/CFGBuilder.h
 diff -u "$CLANG_INC"/AttributeGrammar.h  src/til/AttributeGrammar.h
 diff -u "$CLANG_INC"/CopyReducer.h       src/til/CopyReducer.h
+diff -u "$CLANG_INC"/InplaceReducer.h    src/til/InplaceReducer.h
+diff -u "$CLANG_INC"/SSAPass.h           src/til/SSAPass.h
 
 diff -u "$CLANG_LIB"/TIL.cpp             src/til/TIL.cpp
 diff -u "$CLANG_LIB"/CFGBuilder.cpp      src/til/CFGBuilder.cpp
+diff -u "$CLANG_INC"/SSAPass.cpp         src/til/SSAPass.cpp
