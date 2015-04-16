@@ -1,0 +1,8 @@
+
+sum(n: Int): Int -> {
+  let loop@(loop)(i: Int, total: Int): Int -> {
+    if (i == 0) then total
+    else loop@()(i-1, total+i)();
+  };
+  loop@()(n, 0)();
+};

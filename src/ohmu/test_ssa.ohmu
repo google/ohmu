@@ -1,0 +1,15 @@
+
+sum(n: Int): Int -> {
+  var i:     Int = 0;
+  var total: Int = 0;
+  let loop@(loop): Int -> {
+    if (i^ >= n) then total^
+    else {
+      total := total^ + i^;
+      i := i^ + 1;
+      loop@()();
+    };
+  };
+  loop@()();
+};
+
