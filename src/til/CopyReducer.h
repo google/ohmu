@@ -203,11 +203,11 @@ public:
   }
 
   void reduceRecord(Record *Orig) {
-    unsigned Ns = this->numAttrs();
+    unsigned Ns = this->numAttrs() - 1;
     assert(Ns == Orig->slots().size());
-    auto *Res = Builder.newRecord(Ns);
+    auto *Res = Builder.newRecord(Ns, this->attr(0).Exp);
     for (unsigned i = 0; i < Ns; ++i) {
-      Slot *S = cast<Slot>( this->attr(i).Exp );
+      Slot *S = cast<Slot>( this->attr(i+1).Exp );
       Res->addSlot(arena(), S);
     }
     this->resultAttr().Exp = Res;

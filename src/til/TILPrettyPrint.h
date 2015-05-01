@@ -305,7 +305,12 @@ protected:
   }
 
   void printRecord(const Record *E, StreamType &SS) {
-    SS << "struct {";
+    SS << "struct ";
+    if (E->parent()) {
+      self()->printSExpr(E->parent(), SS, Prec_Decl);
+      SS << " ";
+    }
+    SS << "{";
     self()->indent();
     for (auto &S : E->slots()) {
       self()->newline(SS);

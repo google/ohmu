@@ -25,8 +25,10 @@ value ::=
     literal
   | "\\"  "(" function
   | "\\@" "(" sfunction
-  | "struct" "{" ss=slotList "}"      { (record ss)  }
-  | "[" es=exprList "]"               { (array es)   }
+  | "struct" ( "{" ss=slotList "}"                   { (record ss)   }
+             | "extends" e=expr "{" ss=slotList "}"  { (record e ss) }
+             )
+  | "[" es=exprList "]"                              { (array es)    }
   ;
 
 field ::=

@@ -140,10 +140,18 @@ typename C::CType Apply::compare(const Apply* E, C& Cmp) const {
 
 template <class C>
 typename C::CType Project::compare(const Project* E, C& Cmp) const {
-  typename C::CType Ct = Cmp.compare(record(), E->record());
-  if (Cmp.notTrue(Ct))
-    return Ct;
-  return Cmp.compareStrings(slotName(), E->slotName());
+  typename C::CType Ct;
+  if (slotDecl() && E->slotDecl()) {
+    Ct = Cmp.comparePointers(slotDecl(), E->slotDecl());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+  }
+  else {
+    Ct = Cmp.compareStrings(slotName(), E->slotName());
+    if (Cmp.notTrue(Ct))
+      return Ct;
+  }
+  return Cmp.compare(record(), E->record());
 }
 
 template <class C>

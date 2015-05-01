@@ -248,9 +248,18 @@ ParseResult TILParser::makeExpr(unsigned op, unsigned arity, ParseResult *prs) {
       return ParseResult(TILP_SExpr, e);
     }
     case TCOP_Record: {
-      assert(arity == 1);
-      auto* es = sexprList(0);
-      auto* r  = new (arena_) Record(arena_, es->size());
+      assert(arity == 1 || arity == 2);
+      SExpr *p;
+      std::vector<SExpr*>* es;
+      if (arity == 1) {
+        p  = nullptr;
+        es = sexprList(0);
+      }
+      else {
+        p  = sexpr(0);
+        es = sexprList(1);
+      }
+      auto *r = new (arena_) Record(arena_, es->size(), p);
       for (SExpr* e : *es) {
         Slot* s = dyn_cast<Slot>(e);
         if (s)

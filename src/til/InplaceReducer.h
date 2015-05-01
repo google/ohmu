@@ -132,10 +132,11 @@ public:
   }
 
   void reduceRecord(Record *Orig) {
-    unsigned Ns = this->numAttrs();
+    unsigned Ns = this->numAttrs() - 1;
     assert(Ns == Orig->slots().size());
+    Orig->rewrite(this->attr(0).Exp);
     for (unsigned i = 0; i < Ns; ++i) {
-      Slot *S = cast<Slot>( this->attr(i).Exp );
+      Slot *S = cast<Slot>( this->attr(i+1).Exp );
       Orig->slots()[i].reset(S);
     }
     this->resultAttr().Exp = Orig;

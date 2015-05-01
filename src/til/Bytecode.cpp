@@ -469,13 +469,13 @@ void BytecodeWriter::reduceRecord(Record *E) {
 }
 
 void BytecodeReader::readRecord() {
-  unsigned Sz = Reader->readUInt32();
-  auto *E = Builder.newRecord(Sz);
-  for (int i = Sz-1; i >= 0; --i) {
+  unsigned Ns = Reader->readUInt32();
+  auto *E = Builder.newRecord(Ns, arg(Ns));
+  for (int i = Ns-1; i >= 0; --i) {
     auto *Slt = dyn_cast<Slot>(arg(i));
     E->addSlot(Builder.arena(), Slt);
   }
-  drop(Sz);
+  drop(Ns+1);
   push(E);
 }
 

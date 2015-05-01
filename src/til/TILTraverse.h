@@ -242,6 +242,10 @@ void Traversal<S>::traverseSlot(Slot *E) {
 
 template <class S>
 void Traversal<S>::traverseRecord(Record *E) {
+  if (E->parent())
+    self()->traverse(E->parent(), TRV_Lazy);
+  else
+    self()->traverseNull();
   for (auto &Slt : E->slots()) {
     self()->traverse(Slt.get(), TRV_Decl);
   }

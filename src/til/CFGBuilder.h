@@ -129,8 +129,8 @@ public:
   Slot* newSlot(StringRef S, SExpr *E0) {
     return new (Arena) Slot(S, E0);
   }
-  Record* newRecord(unsigned NSlots = 0) {
-    return new (Arena) Record(Arena, NSlots);
+  Record* newRecord(unsigned NSlots = 0, SExpr* Parent = nullptr) {
+    return new (Arena) Record(Arena, NSlots, Parent);
   }
 
   ScalarType* newScalarType(BaseType Bt) {

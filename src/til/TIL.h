@@ -176,9 +176,6 @@ TIL_CastOpcode typeConvertable(BaseType Vt1, BaseType Vt2);
 
 
 
-/// Macro for the ugly template return type of SExpr::traverse
-#define MAPTYPE(R, X) typename R::template TypeMap<X>::Ty
-
 #define DECLARE_TRAVERSE_AND_COMPARE(X)                       \
   template <class C>                                          \
   typename C::CType compare(const X* E, C& Cmp) const;
@@ -674,8 +671,13 @@ public:
 
   static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
 
-  Record(MemRegionRef A, unsigned NSlots)
-    : PValue(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
+  Record(MemRegionRef A, unsigned NSlots, SExpr* P = nullptr)
+    : PValue(COP_Record), Parent(P), Slots(A, NSlots), SMap(nullptr) {}
+
+  void rewrite(SExpr *P) { Parent.reset(P); }
+
+  SExpr* parent() { return Parent.get(); }
+  const SExpr* parent() const { return Parent.get(); }
 
   SlotArray& slots() { return Slots; }
   const SlotArray& slots() const { return Slots; }
@@ -687,6 +689,7 @@ public:
   DECLARE_TRAVERSE_AND_COMPARE(Record)
 
 private:
+  SExprRef  Parent;   ///< The record we inherit from
   SlotArray Slots;    ///< The slots in the record.
   SlotMap*  SMap;     ///< A map from slot names to indices.
 };
@@ -794,7 +797,8 @@ class Project : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Project; }
 
-  static const short PRJ_Arrow = 0x01;
+  static const short PRJ_Arrow   = 0x01;
+  static const short PRJ_Foreign = 0x02;
 
   Project(SExpr *R, StringRef SName)
       : Instruction(COP_Project), Rec(R), SlotName(SName)  { }
@@ -804,10 +808,27 @@ public:
   SExpr *record() { return Rec.get(); }
   const SExpr *record() const { return Rec.get(); }
 
+  Slot *slotDecl() { return SlotDecl; }
+  const Slot* slotDecl() const { return SlotDecl; }
+
+  // Flag for pretty-printing Ohmu expressions in C++ syntax.
   bool isArrow() const { return (Flags & PRJ_Arrow) != 0; }
   void setArrow(bool b) {
     if (b) Flags |= PRJ_Arrow;
     else Flags &= ~PRJ_Arrow;
+  }
+
+  // Flag for projections that refer to foreign (e.g. C++) members.
+  bool isForeign() const { return (Flags & PRJ_Foreign) != 0; }
+  template<class T>
+  const T* slotDeclAs() const {
+    assert(isForeign() && "Not a foreign projection.");
+    return reinterpret_cast<T*>(SlotDecl);
+  }
+  template<class T>
+  void setSlotDeclAs(const T* Ptr) {
+    Flags |= PRJ_Foreign;
+    SlotDecl = reinterpret_cast<Slot*>(Ptr);
   }
 
   StringRef slotName() const { return SlotName; }
@@ -815,8 +836,9 @@ public:
   DECLARE_TRAVERSE_AND_COMPARE(Project)
 
 private:
-  SExprRef Rec;
+  SExprRef  Rec;
   StringRef SlotName;
+  Slot*     SlotDecl;
 };
 
 
@@ -1595,6 +1617,8 @@ inline bool Goto::isBackEdge() const {
   return TargetBlock->blockID() <= block()->blockID();
 }
 
+
+#undef DECLARE_TRAVERSE_AND_COMPARE
 
 }  // end namespace til
 }  // end namespace ohmu
