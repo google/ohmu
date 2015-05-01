@@ -227,7 +227,7 @@ protected:
 
   const unsigned char Opcode;
   const unsigned char SubOpcode;
-  uint16_t Flags;
+  uint16_t Flags;                 ///< For use by subclasses.
 
 private:
   SExpr() = delete;
@@ -291,6 +291,24 @@ private:
 typedef SExprRefT<SExpr> SExprRef;
 
 
+/// PValues (pointer values) are large values that must be allocated on
+/// the heap, and referenced via a pointer.  (i.e. reference types).  Examples
+/// include functions, records, objects, and boxed values.  Small values
+/// that can fit in registers (e.g. bool/int/float) are classified as
+/// Instructions instead.
+///
+/// A PValue expression is a constant expression that declares or defines a
+/// value, e.g., a class or function definition.  The Alloc instruction can
+/// be used to create a new (possibly mutable) object from a PValue.
+class PValue : public SExpr {
+public:
+  static bool classof(const SExpr *E) {
+    return E->opcode() >= COP_Function  &&  E->opcode() <= COP_Record;
+  }
+
+  PValue(TIL_Opcode Op, unsigned char SubOp = 0) : SExpr(Op, SubOp) { }
+  PValue(const SExpr &E) : SExpr(E) { }
+};
 
 
 /// Instructions are expressions with computational effect that can appear
@@ -363,6 +381,9 @@ inline Instruction* SExpr::asCFGInstruction() {
 
 /// Placeholder for an expression that has not yet been created.
 /// Used to implement lazy copy and rewriting strategies.
+/// It is classified as an instruction so that it can be used in places
+/// where an instruction is required, but it may not produce an instruction
+/// when forced.
 class Future : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Future; }
@@ -510,12 +531,12 @@ private:
 /// A function -- a.k.a. a lambda abstraction.
 /// Functions with multiple arguments are created by currying,
 /// e.g. (Function (x: Int) (Function (y: Int) (Code { return x + y; })))
-class Function : public SExpr {
+class Function : public PValue {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Function; }
 
   Function(VarDecl *Vd, SExpr *Bd)
-      : SExpr(COP_Function), VDecl(Vd), Body(Bd) {
+      : PValue(COP_Function), VDecl(Vd), Body(Bd) {
     assert(Vd->kind() == VarDecl::VK_Fun || Vd->kind() == VarDecl::VK_SFun);
     if (Vd->kind() == VarDecl::VK_SFun) {
       assert(Vd->definition() == nullptr);
@@ -545,7 +566,7 @@ private:
 
 
 /// A block of code -- e.g. the body of a function.
-class Code : public SExpr {
+class Code : public PValue {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Code; }
 
@@ -555,7 +576,7 @@ public:
     CallingConvention_OhmuInternal
   };
 
-  Code(SExpr *T, SExpr *B) : SExpr(COP_Code), ReturnType(T), Body(B) {}
+  Code(SExpr *T, SExpr *B) : PValue(COP_Code), ReturnType(T), Body(B) {}
 
   void rewrite(SExpr *T, SExpr *B) {
     ReturnType.reset(T);
@@ -584,11 +605,11 @@ private:
 
 
 /// A typed, writable location in memory
-class Field : public SExpr {
+class Field : public PValue {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Field; }
 
-  Field(SExpr *R, SExpr *B) : SExpr(COP_Field), Range(R), Body(B) {}
+  Field(SExpr *R, SExpr *B) : PValue(COP_Field), Range(R), Body(B) {}
 
   void rewrite(SExpr *R, SExpr *B) {
     Range.reset(R);
@@ -610,7 +631,7 @@ private:
 
 
 /// A Slot (i.e. a named definition) in a Record.
-class Slot : public SExpr {
+class Slot : public PValue {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Slot; }
 
@@ -620,7 +641,7 @@ public:
     SLT_Override = 2
   };
 
-  Slot(StringRef N, SExpr *D) : SExpr(COP_Slot), SlotName(N), Definition(D) { }
+  Slot(StringRef N, SExpr *D) : PValue(COP_Slot), SlotName(N), Definition(D) { }
 
   void rewrite(SExpr *D) { Definition.reset(D); }
 
@@ -646,7 +667,7 @@ private:
 
 /// A record, which is similar to a C struct.
 /// A record is essentially a function from slot names to definitions.
-class Record : public SExpr {
+class Record : public PValue {
 public:
   typedef ArrayTree<SExprRefT<Slot>> SlotArray;
   typedef DenseMap<std::string, unsigned> SlotMap;
@@ -654,7 +675,7 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
 
   Record(MemRegionRef A, unsigned NSlots)
-    : SExpr(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
+    : PValue(COP_Record), Slots(A, NSlots), SMap(nullptr) {}
 
   SlotArray& slots() { return Slots; }
   const SlotArray& slots() const { return Slots; }

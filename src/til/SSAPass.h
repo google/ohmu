@@ -92,7 +92,7 @@ private:
 
   SSAPass() = delete;
 
-  MemRegion    FutRegion;  ///< Put fFutures in region for immediate deletion.
+  MemRegion    FutRegion;  ///< Put Futures in region for immediate deletion.
   MemRegionRef FutArena;
 
   LocalVarMap* CurrentVarMap;

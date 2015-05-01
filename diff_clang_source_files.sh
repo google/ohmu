@@ -21,4 +21,4 @@ diff -u "$CLANG_INC"/SSAPass.h           src/til/SSAPass.h
 
 diff -u "$CLANG_LIB"/TIL.cpp             src/til/TIL.cpp
 diff -u "$CLANG_LIB"/CFGBuilder.cpp      src/til/CFGBuilder.cpp
-diff -u "$CLANG_INC"/SSAPass.cpp         src/til/SSAPass.cpp
+diff -u "$CLANG_LIB"/SSAPass.cpp         src/til/SSAPass.cpp
