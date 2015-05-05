@@ -552,6 +552,8 @@ public:
   SExpr *body() { return Body.get(); }
   const SExpr *body() const { return Body.get(); }
 
+  void setBody(SExpr* B) { Body.reset(B); }
+
   bool isSelfApplicable() { return VDecl->kind() == VarDecl::VK_SFun; }
 
   DECLARE_TRAVERSE_AND_COMPARE(Function)
@@ -592,6 +594,8 @@ public:
 
   SExpr *body() { return Body.get(); }
   const SExpr *body() const { return Body.get(); }
+
+  void setBody(SExpr* B) { Body.reset(B); }
 
   DECLARE_TRAVERSE_AND_COMPARE(Code)
 
@@ -743,6 +747,8 @@ public:
   const VarDecl* variableDecl() const { return VDecl.get(); }
   VarDecl* variableDecl() { return VDecl.get(); }
 
+  StringRef varName() const { return VDecl->varName(); }
+
   DECLARE_TRAVERSE_AND_COMPARE(Variable)
 
 private:
@@ -801,7 +807,11 @@ public:
   static const short PRJ_Foreign = 0x02;
 
   Project(SExpr *R, StringRef SName)
-      : Instruction(COP_Project), Rec(R), SlotName(SName)  { }
+      : Instruction(COP_Project), Rec(R), SlotName(SName),
+        SlotDecl(nullptr)  { }
+  Project(SExpr *R, Slot* Sd)
+      : Instruction(COP_Project), Rec(R), SlotName(Sd->slotName()),
+        SlotDecl(Sd)  { }
 
   void rewrite(SExpr *R) { Rec.reset(R); }
 
@@ -821,14 +831,14 @@ public:
   // Flag for projections that refer to foreign (e.g. C++) members.
   bool isForeign() const { return (Flags & PRJ_Foreign) != 0; }
   template<class T>
-  const T* slotDeclAs() const {
+  const T* getForeignSlotDecl() const {
     assert(isForeign() && "Not a foreign projection.");
-    return reinterpret_cast<T*>(SlotDecl);
+    return reinterpret_cast<const T*>(SlotDecl);
   }
   template<class T>
-  void setSlotDeclAs(const T* Ptr) {
+  void setForeignSlotDecl(const T* Ptr) {
     Flags |= PRJ_Foreign;
-    SlotDecl = reinterpret_cast<Slot*>(Ptr);
+    SlotDecl = reinterpret_cast<Slot*>(const_cast<T*>(Ptr));
   }
 
   StringRef slotName() const { return SlotName; }
@@ -1486,19 +1496,9 @@ public:
 
   DECLARE_TRAVERSE_AND_COMPARE(SCFG)
 
-
   SCFG(MemRegionRef A, unsigned Nblocks)
       : SExpr(COP_SCFG), Arena(A), Blocks(A, Nblocks),
-        Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) {
-    Entry = new (A) BasicBlock(A);
-    Exit  = new (A) BasicBlock(A);
-    auto *V = new (A) Phi();
-    Exit->addArgument(V);
-    Exit->setTerminator(new (A) Return(V));
-    add(Entry);
-    add(Exit);
-    Exit->setBlockID(1);
-  }
+        Entry(nullptr), Exit(nullptr), NumInstructions(0), Normal(false) { }
 
 private:
   MemRegionRef Arena;

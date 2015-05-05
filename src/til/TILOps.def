@@ -14,7 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #ifdef TIL_OPCODE_FIRST
-  TIL_OPCODE_FIRST(VarDecl);
+  TIL_OPCODE_FIRST(VarDecl)
 #undef TIL_OPCODE_FIRST
 #endif
 

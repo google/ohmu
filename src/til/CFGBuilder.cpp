@@ -45,13 +45,28 @@ SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
   assert(!CurrentCFG && !CurrentBB && "Already inside a CFG");
 
   CurrentState.EmitInstrs = true;
-  if (!Cfg) {
-    CurrentCFG = new (Arena) SCFG(Arena, 0);
-    // CurrentCFG->blocks().reserve(Arena, NumBlocks);
-  }
-  else {
+  if (Cfg) {
     CurrentCFG = Cfg;
+    return Cfg;
   }
+
+  CurrentCFG = new (Arena) SCFG(Arena, 0);
+
+  auto* Entry = new (Arena) BasicBlock(Arena);
+  auto* Exit  = new (Arena) BasicBlock(Arena);
+  auto *V     = new (Arena) Phi();
+  auto *Ret   = new (Arena) Return(V);
+
+  Exit->addArgument(V);
+  Exit->setTerminator(Ret);
+  Entry->setBlockID(0);
+  Exit->setBlockID(1);
+
+  CurrentCFG->add(Entry);
+  CurrentCFG->add(Exit);
+  CurrentCFG->setEntry(Entry);
+  CurrentCFG->setExit(Exit);
+
   return CurrentCFG;
 }
 
@@ -104,7 +119,10 @@ void CFGBuilder::endBlock(Terminator *Term) {
     for (auto *E : CurrentInstrs)
       CurrentBB->addInstruction(E);
   }
-  CurrentBB->setTerminator(Term);
+
+  // Set the terminator, if one has been specified.
+  if (Term)
+    CurrentBB->setTerminator(Term);
 
   CurrentArgs.clear();
   CurrentInstrs.clear();

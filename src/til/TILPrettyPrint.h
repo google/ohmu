@@ -116,12 +116,28 @@ protected:
     }
   }
 
-  StringRef printableName(StringRef N) {
-    if (N.size() > 0)
-      return N;
-    return StringRef("x", 1);
+  void printVarName(StreamType &SS, StringRef N, unsigned Id) {
+    if (N.size() > 0) {
+      SS << N;
+      if (Verbose)
+        SS << Id;
+    }
+    else {
+      SS << "y_" << Id;
+    }
   }
 
+  void printInstrName(StreamType &SS, StringRef N, unsigned Id) {
+    if (N.size() > 0) {
+      SS << "_";
+      SS << N;
+      if (Verbose)
+        SS << Id;
+    }
+    else {
+      SS << "_x" << Id;
+    }
+  }
 
   void printSExpr(const SExpr *E, StreamType &SS, unsigned P, bool Sub=true) {
     AutoIncDec  Aid(&Depth);
@@ -136,7 +152,7 @@ protected:
     }
     if (Sub) {
       if (const auto *I = E->asCFGInstruction()) {
-        SS << "_" << printableName(I->instrName()) << I->instrID();
+        printInstrName(SS, I->instrName(), I->instrID());
         return;
       }
     }
@@ -217,17 +233,13 @@ protected:
 
   void printVariable(const Variable *E, StreamType &SS) {
     auto* Vd = E->variableDecl();
-    if (Vd->varName().size() > 0) {
-      SS << Vd->varName() << Vd->varIndex();
-      return;
-    }
-    SS << "x_" << Vd->varIndex();
+    printVarName(SS, Vd->varName(), Vd->varIndex());
   }
 
   void printVarDecl(const VarDecl *E, StreamType &SS) {
     if (E->kind() == VarDecl::VK_SFun)
       SS << "@";
-    SS << printableName(E->varName()) << E->varIndex();
+    printVarName(SS, E->varName(), E->varIndex());
     switch (E->kind()) {
     case VarDecl::VK_Fun:
       SS << ": ";
@@ -351,7 +363,8 @@ protected:
 
   void printProject(const Project *E, StreamType &SS) {
     if (!E->record()) {
-      SS << "_global.";
+      if (Verbose)
+        SS << "_global.";
       SS << E->slotName();
       return;
     }
@@ -477,7 +490,8 @@ protected:
     }
     self()->newline(SS);
     if (E->opcode() != COP_Store) {
-      SS << "let " << "_" << printableName(E->instrName()) << E->instrID();
+      SS << "let ";
+      printInstrName(SS, E->instrName(), E->instrID());
       if (Verbose) {
         SS << ": " << E->baseType().getTypeName();
       }

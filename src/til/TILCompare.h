@@ -151,6 +151,8 @@ typename C::CType Project::compare(const Project* E, C& Cmp) const {
     if (Cmp.notTrue(Ct))
       return Ct;
   }
+  if (!record() || !E->record())
+    return Cmp.comparePointers(record(), E->record());
   return Cmp.compare(record(), E->record());
 }
 
@@ -319,6 +321,8 @@ public:
   bool comparePointers(const void* P, const void* Q) { return P == Q; }
 
   bool compare(const SExpr *E1, const SExpr* E2) {
+    if (E1 == E2)
+      return true;
     if (E1->opcode() != E2->opcode())
       return false;
     return compareByCase(E1, E2);
@@ -351,6 +355,8 @@ public:
   bool comparePointers(const void* P, const void* Q) { return P == Q; }
 
   bool compare(const SExpr *E1, const SExpr* E2) {
+    if (E1 == E2)
+      return true;
     // Wildcards match anything.
     if (E1->opcode() == COP_Wildcard || E2->opcode() == COP_Wildcard)
       return true;
