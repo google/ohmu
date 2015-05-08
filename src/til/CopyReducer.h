@@ -141,6 +141,9 @@ public:
 
   /// Find the basic block that Orig maps to, or create a new one.
   BasicBlock* lookupBlock(BasicBlock *Orig) {
+    if (!Orig)
+      return nullptr;
+
     auto *B2 = this->scope()->lookupBlock(Orig);
     if (!B2) {
       // Create new blocks on demand.

@@ -130,7 +130,8 @@ protected:
 
   void printInstrName(StreamType &SS, StringRef N, unsigned Id) {
     if (N.size() > 0) {
-      SS << "_";
+      if (Verbose)
+        SS << "_";
       SS << N;
       if (Verbose)
         SS << Id;
@@ -153,8 +154,10 @@ protected:
     }
     if (Sub) {
       if (const auto *I = E->asCFGInstruction()) {
-        printInstrName(SS, I->instrName(), I->instrID());
-        return;
+        if (!CStyle || I->instrName().size() > 0) {
+          printInstrName(SS, I->instrName(), I->instrID());
+          return;
+        }
       }
     }
     if (self()->precedence(E) > P) {
@@ -389,7 +392,7 @@ protected:
     if (CStyle) {
       // Omit the 'this->'
       if (const Apply *SAP = dyn_cast<Apply>(E->record())) {
-        if (auto *V = dyn_cast<Variable>(SAP->fun())) {
+        if (auto *V = dyn_cast_or_null<Variable>(SAP->fun())) {
           if (V->variableDecl()->kind() == VarDecl::VK_SFun &&
               !SAP->isDelegation()) {
             SS << E->slotName();

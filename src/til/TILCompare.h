@@ -47,6 +47,10 @@ public:
   void compareSExpr(const SExpr *E1, const SExpr *E2) {
     if (E1 == E2)
        return;
+    if (!E1 || !E2) {
+      this->self()->fail();
+      return;
+    }
     if (E1->opcode() == E2->opcode())
       compareByCase(E1, E2);
     else
@@ -523,6 +527,10 @@ public:
   void compareSExpr(const SExpr *E1, const SExpr *E2) {
     if (E1 == E2)
       return;
+    if (!E1 || !E2) {
+      this->self()->fail();
+      return;
+    }
     if (E1->opcode() != E2->opcode()) {
       // If opcodes don't match, try to skip let-definitions or look up a
       // variable that is bounded by a let-definition.
@@ -604,7 +612,7 @@ public:
   void compareScalarValues (Lit i, Lit j)             { if (i != j) fail(); }
 
   void compareOpcodes  (TIL_Opcode O, TIL_Opcode P) {
-   if(O != P && O != COP_Wildcard && P != COP_Wildcard)
+   if (O != P && O != COP_Wildcard && P != COP_Wildcard)
      fail();
   }
 

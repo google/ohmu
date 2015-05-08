@@ -78,14 +78,14 @@ public:
 
   /// Invoked by SExpr classes to traverse possibly weak members.
   /// Do not override.
-  void traverseArg(SExpr *E) {
+  void traverseArg(SExpr *E, TraversalKind K = TRV_Arg) {
     if (!E)
       self()->traverseNull();
     // Detect weak references to other instructions in the CFG.
     else if (Instruction *I = E->asCFGInstruction())
       self()->traverseWeak(I);
     else
-      self()->traverse(E, TRV_Arg);
+      self()->traverse(E, K);
   }
 
   /// Starting point for a traversal.
@@ -214,7 +214,7 @@ template <class S>
 void Traversal<S>::traverseVarDecl(VarDecl *E) {
   switch (E->kind()) {
     case VarDecl::VK_Fun: {
-      self()->traverse(E->definition(), TRV_Type);
+      self()->traverseArg(E->definition(), TRV_Type);
       self()->reduceVarDecl(E);
       return;
     }
@@ -226,7 +226,7 @@ void Traversal<S>::traverseVarDecl(VarDecl *E) {
       return;
     }
     case VarDecl::VK_Let: {
-      self()->traverse(E->definition(), TRV_Decl);
+      self()->traverseArg(E->definition(), TRV_Decl);
       self()->reduceVarDecl(E);
       return;
     }
@@ -246,21 +246,15 @@ void Traversal<S>::traverseFunction(Function *E) {
 
 template <class S>
 void Traversal<S>::traverseCode(Code *E) {
-  self()->traverse(E->returnType(), TRV_Type);
-  if (E->body())
-    self()->traverse(E->body(), TRV_Lazy);
-  else
-    self()->traverseNull();
+  self()->traverseArg(E->returnType(), TRV_Type);
+  self()->traverseArg(E->body(), TRV_Lazy);
   self()->reduceCode(E);
 }
 
 template <class S>
 void Traversal<S>::traverseField(Field *E) {
-  self()->traverse(E->range(), TRV_Type);
-  if (E->body())
-    self()->traverse(E->body(), TRV_Decl);
-  else
-    self()->traverseNull();
+  self()->traverseArg(E->range(), TRV_Type);
+  self()->traverseArg(E->body(), TRV_Lazy);
   self()->reduceField(E);
 }
 
@@ -272,10 +266,7 @@ void Traversal<S>::traverseSlot(Slot *E) {
 
 template <class S>
 void Traversal<S>::traverseRecord(Record *E) {
-  if (E->parent())
-    self()->traverse(E->parent(), TRV_Lazy);
-  else
-    self()->traverseNull();
+  self()->traverseArg(E->parent(), TRV_Lazy);
   for (auto &Slt : E->slots()) {
     self()->traverse(Slt.get(), TRV_Decl);
   }
@@ -319,7 +310,7 @@ void Traversal<S>::traverseVariable(Variable *E) {
 
 template <class S>
 void Traversal<S>::traverseApply(Apply *E) {
-  self()->traverse(E->fun(), TRV_Path);
+  self()->traverseArg(E->fun(), TRV_Path);
   E->arg() ? self()->traverseArg(E->arg())
            : self()->traverseNull();
   self()->reduceApply(E);
@@ -329,7 +320,7 @@ template <class S>
 void Traversal<S>::traverseProject(Project *E) {
   // TODO: the C++ translator uses null to mean "global"
   if (E->record())
-    self()->traverse(E->record(), TRV_Path);
+    self()->traverseArg(E->record(), TRV_Path);
   else
     self()->traverseNull();
   self()->reduceProject(E);
@@ -337,7 +328,7 @@ void Traversal<S>::traverseProject(Project *E) {
 
 template <class S>
 void Traversal<S>::traverseCall(Call *E) {
-  self()->traverse(E->target(), TRV_Path);
+  self()->traverseArg(E->target(), TRV_Path);
   self()->reduceCall(E);
 }
 
@@ -428,16 +419,20 @@ template <class S>
 void Traversal<S>::traverseBasicBlock(BasicBlock *E) {
   self()->enterBlock(E);
   for (Phi *A : E->arguments()) {
-    self()->traverse(A, TRV_Instr);
-    self()->reduceBBArgument(A);
+    if (A) {
+      self()->traverse(A, TRV_Instr);
+      self()->reduceBBArgument(A);
+    }
   }
-
   for (Instruction *I : E->instructions()) {
-    self()->traverse(I, TRV_Instr);
-    self()->reduceBBInstruction(I);
+    if (I) {
+      self()->traverse(I, TRV_Instr);
+      self()->reduceBBInstruction(I);
+    }
   }
-
-  self()->traverse(E->terminator(), TRV_Instr);
+  if (auto* Term = E->terminator()) {
+    self()->traverse(Term, TRV_Instr);
+  }
   self()->reduceBasicBlock(E);
   self()->exitBlock(E);
 }
@@ -454,7 +449,10 @@ void Traversal<S>::traverseSCFG(SCFG *E) {
 template <class S>
 void Traversal<S>::traverseFuture(Future *E) {
   SExpr* Res = E->force();
-  self()->traverse(Res, TRV_Decl);
+  if (Res)
+    self()->traverseArg(Res, TRV_Decl);
+  else
+    self()->traverseNull();
 }
 
 template <class S>
@@ -475,10 +473,10 @@ void Traversal<S>::traverseIdentifier(Identifier *E) {
 template <class S>
 void Traversal<S>::traverseLet(Let *E) {
   // E is a variable declaration, so traverse the definition.
-  self()->traverse(E->variableDecl(), TRV_Decl);
+  self()->traverseArg(E->variableDecl(), TRV_Decl);
   // Tell the rewriter to enter the scope of the let variable.
   self()->enterScope(E->variableDecl());
-  self()->traverse(E->body(), TRV_Arg);
+  self()->traverseArg(E->body());
   self()->exitScope(E->variableDecl());
   self()->reduceLet(E);
 }
@@ -486,8 +484,8 @@ void Traversal<S>::traverseLet(Let *E) {
 template <class S>
 void Traversal<S>::traverseIfThenElse(IfThenElse *E) {
   self()->traverseArg(E->condition());
-  self()->traverse(E->thenExpr(), TRV_Arg);
-  self()->traverse(E->elseExpr(), TRV_Arg);
+  self()->traverseArg(E->thenExpr());
+  self()->traverseArg(E->elseExpr());
   self()->reduceIfThenElse(E);
 }
 

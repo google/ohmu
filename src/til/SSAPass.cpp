@@ -27,16 +27,17 @@ namespace til  {
 void SSAPass::enterCFG(SCFG *Cfg) {
   InplaceReducer::enterCFG(Cfg);
   BInfoMap.resize(Builder.currentCFG()->numBlocks());
+  NumUses.resize(Cfg->numInstructions(), 0);
 }
 
 
 void SSAPass::exitCFG(SCFG *Cfg) {
-  replacePendingLoads();
+  replacePending();
   CurrBB = nullptr;
 
   // TODO: clear the Future arena.
-  Pending.clear();
   BInfoMap.clear();
+  NumUses.clear();
 
   InplaceReducer::exitCFG(Cfg);
 }
@@ -52,110 +53,212 @@ void SSAPass::enterBlock(BasicBlock *B) {
 
   // Initialize variable map to the size of the dominator's map.
   // Local variables in the dominator are in scope.
-  unsigned PSize = 0;
+  unsigned PSize;
   if (Cbb->parent())
     PSize = BInfoMap[Cbb->parent()->blockID()].AllocVarMap.size();
+  else
+    PSize = 1;   // ID of zero means invalid ID.
+
   CurrentVarMap->resize(PSize, nullptr);
 }
 
 
 void SSAPass::exitBlock(BasicBlock *B) {
+  InplaceReducer::exitBlock(B);
+}
 
+
+void SSAPass::reduceWeak(Instruction *I) {
+  // Find all uses of alloc instructions to see if they can be eliminated.
+  // We don't count loads and stores, and so decrement the counter there.
+  if (I->instrID() > 0 && isa<Alloc>(I)) {
+    ++NumUses[I->instrID()];
+  }
+  Super::reduceWeak(I);
 }
 
 
 void SSAPass::reduceAlloc(Alloc *Orig) {
   assert(Orig->instrID() > 0 && "Alloc must be a top-level instruction.");
+
+  // Rewrite the alloc, in case we need it.
+  Super::reduceAlloc(Orig);
   auto* E0 = attr(0).Exp;
 
-  if (Builder.currentBB()) {
+  Orig->setAllocID(0);   // Invalidate ID, just to be sure.
+
+  if (Builder.currentBB() && !Orig->isHeap()) {
     auto* Fld = dyn_cast<Field>(E0);
     if (Fld) {
-      // Add alloc to current var map.
-      Orig->setAllocID(CurrentVarMap->size());
-      CurrentVarMap->push_back(Fld->body());
-      resultAttr().Exp = nullptr;   // Remove Alloc instruction
-      return;
+      // Add the new variable to the map for the current block.
+      unsigned Id = CurrentVarMap->size();
+      Orig->setAllocID(Id);
+
+      if (Fld->body()) {
+        CurrentVarMap->push_back(Fld->body());
+      }
+      else {
+        // Push undefined value into variable map.
+        // It will hopefully be defined before a load instruction.
+        auto* Un = Builder.newUndefined();
+        if (auto* Ty = dyn_cast<ScalarType>(Fld->range())) {
+          Un->setBaseType(Ty->baseType());
+        }
+        CurrentVarMap->push_back(Un);
+      }
+
+      // Reset uses to zero.
+      NumUses[Orig->instrID()] = 0;
+
+      // Return future, which will delete the Alloc later if not needed.
+      auto *F = new (FutArena) FutureAlloc(Orig);
+      PendingAllocs.push_back(F);
+      resultAttr().Exp = F;
     }
   }
-  Super::reduceAlloc(Orig);
 }
 
 
 void SSAPass::reduceStore(Store *Orig) {
-  // Alloc is rewritten to nullptr above, so attr(0).Exp == nullptr
+  // Alloc is rewritten to a future, so grab the original
   auto* E0 = Orig->destination();
-  auto* E1 = attr(1).Exp;
+
+  // Rewrite the store, in case we need it.
+  Super::reduceStore(Orig);
 
   if (Builder.currentBB()) {
+    auto* E1 = attr(1).Exp;
     auto* A = dyn_cast<Alloc>(E0);
-    if (A) {
-      // Update current var map.
+
+    if (A && A->allocID() > 0 && A->allocID() < CurrentVarMap->size()) {
+      // Remove the use that we marked for this store during traversal.
+      assert(NumUses[A->instrID()] > 0);
+      --NumUses[A->instrID()];
+
+      // Update the map for the current block to hold the new value.
+      assert(E1 && "Invalid store operation.");
       CurrentVarMap->at(A->allocID()) = E1;
-      resultAttr().Exp = nullptr;   // Remove Store instruction
-      return;
+
+      // Return future, which will delete the Store later if not needed.
+      auto *F = new (FutArena) FutureStore(Orig, A);
+      PendingStores.push_back(F);
+      resultAttr().Exp = F;
     }
   }
-  Super::reduceStore(Orig);
 }
 
 
 void SSAPass::reduceLoad(Load *Orig) {
-  // Alloc is rewritten to nullptr above, so attr(0).Exp == nullptr
+  // Alloc is rewritten to a future above, so grab the original
   auto* E0 = Orig->pointer();
 
+  // Rewrite the load, in case we need it.
+  Super::reduceLoad(Orig);
+
   if (Builder.currentBB()) {
-    auto* A = dyn_cast_or_null<Alloc>(E0);
-    if (A) {
-      if (auto *Av = CurrentVarMap->at(A->allocID())) {
-        // Replace load with value from current var map.
-        resultAttr().Exp = Av;
-        return;
+    auto* A = dyn_cast<Alloc>(E0);
+
+    if (A && A->allocID() > 0 && A->allocID() < CurrentVarMap->size()) {
+      // Remove the use that we marked for this load during traversal.
+      assert(NumUses[A->instrID()] > 0);
+      --NumUses[A->instrID()];
+
+      auto* Av = CurrentVarMap->at(A->allocID());
+      if (Av) {
+        if (isa<Undefined>(Av)) {
+          // Load value is undefined -- keep the load and alloc.
+          ++NumUses[A->instrID()];
+          resultAttr().Exp = Orig;
+        }
+        else {
+          // Replace load with value from current var map.
+          resultAttr().Exp = Av;
+        }
       }
       else {
-        // Replace load with future
-        auto *F = new (FutArena) FutureLoad(A);
-        Pending.push_back(F);
+        // Replace load with a future, which does lazy lookup.
+        auto *F = new (FutArena) FutureLoad(Orig, A);
+        PendingLoads.push_back(F);
         resultAttr().Exp = F;
-        return;
       }
     }
   }
-  Super::reduceLoad(Orig);
 }
 
 
 
 // This is the second pass of the SSA conversion, which looks up values for
 // all loads, and replaces the loads.
-void SSAPass::replacePendingLoads() {
+void SSAPass::replacePending() {
+  // Delete all unused Allocs for local variables
+  for (auto *F : PendingAllocs) {
+    auto* A = F->AllocInstr;
+    if (NumUses[A->instrID()] <= 0) {
+      F->setResult(nullptr);
+    }
+    else {
+      if (A->isLocal()) {
+        // TODO: warn on misuse of local variable.
+        A->setAllocKind(Alloc::AK_Stack);
+      }
+      F->setResult(A);
+    }
+  }
+  PendingAllocs.clear();
+
+  // Delete all stores to unused Allocs.
+  for (auto *F : PendingStores) {
+    if (NumUses[F->AllocInstr->instrID()] <= 0)
+      F->setResult(nullptr);
+    else
+      F->setResult(F->StoreInstr);
+  }
+  PendingStores.clear();
+
+
   // Second pass:  Go back and replace all loads with phi nodes or values.
   // VarMapCache holds lookups that we've already done in the current block.
   CurrBB = Builder.currentCFG()->entry();
   unsigned MSize = BInfoMap[CurrBB->blockID()].AllocVarMap.size();
   VarMapCache.resize(MSize, nullptr);
 
-  for (auto *F : Pending) {
-    SExpr *E = F->maybeGetResult();
-    if (!E) {
-      Alloc *A = F->AllocInstr;
-      BasicBlock *B = F->block();
-      if (B != CurrBB) {
-        // We've switched to a new block.  Clear the cache.
-        VarMapCache.clear();
-        MSize = BInfoMap[B->blockID()].AllocVarMap.size();
-        VarMapCache.resize(MSize, nullptr);
-        CurrBB = B;
-      }
-      E = lookupInPredecessors(B, A->allocID(), A->instrName());
-      F->setResult(E);
+  for (auto *F : PendingLoads) {
+    Alloc *A = F->AllocInstr;
+
+    if (NumUses[A->instrID()] > 0) {
+      F->setResult(F->LoadInstr);   // Keep the load in place.
+      continue;
+    }
+
+    BasicBlock *B = F->block();
+    if (B != CurrBB) {
+      // We've switched to a new block.  Clear the cache.
+      VarMapCache.clear();
+      MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+      VarMapCache.resize(MSize, nullptr);
+      CurrBB = B;
+    }
+    auto* E = lookupInPredecessors(B, A->allocID(), A->instrName());
+    if (E) {
+      F->setResult(E);  // Replace load
+    }
+    else {
+      // TODO: error on completely undefined variable.
+      F->setResult(Builder.newUndefined());
     }
   }
+
+  PendingAllocs.clear();
+  PendingStores.clear();
+  PendingLoads.clear();
   VarMapCache.clear();
 }
 
 
 SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
+  if (LvarID >= LvarMap->size())
+    return nullptr;
+
   SExpr *E = LvarMap->at(LvarID);
   if (!E)
     return nullptr;
@@ -168,6 +271,18 @@ SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
       LvarMap->at(LvarID) = E;
     }
   }
+
+  // The cached value may be a Future that has since been resolved.
+  do {
+    auto* Fut = dyn_cast_or_null<Future>(E);
+    if (Fut && Fut->maybeGetResult()) {
+      E = Fut->maybeGetResult();
+      LvarMap->at(LvarID) = E;
+    }
+    else
+      break;
+  } while (true);
+
   return E;
 }
 
@@ -178,7 +293,7 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
   // Fill it with the original value E
   for (unsigned j = 0; j < i; ++j)
     Ph->values().emplace_back(arena(), E);
-  if (Instruction *I = dyn_cast<Instruction>(E))
+  if (Instruction *I = dyn_cast_or_null<Instruction>(E))
     Ph->setBaseType(I->baseType());
   return Ph;
 }
@@ -187,6 +302,8 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 // Lookup value of local variable at the beginning of basic block B
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
                                      StringRef Nm) {
+  assert(LvarID > 0 && "Invalid variable ID");
+
   if (B == CurrBB) {
     // See if we have a cached value at the start of the current block.
     if (SExpr* E = VarMapCache[LvarID])
@@ -194,6 +311,9 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
   }
 
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
+  if (LvarID >= LvarMap->size())
+    return nullptr;  // Invalid CFG.
+
   SExpr* E  = nullptr;   // The first value we find.
   SExpr* E2 = nullptr;   // The second distinct value we find.
   Phi*   Ph = nullptr;   // The Phi node we created (if any)
@@ -203,7 +323,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
 
   for (auto &P : B->predecessors()) {
     if (!Ph && !SetInBlock && P->blockID() >= B->blockID()) {
-      // This is a back-edge, and we don't set the variable in this block.
+      // This is a back-edge, and we didn't set the variable in this block.
       // Create a dummy Phi node to avoid infinite recursion before lookup.
       Ph = makeNewPhiNode(i, E, B->numPredecessors());
       Incomplete = true;
@@ -211,7 +331,14 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
       SetInBlock = true;
     }
 
+    // Any loads in the block that declares a variable have already been
+    // eliminated.  The variable must have been declared in a dominating block.
     E2 = lookup(P.get(), LvarID, Nm);
+    if (!E2) {
+      // TODO: error on undefined variable. (Should at least be Undefined)
+      continue;
+    }
+
     if (!SetInBlock) {
       // Lookup in P may have forced a lookup in the current block due to
       // cycles.  Check the cache to see if that happened, and if it did,
@@ -234,17 +361,33 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
       Ph = makeNewPhiNode(i, E, B->numPredecessors());
       Ph->values().emplace_back(arena(), E2);
       Incomplete = false;
+      if (!SetInBlock) {
+        LvarMap->at(LvarID) = Ph;
+        SetInBlock = true;
+      }
     }
     ++i;
   }
 
   if (Ph) {
     if (Incomplete) {
-      // Remove Ph from the LvarMap; LvarMap will be set to E in lookup()
-      LvarMap->at(LvarID) = nullptr;
+      assert(LvarMap->at(LvarID) == Ph && "Phi should have been cached.");
+      // Replace Phi node in cache.
+      LvarMap->at(LvarID) = E;
+
       // Ph may have been cached elsewhere, so mark it as single val.
       // It will be eliminated by lookupInCache/
-      Ph->values()[0].reset(E);
+      if (Ph->numValues() > 0) {
+        SExprRef& Val0 = Ph->values()[0];
+        if (Val0.get() != E) {
+          // Don't reset if it's already E, because E may be a future.
+          assert((Val0.get() == nullptr || Val0.get() == Ph) && "Invalid Phi");
+          Val0.reset(E);
+        }
+      }
+      else {
+        Ph->values().emplace_back(arena(), E);
+      }
       Ph->setStatus(Phi::PH_SingleVal);
     }
     else {
@@ -266,14 +409,18 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
 // Lookup value of local variable at the end of basic block B
 SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID, StringRef Nm) {
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
-  assert(LvarID < LvarMap->size());
+  if (LvarID >= LvarMap->size())
+    return nullptr;   // Invalid CFG.
+
   // Check to see if the variable was set in this block.
   if (auto* E = lookupInCache(LvarMap, LvarID))
     return E;
+
   // Lookup variable in predecessor blocks.
   auto* E = lookupInPredecessors(B, LvarID, Nm);
   // Cache the result.
   LvarMap->at(LvarID) = E;
+
   return E;
 }
 

@@ -189,13 +189,13 @@ public:
   TIL_Opcode opcode() const { return static_cast<TIL_Opcode>(Opcode); }
 
   /// Return true if this is a trivial SExpr (constant or variable name).
-  bool isTrivial();
+  bool isTrivial() const;
 
   /// Return true if this SExpr is a value (e.g. function, record, constant)
-  bool isValue();
+  bool isValue() const;
 
-  /// Return true if this SExpr is a heap-allocated value (e.g. function)
-  bool isHeapValue();
+  /// Return true if this SExpr is a memory-allocated value (e.g. function)
+  bool isMemValue() const;
 
   /// Cast this SExpr to a CFG instruction, or return null if it is not one.
   Instruction* asCFGInstruction();
@@ -243,7 +243,7 @@ protected:
       Annotations(nullptr) {}
 
   const unsigned char Opcode;
-  const unsigned char SubOpcode;
+  unsigned char SubOpcode;
   uint16_t Flags;                 ///< For use by subclasses.
 
 private:
@@ -351,6 +351,7 @@ public:
   BaseType baseType() const { return BType; }
 
   /// Returns the instruction ID for this instruction.
+  /// A value of 0 means no or unassigned ID.
   /// All basic block instructions have an ID that is unique within the CFG.
   unsigned instrID() const { return InstrID; }
 
@@ -433,10 +434,7 @@ public:
   SExpr* addPosition(SExpr **Eptr);
 
   // Connect this future to the given position in a basic block.
-  void addPosition(Instruction **Iptr) {
-    assert(!IPos);
-    IPos = Iptr;
-  }
+  void addInstrPosition(Instruction **Iptr);
 
   /// Derived classes must override evaluate to compute the future.
   virtual SExpr* evaluate() = 0;
@@ -458,15 +456,15 @@ private:
 
 
 inline SExpr* maybeRegisterFuture(SExpr** Eptr, SExpr* P) {
-  if (auto *F = dyn_cast_or_null<Future>(P))
-    return F->addPosition(Eptr);
+  if (auto *Fut = dyn_cast_or_null<Future>(P))
+    return Fut->addPosition(Eptr);
   return P;
 }
 
 template<class T>
 inline T* maybeRegisterFuture(T** Eptr, T* P) {
   // Futures can only be stored in places that can hold any SExpr.
-  assert(P->opcode() != COP_Future);
+  assert(!P || P->opcode() != COP_Future);
   return P;
 }
 
@@ -894,6 +892,12 @@ public:
 
   AllocKind allocKind() const { return static_cast<AllocKind>(SubOpcode); }
 
+  void setAllocKind(AllocKind K) { SubOpcode = K; }
+
+  bool isLocal() const { return allocKind() == AK_Local; }
+  bool isStack() const { return allocKind() == AK_Stack; }
+  bool isHeap()  const { return allocKind() == AK_Heap;  }
+
   SExpr *initializer() { return InitExpr.get(); }
   const SExpr *initializer() const { return InitExpr.get(); }
 
@@ -1107,6 +1111,8 @@ public:
   Phi(MemRegionRef A, unsigned Nvals, Alloc* Lv = nullptr)
       : Instruction(COP_Phi), Values(A, Nvals) { }
 
+  unsigned numValues() const { return Values.size(); }
+
   /// Return the array of Phi arguments
   const ValArray &values() const { return Values; }
   ValArray &values() { return Values; }
@@ -1258,7 +1264,7 @@ public:
   typedef ArrayTree<SExprRefT<BasicBlock>, 2>  PredArray;
   typedef ArrayTree<SExprRefT<BasicBlock>>     BlockArray;
 
-  static const unsigned InvalidBlockID = 0x0FFFFFFF;
+  static const unsigned InvalidBlockID = 0x7FFFFFFF;
 
   // TopologyNodes are used to overlay tree structures on top of the CFG,
   // such as dominator and postdominator trees.  Each block is assigned an
@@ -1285,7 +1291,7 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
-  size_t blockID() const { return BlockID; }
+  size_t  blockID() const { return BlockID; }
   void setBlockID(size_t i) { BlockID = i; }
 
   size_t numArguments()    const { return Args.size(); }
@@ -1356,7 +1362,7 @@ public:
     E->setBlock(this);
     Instrs.emplace_back(Arena, E);
     if (auto *F = dyn_cast<Future>(E))
-      F->addPosition(&Instrs.back());
+      F->addInstrPosition(&Instrs.back());
   }
 
   /// Set the terminator.
@@ -1383,14 +1389,14 @@ public:
   explicit BasicBlock(MemRegionRef A)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
         TermInstr(nullptr),
-        PostBlockID(0), Depth(0), LoopDepth(0), Visited(false) { }
+        PostBlockID(0), Depth(0), LoopDepth(0) { }
 
 private:
   friend class SCFG;
 
   unsigned renumber(unsigned id);   // assign unique ids to all instructions
-  int  topologicalSort     (BlockArray& Blocks, int ID);
-  int  postTopologicalSort (BlockArray& Blocks, int ID);
+  int  topologicalSort    (BasicBlock **Blocks, int ID);
+  int  postTopologicalSort(BasicBlock **Blocks, int ID);
   void computeDominator();
   void computePostDominator();
 
@@ -1407,8 +1413,6 @@ private:
   unsigned     PostBlockID;  // ID in post-topological order
   unsigned     Depth;        // The instruction Depth of the first instruction.
   unsigned     LoopDepth;    // The level of nesting within loops.
-  bool         Visited;      // Bit to determine if a block has been visited
-                             // during a traversal.
 
   TopologyNode DominatorNode;       // The dominator tree
   TopologyNode PostDominatorNode;   // The post-dominator tree

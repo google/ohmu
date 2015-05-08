@@ -145,7 +145,7 @@ StringRef getCastOpcodeString(TIL_CastOpcode Op) {
 
 
 
-bool SExpr::isTrivial() {
+bool SExpr::isTrivial() const {
   switch (Opcode) {
     case COP_ScalarType: return true;
     case COP_Literal:    return true;
@@ -155,7 +155,7 @@ bool SExpr::isTrivial() {
 }
 
 
-bool SExpr::isValue() {
+bool SExpr::isValue() const {
   switch (Opcode) {
     case COP_ScalarType: return true;
     case COP_Literal:    return true;
@@ -169,7 +169,7 @@ bool SExpr::isValue() {
 }
 
 
-bool SExpr::isHeapValue() {
+bool SExpr::isMemValue() const {
   switch (Opcode) {
     case COP_Function:   return true;
     case COP_Slot:       return true;
@@ -197,39 +197,91 @@ void SExpr::addAnnotation(Annotation *A) {
 
 SExpr* Future::addPosition(SExpr **Eptr) {
   // If the future has already been forced, return the forced value.
-  if (Status == FS_done)
-    return Result;
+  if (Status == FS_done) {
+    // The result may be a future, in which case we recurse.
+    if (auto* Fut = dyn_cast_or_null<Future>(Result))
+      return Fut->addPosition(Eptr);
+    else
+      return Result;
+  }
   // Otherwise connect Eptr to this future, and return this future.
   Positions.push_back(Eptr);
   return this;
 }
 
 
+void Future::addInstrPosition(Instruction **Iptr) {
+  assert(!IPos && "Future has already been added to a basic block.");
+
+  // If this future has already been forced, return the result;
+  if (Status == FS_done) {
+    if (auto* Fut = dyn_cast_or_null<Future>(Result)) {
+      Fut->addInstrPosition(Iptr);
+      return;
+    }
+    else {
+      auto *I = dyn_cast_or_null<Instruction>(Result);
+      if (I && I->block() == nullptr && !Result->isTrivial()) {
+        I->setBlock(this->block());
+        *Iptr = I;
+      }
+      else {
+        // If Result has already been added to a block, then it's a weak
+        // reference to a previously added instruction; ignore it.
+        *Iptr = nullptr;
+      }
+      return;
+    }
+  }
+  IPos = Iptr;
+}
+
+
 void Future::setResult(SExpr *Res) {
   assert(Status != FS_done && "Future has already been forced.");
 
-  Result = Res;
-  Status = FS_done;
+  auto *Fut = dyn_cast_or_null<Future>(Res);
+  if (Fut) {
+    // Result is another future; register all of our positions with it.
+    if (IPos) {
+      Fut->addInstrPosition(IPos);
+    }
+    for (SExpr **Eptr : Positions) {
+      assert(*Eptr == this && "Invalid position for future.");
+      *Eptr = Fut->addPosition(Eptr);
+    }
 
-  if (IPos) {
-    // If Res has already been added to a block, then it's a weak reference
-    // to a previously added instruction; ignore it.
-    if (auto *I = dyn_cast<Instruction>(Res)) {
-      if (I->block() == nullptr && !Res->isTrivial()) {
-        I->setBlock(block());
+    // This future may be a temporary object, so we don't call
+    // Result = Fut->addPosition(&Result)
+    Result = Fut;
+  }
+  else {
+    // Write back result to basic block.
+    if (IPos) {
+      auto *I = dyn_cast_or_null<Instruction>(Res);
+      if (I && I->block() == nullptr && !Res->isTrivial()) {
+        I->setBlock(this->block());
         *IPos = I;
       }
       else {
+        // If Result has already been added to a block, then it's a weak
+        // reference to a previously added instruction; ignore it.
         *IPos = nullptr;
       }
+      IPos = nullptr;
     }
-  }
-  for (SExpr **Eptr : Positions) {
-    assert(*Eptr == this && "Invalid position for future.");
-    *Eptr = Res;
+
+    // Write back result to all positions that use this future.
+    for (SExpr **Eptr : Positions) {
+      assert(*Eptr == this && "Invalid position for future.");
+      *Eptr = Res;
+    }
+
+    Result = Res;
   }
 
-  IPos = nullptr;
+  Status = FS_done;
+
   Positions.clear();
   Positions.shrink_to_fit();
   assert(Positions.capacity() == 0 && "Memory Leak.");
@@ -249,7 +301,7 @@ SExpr* Future::force() {
   Status = FS_evaluating;
   auto *Res = evaluate();
   setResult(Res);
-  return Res;
+  return Result;
 }
 
 
@@ -347,23 +399,25 @@ void SCFG::renumber() {
 // Each block will be written into the Blocks array in order, and its BlockID
 // will be set to the index in the array.  Sorting should start from the entry
 // block, and ID should be the total number of blocks.
-int BasicBlock::topologicalSort(BlockArray& Blocks, int ID) {
-  if (Visited) return ID;
-  Visited = true;
+int BasicBlock::topologicalSort(BasicBlock** Blocks, int ID) {
+  if (BlockID != InvalidBlockID) return ID;
+  BlockID = 0;  // mark as being visited
 
   // First sort the post-dominator, if it exists.
   // This gives us a topological order where post-dominators always come last.
   if (PostDominatorNode.Parent)
     ID = PostDominatorNode.Parent->topologicalSort(Blocks, ID);
 
-  for (auto &B : successors())
-    ID = B->topologicalSort(Blocks, ID);
+  for (auto &B : successors()) {
+    if (B.get())
+      ID = B->topologicalSort(Blocks, ID);
+  }
 
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
   BlockID = --ID;
-  Blocks[BlockID].reset(this);
+  Blocks[BlockID] = this;
   return ID;
 }
 
@@ -372,23 +426,25 @@ int BasicBlock::topologicalSort(BlockArray& Blocks, int ID) {
 // Each block will be written into the Blocks array in order, and PostBlockID
 // will be set to the index in the array.  Sorting should start from the exit
 // block, and ID should be the total number of blocks.
-int BasicBlock::postTopologicalSort(BlockArray& Blocks, int ID) {
-  if (Visited) return ID;
-  Visited = true;
+int BasicBlock::postTopologicalSort(BasicBlock** Blocks, int ID) {
+  if (PostBlockID != InvalidBlockID) return ID;
+  PostBlockID = 0;  // mark as being visited
 
   // First sort the dominator, if it exists.
   // This gives us a topological order where post-dominators always come last.
   if (DominatorNode.Parent)
     ID = DominatorNode.Parent->postTopologicalSort(Blocks, ID);
 
-  for (auto &B : predecessors())
-    ID = B->postTopologicalSort(Blocks, ID);
+  for (auto &B : predecessors()) {
+    if (B.get())
+      ID = B->postTopologicalSort(Blocks, ID);
+  }
 
   // set ID and update block array in place.
   // We may lose pointers to unreachable blocks.
   assert(ID > 0);
   PostBlockID = --ID;
-  Blocks[PostBlockID].reset(this);
+  Blocks[PostBlockID] = this;
   return ID;
 }
 
@@ -410,6 +466,12 @@ void BasicBlock::computeDominator() {
     // Walk the alternate and current candidate back to find a common ancestor.
     auto *Alternate = Pred.get();
     while (Alternate != Candidate) {
+      if (!Alternate || !Candidate) {
+        // TODO: warn on invalid CFG.
+        Candidate = nullptr;
+        break;
+      }
+
       if (Candidate->BlockID > Alternate->BlockID)
         Candidate = Candidate->DominatorNode.Parent;
       else
@@ -428,6 +490,10 @@ void BasicBlock::computePostDominator() {
   BasicBlock *Candidate = nullptr;
   // Walk forward from each successor to find the common post-dominator node.
   for (auto &Succ : successors()) {
+    // Skip edges that have been pruned.
+    if (Succ.get() == nullptr)
+      continue;
+
     // Skip back-edges
     if (Succ->PostBlockID >= PostBlockID) continue;
     // If we don't yet have a candidate for post-dominator yet, take this one.
@@ -438,6 +504,12 @@ void BasicBlock::computePostDominator() {
     // Walk the alternate and current candidate back to find a common ancestor.
     auto *Alternate = Succ.get();
     while (Alternate != Candidate) {
+      if (!Alternate || !Candidate) {
+        // TODO: warn on invalid CFG.
+        Candidate = nullptr;
+        break;
+      }
+
       if (Candidate->PostBlockID > Alternate->PostBlockID)
         Candidate = Candidate->PostDominatorNode.Parent;
       else
@@ -475,19 +547,55 @@ static inline void computeNodeID(BasicBlock *B,
 // 2) Computing dominators and post-dominators
 // 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
-  // Sort the blocks in post-topological order, starting from the exit.
-  int NumUnreachableBlocks = Exit->postTopologicalSort(Blocks, Blocks.size());
-  assert(NumUnreachableBlocks == 0);
-
-  // Compute post-dominators, which improves the topological sort.
+  // Clear existing block IDs.
   for (auto &B : Blocks) {
-    B->computePostDominator();
-    B->Visited = false;
+    B->BlockID     = BasicBlock::InvalidBlockID;
+    B->PostBlockID = BasicBlock::InvalidBlockID;
   }
 
+  // Allocate new vector to store the blocks in sorted order
+  std::vector<BasicBlock*> Blks(Blocks.size(), nullptr);
+
+  // Sort the blocks in post-topological order, starting from the exit.
+  unsigned PostUnreachable = Exit->postTopologicalSort(&Blks[0], Blocks.size());
+
+  // Fix up numbers if we have unreachable blocks.
+  if (PostUnreachable > 0) {
+    for (unsigned i = PostUnreachable, n = Blocks.size(); i < n; ++i)
+      Blks[i]->PostBlockID -= PostUnreachable;
+  }
+
+  // Compute post-dominators, which improves the topological sort.
+  for (unsigned i = PostUnreachable, n = Blocks.size(); i < n; ++i)
+    Blks[i]->computePostDominator();
+
   // Now re-sort the blocks in topological order, starting from the entry.
-  NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
-  assert(NumUnreachableBlocks == 0);
+  unsigned NumUnreachable = Entry->topologicalSort(&Blks[0], Blocks.size());
+
+  // Collect any unreachable blocks, and fix up numbers.
+  std::vector<BasicBlock*> Unreachables;
+  if (NumUnreachable > 0) {
+    for (unsigned i = NumUnreachable, n = Blocks.size(); i < n; ++i)
+      Blks[i]->BlockID -= NumUnreachable;
+
+    for (auto &B : Blocks) {
+      if (B->BlockID == BasicBlock::InvalidBlockID)
+        Unreachables.push_back(B.get());
+    }
+    assert(Unreachables.size() == NumUnreachable && "Error counting blocks.");
+  }
+
+  // Copy sorted blocks back to blocks array.
+  int Bid = 0;
+  int Nr  = Blocks.size() - NumUnreachable;
+  for (; Bid < Nr;) {
+    Blocks[Bid].reset( Blks[Bid + NumUnreachable] );
+    ++Bid;
+  }
+  for (unsigned i = 0; i < NumUnreachable; ++i) {
+    Blocks[Bid].reset( Unreachables[i] );
+    ++Bid;
+  }
 
   // Renumber blocks and instructions now that we have a final sort.
   renumber();

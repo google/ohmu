@@ -774,7 +774,9 @@ void TypedEvaluator::traverseIfThenElse(IfThenElse *Orig) {
   }
 
   // Otherwise convert conditionals to CFG branches
-  Branch* Br = Builder.newBranch(Nc);
+  BasicBlock* Tb = Builder.newBlock();
+  BasicBlock* Eb = Builder.newBlock();
+  Branch* Br = Builder.newBranch(Nc, Tb, Eb);
 
   // If the current continuation is null, then make a new one.
   BasicBlock* CurrCont = scope()->currentContinuation();

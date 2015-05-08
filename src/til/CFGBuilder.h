@@ -145,6 +145,7 @@ public:
     return new (Arena) Variable(Vd);
   }
   Apply* newApply(SExpr* E0, SExpr* E1, Apply::ApplyKind K=Apply::FAK_Apply) {
+    assert(E0 && "Function must not be null.");
     return new (Arena) Apply(E0, E1, K);
   }
   Project* newProject(SExpr* E0, StringRef S) {
@@ -180,9 +181,7 @@ public:
   }
 
   /// Terminate the current block with a branch instruction.
-  /// If B0 and B1 are not specified, then this will create new blocks.
-  Branch* newBranch(SExpr *Cond, BasicBlock *B0 = nullptr,
-                                 BasicBlock *B1 = nullptr);
+  Branch* newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1);
 
   /// Terminate the current block with a Goto instruction.
   /// If result is specified, then passes result as an argument.
@@ -199,7 +198,7 @@ public:
     return Res;
   }
 
-  SExpr* newUndefined() {
+  Undefined* newUndefined() {
     return new (Arena) Undefined();
   }
   SExpr* newWildcard() {

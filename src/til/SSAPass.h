@@ -45,20 +45,56 @@ public:
   void enterBlock(BasicBlock *B);
   void exitBlock(BasicBlock *B);
 
+  void reduceWeak(Instruction *I);
   void reduceAlloc(Alloc *Orig);
   void reduceStore(Store *Orig);
   void reduceLoad (Load  *Orig);
 
 protected:
+  // An Alloc instruction that may be removed.
+  class FutureAlloc : public Future {
+  public:
+    FutureAlloc(Alloc* A) : AllocInstr(A) { }
+    virtual ~FutureAlloc() { }
+
+    /// We don't use evaluate(); FutureAllocs are forced manually.
+    virtual SExpr* evaluate() override {
+      assert(false && "Cannot force this future.");
+      return nullptr;
+    }
+
+    Alloc *AllocInstr;
+  };
+
+  // A Store instruction that may be removed.
+  class FutureStore : public Future {
+  public:
+    FutureStore(Store* S, Alloc* A) : StoreInstr(S), AllocInstr(A) { }
+    virtual ~FutureStore() { }
+
+    /// We don't use evaluate(); FutureStores are forced manually.
+    virtual SExpr* evaluate() override {
+      assert(false && "Cannot force this future.");
+      return nullptr;
+    }
+
+    Store *StoreInstr;
+    Alloc *AllocInstr;
+  };
+
   // A load instruction that needs to be rewritten.
   class FutureLoad : public Future {
   public:
-    FutureLoad(Alloc* A) : AllocInstr(A) { }
+    FutureLoad(Load* L, Alloc* A) : LoadInstr(L), AllocInstr(A) { }
     virtual ~FutureLoad() { }
 
     /// We don't use evaluate(); FutureLoads are forced manually.
-    virtual SExpr* evaluate() override { return nullptr; }
+    virtual SExpr* evaluate() override {
+      assert(false && "Cannot force this future.");
+      return nullptr;
+    }
 
+    Load  *LoadInstr;
     Alloc *AllocInstr;
   };
 
@@ -75,7 +111,7 @@ protected:
   SExpr* lookup(BasicBlock *B, unsigned LvarID, StringRef Nm);
 
   // Second pass of SSA -- lookup variables and replace all loads.
-  void replacePendingLoads();
+  void replacePending();
 
 public:
   SSAPass(MemRegionRef A)
@@ -94,8 +130,12 @@ private:
 
   LocalVarMap* CurrentVarMap;
 
-  std::vector<SSABlockInfo> BInfoMap;  ///< Side table for basic blocks.
-  std::vector<FutureLoad*>  Pending;   ///< Loads that need to be rewritten.
+  std::vector<SSABlockInfo> BInfoMap;      ///< Side table for basic blocks.
+  std::vector<FutureAlloc*> PendingAllocs; ///< Possibly removable allocs.
+  std::vector<FutureStore*> PendingStores; ///< Possibly removable stores.
+  std::vector<FutureLoad*>  PendingLoads;  ///< Loads that need to be forced.
+
+  std::vector<int> NumUses;
   LocalVarMap VarMapCache;
 
   BasicBlock* CurrBB;

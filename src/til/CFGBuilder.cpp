@@ -166,16 +166,14 @@ BasicBlock* CFGBuilder::newBlock(unsigned Nargs, unsigned Npreds) {
 Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
   assert(CurrentBB && "No current block.");
 
-  if (!B0)
-    B0 = newBlock();
-  if (!B1)
-    B1 = newBlock();
-
-  assert(B0->arguments().size() == 0 && "Cannot branch to a block with args.");
-  assert(B1->arguments().size() == 0 && "Cannot branch to a block with args.");
-
-  B0->addPredecessor(CurrentBB);
-  B1->addPredecessor(CurrentBB);
+  if (B0) {
+    assert(B0->numArguments() == 0 && "Cannot branch to a block with args.");
+    B0->addPredecessor(CurrentBB);
+  }
+  if (B1) {
+    assert(B1->numArguments() == 0 && "Cannot branch to a block with args.");
+    B1->addPredecessor(CurrentBB);
+  }
 
   // Terminate current basic block with a branch
   auto *Nt = new (Arena) Branch(Cond, B0, B1);
