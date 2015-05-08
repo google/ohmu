@@ -297,7 +297,11 @@ void Traversal<S>::traverseApply(Apply *E) {
 
 template <class S>
 void Traversal<S>::traverseProject(Project *E) {
-  self()->traverse(E->record(), TRV_Path);
+  // TODO: the C++ translator uses null to mean "global"
+  if (E->record())
+    self()->traverse(E->record(), TRV_Path);
+  else
+    self()->traverseNull();
   self()->reduceProject(E);
 }
 

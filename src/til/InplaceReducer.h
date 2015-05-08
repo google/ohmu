@@ -62,7 +62,7 @@ public:
   }
 
   void enterBlock(BasicBlock *B) {
-    Builder.beginBlock(B);
+    Builder.beginBlock(B, true);   // Overwrite the block
   }
 
   void exitBlock(BasicBlock *B) {
@@ -83,18 +83,16 @@ public:
   }
 
   void reduceBBArgument(Phi *Ph) {
-    if (Builder.overwriteArguments()) {
-      auto *Ph2 = dyn_cast_or_null<Phi>(this->lastAttr().Exp);
+    auto *Ph2 = dyn_cast_or_null<Phi>(this->lastAttr().Exp);
+    if (Ph2 && !Ph2->block())
       Builder.addArg(Ph2);
-    }
     this->scope()->insertInstructionMap(Ph, std::move(this->lastAttr()));
   }
 
   void reduceBBInstruction(Instruction *I) {
-    if (Builder.overwriteInstructions()) {
-      auto *I2 = dyn_cast_or_null<Instruction>(this->lastAttr().Exp);
+    auto *I2 = dyn_cast_or_null<Instruction>(this->lastAttr().Exp);
+    if (I2 && !I2->block() && !I2->isTrivial())
       Builder.addInstr(I2);
-    }
     this->scope()->insertInstructionMap(I, std::move(this->lastAttr()));
   }
 
@@ -311,13 +309,11 @@ public:
 
 public:
   InplaceReducer()
-      : AttributeGrammar<Attr, ScopeT>(new ScopeT()) {
-    Builder.setOverwriteMode(true, true);
-  }
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT())
+  { }
   InplaceReducer(MemRegionRef A)
-      : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A) {
-    Builder.setOverwriteMode(true, true);
-  }
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A)
+  { }
 
 protected:
   CFGBuilder Builder;

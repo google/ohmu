@@ -398,7 +398,7 @@ protected:
 
   void printCall(const Call *E, StreamType &SS) {
     const SExpr *T = E->target();
-    if (T->opcode() == COP_Apply) {
+    if (T && T->opcode() == COP_Apply) {
       self()->printApply(cast<Apply>(T), SS, true);
       SS << ")";
       if (Verbose)
@@ -436,7 +436,7 @@ protected:
 
   void printArrayAdd(const ArrayAdd *E, StreamType &SS) {
     self()->printSExpr(E->array(), SS, Prec_Postfix);
-    SS << " + ";
+    SS << " [+] ";
     self()->printSExpr(E->index(), SS, Prec_Atom);
   }
 

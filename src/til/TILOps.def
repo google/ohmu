@@ -60,7 +60,6 @@ TIL_OPCODE_DEF(Return)
 // Future is an instruction for rewriting purposes.
 TIL_OPCODE_DEF(Future)
 
-
 // Pseudo-terms
 TIL_OPCODE_DEF(Undefined)
 TIL_OPCODE_DEF(Wildcard)

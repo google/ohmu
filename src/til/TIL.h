@@ -313,7 +313,7 @@ public:
 class Instruction : public SExpr {
 public:
   static bool classof(const SExpr *E) {
-    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Future;
+    return E->opcode() >= COP_Literal  &&  E->opcode() <= COP_Undefined;
   }
 
   static const unsigned InvalidInstrID = 0xFFFFFFFF;
@@ -369,7 +369,7 @@ protected:
 
 inline Instruction* SExpr::asCFGInstruction() {
   Instruction* I = dyn_cast<Instruction>(this);
-  if (I && I->block() && I->instrID() > 0)
+  if (I && I->instrID() > 0)
     return I;
   return nullptr;
 }
@@ -1374,22 +1374,21 @@ public:
 
   /// Add a new argument.
   void addArgument(Phi *E) {
-    Args.emplace_back(Arena, E);
     E->setBlock(this);
+    Args.emplace_back(Arena, E);
   }
 
   /// Add a new instruction.
   void addInstruction(Instruction *E) {
-    Instrs.emplace_back(Arena, E);
     E->setBlock(this);
+    Instrs.emplace_back(Arena, E);
     if (auto *F = dyn_cast<Future>(E))
       F->addPosition(&Instrs.back());
   }
 
+  /// Set the terminator.
   void setTerminator(Terminator *E) {
     TermInstr = E;
-    if (E)
-      E->setBlock(this);
   }
 
   // Add a new predecessor, and return the phi-node index for it.
@@ -1512,11 +1511,11 @@ private:
 
 
 /// Placeholder for expressions that cannot be represented in the TIL.
-class Undefined : public SExpr {
+class Undefined : public Instruction {
 public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Undefined; }
 
-  Undefined() : SExpr(COP_Undefined) { }
+  Undefined() : Instruction(COP_Undefined) { }
 
   DECLARE_TRAVERSE_AND_COMPARE(Undefined)
 };

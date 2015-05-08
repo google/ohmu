@@ -53,13 +53,12 @@ protected:
   // A load instruction that needs to be rewritten.
   class FutureLoad : public Future {
   public:
-    FutureLoad(Load* L, Alloc* A) : LoadInstr(L), AllocInstr(A) { }
+    FutureLoad(Alloc* A) : AllocInstr(A) { }
     virtual ~FutureLoad() { }
 
     /// We don't use evaluate(); FutureLoads are forced manually.
     virtual SExpr* evaluate() override { return nullptr; }
 
-    Load  *LoadInstr;
     Alloc *AllocInstr;
   };
 
@@ -70,10 +69,10 @@ protected:
   Phi* makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds);
 
   // Lookup value of local variable at the beginning of basic block B
-  SExpr* lookupInPredecessors(BasicBlock *B, unsigned LvarID);
+  SExpr* lookupInPredecessors(BasicBlock *B, unsigned LvarID, StringRef Nm);
 
   // Lookup value of local variable at the end of basic block B
-  SExpr* lookup(BasicBlock *B, unsigned LvarID);
+  SExpr* lookup(BasicBlock *B, unsigned LvarID, StringRef Nm);
 
   // Second pass of SSA -- lookup variables and replace all loads.
   void replacePendingLoads();
@@ -82,8 +81,6 @@ public:
   SSAPass(MemRegionRef A)
       : InplaceReducer(A), CurrentVarMap(nullptr), CurrBB(nullptr) {
     FutArena.setRegion(&FutRegion);
-    // We only add new Phi nodes.
-    Builder.setOverwriteMode(true, false);
   }
 
 private:

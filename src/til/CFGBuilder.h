@@ -39,22 +39,17 @@ public:
 
   void setArena(MemRegionRef A) { Arena = A; }
 
-  MemRegionRef&      arena() { return Arena; }
+  /// Return the memory pool used by this builder to create new instructions.
+  MemRegionRef& arena() { return Arena; }
+
+  /// Return the diagnostic emitter used by this builder.
   DiagnosticEmitter& diag()  { return Diag; }
 
-  SCFG*        currentCFG() { return CurrentCFG; }
-  BasicBlock*  currentBB()  { return CurrentBB;  }
+  /// Return the current CFG being constructed (if any)
+  SCFG* currentCFG() { return CurrentCFG; }
 
-  bool overwriteInstructions() const { return OverwriteInstructions; }
-  bool overwriteArguments()    const { return OverwriteArguments;    }
-
-  /// Set the overwrite mode when doing in-place rewrites of an existing CFG.
-  /// If Instrs is true, added instructions will overwrite existing ones.
-  /// If Args is true, added Phi nodes will overwrite existing ones.
-  void setOverwriteMode(bool Instrs, bool Args = false) {
-    OverwriteArguments    = Args;
-    OverwriteInstructions = Instrs;
-  }
+  /// Return the current basic block being constructed (if any)
+  BasicBlock* currentBB() { return CurrentBB;  }
 
   /// Return true if we are in a CFG, and emitting instructions.
   bool emitInstrs() { return CurrentState.EmitInstrs; }
@@ -77,7 +72,7 @@ public:
     auto Temp = CurrentState;  CurrentState = S;  return Temp;
   }
 
-  /// Restore the previous builder state
+  /// Restore the previous builder state (returned from currentState)
   void restoreState(const BuilderState &S) {
     CurrentState = S;
   }
@@ -108,7 +103,10 @@ public:
   virtual void endCFG();
 
   /// Start working on the given basic block.
-  virtual void beginBlock(BasicBlock *B);
+  /// If Overwrite is true, any existing instructions will marked as "removed"
+  /// from the block.  They will not actually be removed until endBlock() is
+  /// is called, so in-place rewriting passes can still traverse them.
+  virtual void beginBlock(BasicBlock *B, bool Overwrite = false);
 
   /// Finish working on the current basic block.
   virtual void endBlock(Terminator *Term);
@@ -217,7 +215,7 @@ public:
     return new (Arena) Identifier(S);
   }
 
-  /// Create a new basic block.
+  /// Create a new basic block in the current cfg.
   /// If Nargs > 0, will create new Phi nodes for arguments.
   /// If NPreds > 0, will reserve space for predecessors.
   BasicBlock* newBlock(unsigned Nargs = 0, unsigned NPreds = 0);
@@ -235,24 +233,23 @@ public:
 
 
   CFGBuilder()
-    : OverwriteArguments(false), OverwriteInstructions(false),
-      CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
+    : CurrentCFG(nullptr), CurrentBB(nullptr), OverwriteCurrentBB(false),
+      OldCfgState(0, false)
   { }
   CFGBuilder(MemRegionRef A, bool Inplace = false)
-    : Arena(A), OverwriteArguments(false), OverwriteInstructions(Inplace),
-      CurrentCFG(nullptr), CurrentBB(nullptr), OldCfgState(0, false)
+    : Arena(A), CurrentCFG(nullptr), CurrentBB(nullptr),
+      OverwriteCurrentBB(false), OldCfgState(0, false)
   { }
   virtual ~CFGBuilder() { }
 
 protected:
-  MemRegionRef               Arena;
-  bool OverwriteArguments;     ///< Set to true for passes which rewrite Phi.
-  bool OverwriteInstructions;  ///< Set to true for in-place rewriting passes.
-
-  SCFG*                      CurrentCFG;
-  BasicBlock*                CurrentBB;
+  MemRegionRef               Arena;          ///< pool to create new instrs
+  SCFG*                      CurrentCFG;     ///< current CFG
+  BasicBlock*                CurrentBB;      ///< current basic block
   std::vector<Phi*>          CurrentArgs;    ///< arguments in CurrentBB.
   std::vector<Instruction*>  CurrentInstrs;  ///< instructions in CurrentBB.
+  bool                       OverwriteCurrentBB;
+
   BuilderState               CurrentState;   ///< state at current location.
   BuilderState               OldCfgState;    ///< state at old CFG location.
 
@@ -264,11 +261,8 @@ template<class T>
 inline T* CFGBuilder::addInstr(T* I) {
   if (!I || !CurrentState.EmitInstrs)
     return I;
-
-  if (I->block() == nullptr)
-    I->setBlock(CurrentBB);        // Mark I as having been added.
-  else
-    assert(I->block() == CurrentBB && "Same argument in multiple blocks.");
+  assert(!I->block() && "Instruction was already added to a block.");
+  I->setBlock(CurrentBB);        // Mark I as having been added.
   CurrentInstrs.push_back(I);
   return I;
 }
@@ -276,11 +270,8 @@ inline T* CFGBuilder::addInstr(T* I) {
 inline Phi* CFGBuilder::addArg(Phi* A) {
   if (!A || !CurrentState.EmitInstrs)
     return A;
-
-  if (A->block() == nullptr)
-    A->setBlock(CurrentBB);        // Mark A as having been added
-  else
-    assert(A->block() == CurrentBB && "Same instruction in multiple blocks.");
+  assert(!A->block() && "Argument was already added to a block.");
+  A->setBlock(CurrentBB);        // Mark A as having been added
   CurrentArgs.push_back(A);
   return A;
 }

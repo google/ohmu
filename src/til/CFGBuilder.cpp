@@ -82,7 +82,7 @@ void CFGBuilder::endCFG() {
 
 
 
-void CFGBuilder::beginBlock(BasicBlock *B) {
+void CFGBuilder::beginBlock(BasicBlock *B, bool Overwrite) {
   assert(!CurrentBB && "Haven't finished current block.");
   assert(CurrentArgs.empty());
   assert(CurrentInstrs.empty());
@@ -90,18 +90,36 @@ void CFGBuilder::beginBlock(BasicBlock *B) {
   CurrentBB = B;
   if (!B->cfg())
     CurrentCFG->add(B);
+
+  // Mark existing instructions as "removed".
+  // We don't remove them yet, because a rewriter will need to traverse them.
+  // They will be cleared from the block when endBlock() is called.
+  if (Overwrite) {
+    for (auto& A : CurrentBB->arguments())
+      A->setBlock(nullptr);
+    for (auto& I : CurrentBB->instructions())
+      I->setBlock(nullptr);
+    if (CurrentBB->terminator())
+      CurrentBB->terminator()->setBlock(nullptr);
+    OverwriteCurrentBB = true;
+  }
+  else {
+    OverwriteCurrentBB = false;
+  }
 }
 
 
 void CFGBuilder::endBlock(Terminator *Term) {
   assert(CurrentBB && "No current block.");
-  assert((CurrentBB->instructions().size() == 0 || OverwriteInstructions) &&
-         "Already finished block.");
 
-  // Ovewrite existing arguments with CurrentArgs, if requested.
-  if (OverwriteArguments)
+  // Remove existing instructions if overwrite was requested in beginBlock.
+  if (OverwriteCurrentBB) {
     CurrentBB->arguments().clear();
+    CurrentBB->instructions().clear();
+    OverwriteCurrentBB = false;
+  }
 
+  // Add new arguments to block.
   if (CurrentArgs.size() > 0) {
     auto Sz = CurrentBB->arguments().size();
     CurrentBB->arguments().reserve(Arena, Sz + CurrentArgs.size());
@@ -109,10 +127,7 @@ void CFGBuilder::endBlock(Terminator *Term) {
       CurrentBB->addArgument(E);
   }
 
-  // Overwrite existing instructions with CurrentInstrs, if requested.
-  if (OverwriteInstructions)
-    CurrentBB->instructions().clear();
-
+  // Add new instructions to block.
   if (CurrentInstrs.size() > 0) {
     auto Sz = CurrentBB->instructions().size();
     CurrentBB->instructions().reserve(Arena, Sz + CurrentInstrs.size());
@@ -121,8 +136,10 @@ void CFGBuilder::endBlock(Terminator *Term) {
   }
 
   // Set the terminator, if one has been specified.
-  if (Term)
+  if (Term) {
+    Term->setBlock(CurrentBB);
     CurrentBB->setTerminator(Term);
+  }
 
   CurrentArgs.clear();
   CurrentInstrs.clear();
@@ -203,7 +220,7 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, SExpr* Result) {
 
   unsigned Idx = B->addPredecessor(CurrentBB);
   if (Result) {
-    assert(B->arguments().size() == 1);
+    assert(B->arguments().size() == 1 && "Block has no arguments.");
     Phi *Ph = B->arguments()[0];
     setPhiArgument(Ph, Result, Idx);
   }

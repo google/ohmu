@@ -114,7 +114,7 @@ void SSAPass::reduceLoad(Load *Orig) {
       }
       else {
         // Replace load with future
-        auto *F = new (FutArena) FutureLoad(Orig, A);
+        auto *F = new (FutArena) FutureLoad(A);
         Pending.push_back(F);
         resultAttr().Exp = F;
         return;
@@ -130,22 +130,24 @@ void SSAPass::reduceLoad(Load *Orig) {
 // all loads, and replaces the loads.
 void SSAPass::replacePendingLoads() {
   // Second pass:  Go back and replace all loads with phi nodes or values.
+  // VarMapCache holds lookups that we've already done in the current block.
   CurrBB = Builder.currentCFG()->entry();
+  unsigned MSize = BInfoMap[CurrBB->blockID()].AllocVarMap.size();
+  VarMapCache.resize(MSize, nullptr);
 
   for (auto *F : Pending) {
     SExpr *E = F->maybeGetResult();
     if (!E) {
-      Load  *L = F->LoadInstr;
       Alloc *A = F->AllocInstr;
-      BasicBlock *B = L->block();
+      BasicBlock *B = F->block();
       if (B != CurrBB) {
         // We've switched to a new block.  Clear the cache.
         VarMapCache.clear();
-        unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+        MSize = BInfoMap[B->blockID()].AllocVarMap.size();
         VarMapCache.resize(MSize, nullptr);
         CurrBB = B;
       }
-      E = lookupInPredecessors(B, A->allocID());
+      E = lookupInPredecessors(B, A->allocID(), A->instrName());
       F->setResult(E);
     }
   }
@@ -183,7 +185,8 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 
 
 // Lookup value of local variable at the beginning of basic block B
-SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
+SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
+                                     StringRef Nm) {
   if (B == CurrBB) {
     // See if we have a cached value at the start of the current block.
     if (SExpr* E = VarMapCache[LvarID])
@@ -208,10 +211,11 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
       SetInBlock = true;
     }
 
-    E2 = lookup(P.get(), LvarID);
+    E2 = lookup(P.get(), LvarID, Nm);
     if (!SetInBlock) {
-      // Lookup in P may force a lookup in the current block due to cycles.
-      // If that happened, just return the previous answer.
+      // Lookup in P may have forced a lookup in the current block due to
+      // cycles.  Check the cache to see if that happened, and if it did,
+      /// just return the cached answer.
       if (auto* CE = lookupInCache(LvarMap, LvarID))
         return CE;
     }
@@ -246,6 +250,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
     else {
       // Valid Phi node; add it to the block and return it.
       E = Ph;
+      Ph->setInstrName(Nm);
       B->addArgument(Ph);
     }
   }
@@ -259,14 +264,14 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID) {
 
 
 // Lookup value of local variable at the end of basic block B
-SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID) {
+SExpr* SSAPass::lookup(BasicBlock *B, unsigned LvarID, StringRef Nm) {
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
   assert(LvarID < LvarMap->size());
   // Check to see if the variable was set in this block.
   if (auto* E = lookupInCache(LvarMap, LvarID))
     return E;
   // Lookup variable in predecessor blocks.
-  auto* E = lookupInPredecessors(B, LvarID);
+  auto* E = lookupInPredecessors(B, LvarID, Nm);
   // Cache the result.
   LvarMap->at(LvarID) = E;
   return E;
