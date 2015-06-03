@@ -18,6 +18,7 @@
 #define OHMU_TIL_TILPRETTYPRINT_H
 
 #include "TIL.h"
+#include "AnnotationImpl.h"
 
 #include <ostream>
 
@@ -168,8 +169,24 @@ protected:
 #define TIL_OPCODE_DEF(X)                                                  \
     case COP_##X:                                                          \
       self()->print##X(cast<X>(E), SS);                                    \
-      return;
+      break;
 #include "TILOps.def"
+    }
+    printAnnotations(E, SS);
+  }
+
+  void printAnnotations(const SExpr *E, StreamType &SS) {
+    Annotation *A = E->annotations();
+    while (A != nullptr) {
+      switch (A->kind()) {
+#define TIL_ANNKIND_DEF(X)                                                 \
+      case ANNKIND_##X:                                                    \
+        SS << " #";                                                        \
+        cast<X>(A)->print<Self, StreamType>(self(), SS);                   \
+        break;
+#include "TILAnnKinds.def"
+      }
+      A = A->next();
     }
   }
 
@@ -251,6 +268,7 @@ protected:
       break;
     }
     printSExpr(E->definition(), SS, Prec_Decl);
+    printAnnotations(E, SS);
   }
 
   void printFunction(const Function *E, StreamType &SS, unsigned sugared = 0) {

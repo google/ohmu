@@ -5,6 +5,7 @@ add_library(til STATIC
   CFGBuilder.cpp
   Global.cpp
   SSAPass.cpp
+  AnnotationImpl.cpp
   TIL.cpp
   TypedEvaluator.cpp
 )

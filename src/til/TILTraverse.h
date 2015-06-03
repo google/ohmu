@@ -16,6 +16,7 @@
 #define OHMU_TIL_TILTRAVERSE_H
 
 #include "TIL.h"
+#include "AnnotationImpl.h"
 
 namespace ohmu {
 namespace til  {
@@ -93,6 +94,7 @@ public:
   void traverse(T *E, TraversalKind K) {
     auto Cstate = self()->enterSubExpr(K);
     traverseByType(E, K);
+    self()->traverseAllAnnotations(E->annotations());
     self()->exitSubExpr(K, Cstate);
   }
 
@@ -107,6 +109,26 @@ public:
   void traverse##X(X *E);
 #include "TILOps.def"
 
+  void traverseAllAnnotations(Annotation *A) {
+    while (A != nullptr) {
+      self()->traverseAnnotation(A);
+      A = A->next();
+    }
+  }
+
+  void traverseAnnotation(Annotation *A) {
+    self()->traverseAnnotationByKind(A);
+  }
+
+  void traverseAnnotationByKind(Annotation *A) {
+    switch (A->kind()) {
+#define TIL_ANNKIND_DEF(X)                                                \
+    case ANNKIND_##X:                                                     \
+      (cast<X>(A))->traverse<Self>(self());                               \
+      break;
+#include "TILAnnKinds.def"
+    }
+  }
 
 protected:
   /// For generic SExprs, do dynamic dispatch by type.
@@ -153,6 +175,7 @@ public:
 /// DefaultReducerBase implements empty versions of the nonstandard
 /// reduceX() methods -- those where X is not the name of a TIL class.
 class DefaultReducerBase {
+public:
   /// Reduce a null SExpr
   void reduceNull() { }
 
@@ -169,9 +192,16 @@ class DefaultReducerBase {
 
 /// DefaultReducer implements empty versions of all of the reduceX() methods.
 class DefaultReducer : public DefaultReducerBase {
+public:
 #define TIL_OPCODE_DEF(X)   \
   void reduce##X(X *E) { }
 #include "TILOps.def"
+
+  template<class T>
+  void reduceLiteralT(LiteralT<T>* E) { }
+
+  template <class T>
+  void reduceAnnotationT(T *A) { }
 };
 
 
@@ -462,7 +492,7 @@ void Traversal<S>::traverseIfThenElse(IfThenElse *E) {
 }
 
 
-} // end namespace til
-} // end namespace ohmu
+}  // end namespace til
+}  // end namespace ohmu
 
 #endif  // OHMU_TIL_TILTRAVERSE_H

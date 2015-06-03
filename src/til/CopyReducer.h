@@ -372,17 +372,32 @@ public:
     this->resultAttr().Exp = Builder.newIfThenElse(C, T, E);
   }
 
+  template <class T>
+  void reduceAnnotationT(T *A) {
+    this->ResultAnn = A->copy(this->Builder, this->attributesAsSExpr());
+  }
+
+  std::vector<SExpr*> attributesAsSExpr() {
+    std::vector<SExpr*> Res;
+    for (int i = 0; i < this->numAttrs(); ++i) {
+      Res.push_back(this->attr(i).Exp);
+    }
+    return Res;
+  }
+
 public:
   CopyReducer()
-    : AttributeGrammar<Attr, ScopeT>(new ScopeT())
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), ResultAnn(nullptr)
   { }
   CopyReducer(MemRegionRef A)
-    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A)
+    : AttributeGrammar<Attr, ScopeT>(new ScopeT()), Builder(A),
+      ResultAnn(nullptr)
   { }
   ~CopyReducer() { }
 
 public:
   CFGBuilder Builder;
+  Annotation* ResultAnn;
 };
 
 
@@ -472,6 +487,13 @@ public:
       return;
     }
     SuperTv::traverse(E, K);
+  }
+
+  void traverseAnnotation(Annotation *A) {
+    unsigned Af = self()->pushAttrFrame();
+    self()->traverseAnnotationByKind(A);
+    self()->restoreAttrFrame(Af);
+    self()->resultAttr().Exp->addAnnotation(self()->ResultAnn);
   }
 
   /// Perform a lazy traversal.

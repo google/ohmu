@@ -215,6 +215,11 @@ public:
     return new (Arena) Identifier(S);
   }
 
+  template<typename AnnType, typename... Params>
+  AnnType* newAnnotationT(Params... Ps) {
+    return new (Arena) AnnType(Ps...);
+  }
+
   /// Create a new basic block in the current cfg.
   /// If Nargs > 0, will create new Phi nodes for arguments.
   /// If NPreds > 0, will reserve space for predecessors.

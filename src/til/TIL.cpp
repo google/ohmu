@@ -8,6 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "TIL.h"
+#include "AnnotationImpl.h"
+#include "CFGBuilder.h"
 
 namespace ohmu {
 namespace til  {
@@ -178,7 +180,20 @@ bool SExpr::isHeapValue() {
   }
 }
 
-
+void SExpr::addAnnotation(Annotation *A) {
+  if (A == nullptr)
+    return;
+  if (Annotations) {
+    if (A->kind() < Annotations->kind()) {
+      A->insert(Annotations);
+      Annotations = A;
+    } else {
+      Annotations->insert(A);
+    }
+  }
+  else
+    Annotations = A;
+}
 
 SExpr* Future::addPosition(SExpr **Eptr) {
   // If the future has already been forced, return the forced value.
@@ -248,6 +263,19 @@ Slot* Record::findSlot(StringRef S) {
   return nullptr;
 }
 
+
+/// Return the name (if any) of this instruction.
+StringRef Instruction::instrName() const {
+  const InstrNameAnnot* Name = getAnnotation<const InstrNameAnnot>();
+  if (Name != nullptr)
+    return Name->name();
+  return StringRef("", 0);
+}
+
+/// Set the name for this instruction.
+void Instruction::setInstrName(CFGBuilder &Builder, StringRef Name) {
+  addAnnotation(Builder.newAnnotationT<InstrNameAnnot>(Name));
+}
 
 
 unsigned BasicBlock::findPredecessorIndex(const BasicBlock *BB) const {

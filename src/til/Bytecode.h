@@ -10,6 +10,7 @@
 #ifndef OHMU_TIL_BYTECODE_H
 #define OHMU_TIL_BYTECODE_H
 
+#include "AnnotationImpl.h"
 #include "CFGBuilder.h"
 #include "TIL.h"
 #include "TILTraverse.h"
@@ -35,13 +36,21 @@ public:
     PSOP_ExitScope,
     PSOP_EnterBlock,
     PSOP_EnterCFG,
+    PSOP_EnterAnn,
     PSOP_Last
+  };
+
+  enum PseudoAnnKind : uint8_t {
+    PSANN_ExitAnn = 0,
+    PSANN_Last
   };
 
   void getBitSize(uint32_t) { }  // trigger an error for unhandled types.
 
   unsigned getBitSizeImpl(PseudoOpcode)     { return 6; }
   unsigned getBitSizeImpl(TIL_Opcode)       { return 6; }
+  unsigned getBitSizeImpl(PseudoAnnKind)    { return 6; }
+  unsigned getBitSizeImpl(TIL_AnnKind)      { return 6; }
   unsigned getBitSizeImpl(TIL_UnaryOpcode)  { return 6; }
   unsigned getBitSizeImpl(TIL_BinaryOpcode) { return 6; }
   unsigned getBitSizeImpl(TIL_CastOpcode)   { return 6; }
@@ -216,6 +225,10 @@ protected:
     writePseudoOpcode(static_cast<PseudoOpcode>(Psop));
   }
 
+  void writePseudoAnnKind(PseudoAnnKind Psann) {
+    writeFlag(Psann);
+  }
+
   void writeBaseType(BaseType Bt) {
     Writer->writeUInt8(Bt.asUInt8());
     if (Bt.VectSize >= 1)
@@ -246,8 +259,42 @@ protected:
 public:
   template<class T>
   void traverse(T *E, TraversalKind K) {
+    if (WritingAnn)
+      writePseudoAnnKind(PSANN_ExitAnn);
+    bool PrevWriting = WritingAnn;
+
+    WritingAnn = false;
     SuperTv::traverse(E, K);
     Writer->endRecord();
+
+    if (E->annotations()) {
+      writePseudoOpcode(PSOP_EnterAnn);
+      WritingAnn = true;
+      postTraverseAllAnnotations(E->annotations());
+      WritingAnn = PrevWriting;
+      if (!WritingAnn)
+        writePseudoAnnKind(PSANN_ExitAnn);
+    } else {
+      WritingAnn = PrevWriting;
+      if (WritingAnn)
+        writePseudoOpcode(PSOP_EnterAnn);
+    }
+  }
+
+  // Postpone traversal until their SExpr is fully written.
+  void traverseAllAnnotations(Annotation *A) { }
+
+  void postTraverseAllAnnotations(Annotation *A) {
+    while (A != nullptr) {
+      self()->traverseAnnotation(A);
+      A = A->next();
+    }
+  }
+
+  template <class T>
+  void reduceAnnotationT(T *A) {
+    writeAnnKind(A->kind());
+    A->serialize(this);
   }
 
   template<class Ty>
@@ -255,6 +302,11 @@ public:
     writeOpcode(COP_Literal);
     writeBaseType(E->baseType());
     writeLitVal(E->value());
+  }
+
+  void writeAnnKind(TIL_AnnKind Akind) {
+    unsigned Psann = static_cast<unsigned>(PSANN_Last) + Akind;
+    writePseudoAnnKind(static_cast<PseudoAnnKind>(Psann));
   }
 
   typedef bool LocationState;
@@ -306,10 +358,13 @@ public:
   void reduceLet(Let *E);
   void reduceIfThenElse(IfThenElse *E);
 
-  BytecodeWriter(ByteStreamWriterBase *W) : Writer(W) { }
+  BytecodeWriter(ByteStreamWriterBase *W) : Writer(W), WritingAnn(false) { }
+
+  ByteStreamWriterBase *getWriter() { return Writer; }
 
 private:
   ByteStreamWriterBase *Writer;
+  bool WritingAnn;
 };
 
 
@@ -322,8 +377,14 @@ protected:
 
   PseudoOpcode readPseudoOpcode() { return readFlag<PseudoOpcode>(); }
 
+  PseudoAnnKind readPseudoAnnKind() { return readFlag<PseudoAnnKind>(); }
+
   TIL_Opcode getOpcode(PseudoOpcode Psop) {
     return static_cast<TIL_Opcode>(Psop - PSOP_Last);
+  }
+
+  TIL_AnnKind getAnnotationKind(PseudoAnnKind Psann) {
+    return static_cast<TIL_AnnKind>(Psann - PSANN_Last);
   }
 
   BaseType readBaseType() {
@@ -350,10 +411,6 @@ protected:
   StringRef readLitVal(StringRef*) { return Reader->readString(); }
   void*     readLitVal(void**)     { return nullptr; }
 
-  SExpr* arg(int i)     { return Stack[Stack.size()-1 - i]; }
-  void   push(SExpr* E) { Stack.push_back(E); }
-  void   drop(int n)    { Stack.resize(Stack.size() - n); }
-
   ArrayRef<SExpr*> lastArgs(unsigned n) {
     return ArrayRef<SExpr*>(&Stack[Stack.size() - n], n);
   }
@@ -371,10 +428,14 @@ protected:
   /// Read a SExpr, branching on the Opcode.
   void readSExprByType(TIL_Opcode Op);
 
+  /// Read an Ann, branching on the AnnKind.
+  void readAnnotationByKind(TIL_AnnKind Ak);
+
   void enterScope();
   void exitScope();
   void enterBlock();
   void enterCFG();
+  void readAllAnnotations();
 
   /// Get the VarDecl for the given variable index.
   VarDecl* getVarDecl(unsigned Vidx);
@@ -430,6 +491,14 @@ public:
       : Builder(B), Reader(R), CurrentInstrID(0), Success(true) {
     Vars.push_back(nullptr);  // indices start at 1.
   }
+
+  SExpr  *arg(int i)    { return Stack[Stack.size()-1 - i]; }
+  void   push(SExpr* E) { Stack.push_back(E); }
+  void   drop(int n)    { Stack.resize(Stack.size() - n); }
+
+  ByteStreamReaderBase *getReader() { return Reader; }
+
+  CFGBuilder& getBuilder() { return Builder; }
 
 private:
   CFGBuilder&            Builder;

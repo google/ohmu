@@ -250,7 +250,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
     else {
       // Valid Phi node; add it to the block and return it.
       E = Ph;
-      Ph->setInstrName(Nm);
+      Ph->setInstrName(Builder, Nm);
       B->addArgument(Ph);
     }
   }

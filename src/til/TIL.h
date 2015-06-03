@@ -57,6 +57,7 @@
 #include "base/MutArrayRef.h"
 #include "base/SimpleArray.h"
 
+#include "Annotation.h"
 #include "TILBaseType.h"
 
 #include <stdint.h>
@@ -69,6 +70,9 @@
 
 namespace ohmu {
 namespace til {
+
+// Forward declaration.
+class CFGBuilder;
 
 /// Enum for the different distinct classes of SExpr
 enum TIL_Opcode {
@@ -216,11 +220,33 @@ public:
   // with REQUIRES_EH=1.
   void operator delete(void *) = delete;
 
+  /// Get annotation of the specified derived type. Returns nullptr if no such
+  /// annotation exists.
+  template <class T>
+  T *getAnnotation() const {
+    if (Annotations == nullptr)
+      return nullptr;
+    return Annotations->getAnnotation<T>();
+  }
+
+  /// Get all annotations of the specified derived type.
+  template <class T>
+  std::vector<T*> getAllAnnotations() const {
+    if (Annotations == nullptr)
+      return std::vector<T*>();
+    return Annotations->getAllAnnotations<T>();
+  }
+
+  void addAnnotation(Annotation *A);
+
+  Annotation *const annotations() const { return Annotations; }
+
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
-    : Opcode(Op), SubOpcode(SubOp), Flags(0) {}
+    : Opcode(Op), SubOpcode(SubOp), Flags(0), Annotations(nullptr) {}
   SExpr(const SExpr &E)
-    : Opcode(E.Opcode), SubOpcode(E.SubOpcode), Flags(E.Flags) {}
+    : Opcode(E.Opcode), SubOpcode(E.SubOpcode), Flags(E.Flags),
+      Annotations(nullptr) {}
 
   const unsigned char Opcode;
   const unsigned char SubOpcode;
@@ -231,6 +257,8 @@ private:
 
   /// SExpr objects must be created in an arena.
   void *operator new(size_t) = delete;
+
+  Annotation *Annotations = nullptr;
 };
 
 
@@ -320,10 +348,10 @@ public:
 
   Instruction(TIL_Opcode Op, unsigned char SubOp = 0)
       : SExpr(Op, SubOp), BType(BaseType::getBaseType<void>()),
-        InstrID(0), StackID(0), Block(nullptr), InstrName("", 0) { }
+        InstrID(0), StackID(0), Block(nullptr) { }
   Instruction(const Instruction &E)
       : SExpr(E), BType(E.BType),
-        InstrID(0), StackID(0), Block(nullptr), InstrName(E.InstrName) { }
+        InstrID(0), StackID(0), Block(nullptr) { }
 
   /// Return the simple scalar type (e.g. int/float/pointer) of this instr.
   BaseType baseType() const { return BType; }
@@ -341,7 +369,7 @@ public:
   BasicBlock* block() const { return Block; }
 
   /// Return the name (if any) of this instruction.
-  StringRef instrName() const { return InstrName; }
+  StringRef instrName() const;
 
   /// Set the basic block and instruction ID for this instruction.
   void setInstrID(unsigned id) { InstrID = id; }
@@ -355,15 +383,14 @@ public:
   /// Sets the BaseType for this instruction.
   void setBaseType(BaseType Vt) { BType = Vt; }
 
-  /// Sets the name of this instructions.
-  void setInstrName(StringRef N) { InstrName = N; }
+  /// Set the name for this instruction.
+  void setInstrName(CFGBuilder &Builder, StringRef Name);
 
 protected:
   BaseType      BType;      ///< The scalar type (simple type) of this instr.
   unsigned      InstrID;    ///< An ID that is unique within the CFG.
   unsigned      StackID;    ///< An ID for stack machine interpretation.
   BasicBlock*   Block;      ///< The basic block where this instruction occurs.
-  StringRef     InstrName;  ///< The name of this instruction (if any).
 };
 
 

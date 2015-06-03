@@ -1,0 +1,34 @@
+//===- TILAnnKinds.def -----------------------------------------*- C++ --*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file defines the list of annotation kinds for the Typed Intermediate
+// language. See Annotation.h for their usage.
+//
+//===----------------------------------------------------------------------===//
+
+#ifdef TIL_ANNKIND_FIRST
+  TIL_ANNKIND_FIRST(InstrName)
+#undef TIL_ANNKIND_FIRST
+#endif
+
+#ifdef TIL_ANNKIND_DEF
+
+// Declarations and definitions
+TIL_ANNKIND_DEF(InstrNameAnnot)
+TIL_ANNKIND_DEF(SourceLocAnnot)
+TIL_ANNKIND_DEF(TestTripletAnnot)
+TIL_ANNKIND_DEF(PreconditionAnnot)
+
+#undef TIL_ANNKIND_DEF
+#endif // TIL_ANNKIND_DEF
+
+#ifdef TIL_ANNKIND_LAST
+  TIL_ANNKIND_LAST(Precondition)
+#undef TIL_ANNKIND_LAST
+#endif

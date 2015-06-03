@@ -810,6 +810,14 @@ void BytecodeReader::readIfThenElse() {
 }
 
 
+void BytecodeReader::readAllAnnotations() {
+  auto Akind = readPseudoAnnKind();
+  while (Akind != PSANN_ExitAnn) {
+    readAnnotationByKind(getAnnotationKind(Akind));
+    Akind = readPseudoAnnKind();
+  }
+}
+
 
 void BytecodeReader::readSExpr() {
   auto Psop = readPseudoOpcode();
@@ -824,6 +832,7 @@ void BytecodeReader::readSExpr() {
     case PSOP_ExitScope:     exitScope();         break;
     case PSOP_EnterBlock:    enterBlock();        break;
     case PSOP_EnterCFG:      enterCFG();          break;
+    case PSOP_EnterAnn:      readAllAnnotations();    break;
     default:
       readSExprByType(getOpcode(Psop));  break;
   }
@@ -839,6 +848,16 @@ void BytecodeReader::readSExprByType(TIL_Opcode op) {
   }
 }
 
+
+void BytecodeReader::readAnnotationByKind(TIL_AnnKind Ak) {
+  Annotation *A;
+  switch(Ak) {
+#define TIL_ANNKIND_DEF(X) \
+    case ANNKIND_##X: A = X::deserialize(this); break;
+#include "TILAnnKinds.def"
+  }
+  arg(0)->addAnnotation(A);
+}
 
 SExpr* BytecodeReader::read() {
   while (!Reader->empty())
@@ -857,5 +876,3 @@ SExpr* BytecodeReader::read() {
 
 }  // end namespace til
 }  // end namespace ohmu
-
-

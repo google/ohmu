@@ -231,6 +231,65 @@ SExpr* makeSimpleExpr(CFGBuilder& bld) {
 }
 
 
+SExpr* makeBranch(CFGBuilder& bld) {
+  // declare self parameter for enclosing module
+  auto *self_vd = bld.newVarDecl(VarDecl::VK_SFun, "self", nullptr);
+  bld.enterScope(self_vd);
+  auto *self = bld.newVariable(self_vd);
+
+  // declare parameters for sum function
+  auto *int_ty = bld.newScalarType(BaseType::getBaseType<int>());
+  auto *vd_n = bld.newVarDecl(VarDecl::VK_Fun, "n", int_ty);
+  bld.enterScope(vd_n);
+  auto *n = bld.newVariable(vd_n);
+
+  bld.beginCFG(nullptr);
+  auto *cfg = bld.currentCFG();
+
+  bld.beginBlock(cfg->entry());
+  bld.newReturn(bld.newLiteralT<int>(0));
+
+  auto *label1 = bld.newBlock(0);
+  bld.beginBlock(label1);
+  auto *cond = bld.newBinaryOp(BOP_Leq,
+      bld.newLiteralT<int>(0), bld.newLiteralT<int>(0));
+  cond->setBaseType(BaseType::getBaseType<bool>());
+
+  // Annotations:
+  auto *name = bld.newAnnotationT<InstrNameAnnot>("SomeNe");
+  auto* sourcepos = bld.newAnnotationT<SourceLocAnnot>(10);
+  auto* cond2 = bld.newLiteralT<bool>(true);
+  auto* cond3 = bld.newLiteralT<bool>(false);
+  cond2->addAnnotation(sourcepos);
+  auto* precond2 = bld.newAnnotationT<PreconditionAnnot>(cond2);
+  cond3->addAnnotation(precond2);
+  auto* precond3 = bld.newAnnotationT<PreconditionAnnot>(cond3);
+  cond->addAnnotation(precond3);
+  cond->addAnnotation(name);
+
+  bld.newBranch(cond, cfg->entry(), cfg->entry());
+
+  bld.endCFG();
+
+  // construct sum function
+  auto *sum_c   = bld.newCode(int_ty, cfg);
+  bld.exitScope();
+  auto *sum_f   = bld.newFunction(vd_n, sum_c);
+  auto *sum_slt = bld.newSlot("sum", sum_f);
+
+
+  // build enclosing record
+  auto *rec = bld.newRecord(2);
+  rec->addSlot(bld.arena(), sum_slt);
+
+  // build enclosing module
+  bld.exitScope();
+  auto *mod = bld.newFunction(self_vd, sum_slt);
+
+  return mod;
+
+}
+
 SExpr* makeModule(CFGBuilder& bld) {
   // declare self parameter for enclosing module
   auto *self_vd = bld.newVarDecl(VarDecl::VK_SFun, "self", nullptr);
@@ -361,14 +420,57 @@ void testSerialization(CFGBuilder& bld, char* buf, SExpr *e) {
 }
 
 
+
+SExpr* makeSimple(CFGBuilder& bld) {
+  auto* four = bld.newLiteralT<int>(4);
+  four->addAnnotation(bld.newAnnotationT<SourceLocAnnot>(132));
+
+  auto* vd = bld.newVarDecl(VarDecl::VK_Let, "four", four);
+  vd->setVarIndex(1);
+  auto* anncond = bld.newBinaryOp(BOP_Leq, bld.newLiteralT<int>(5),
+      bld.newLiteralT<int>(3));
+  anncond->addAnnotation(
+      bld.newAnnotationT<PreconditionAnnot>(bld.newLiteralT<bool>(true)));
+  vd->addAnnotation(bld.newAnnotationT<PreconditionAnnot>(anncond));
+
+  auto* cond2    = bld.newLiteralT<int>(13);
+  auto* precond2 = bld.newAnnotationT<PreconditionAnnot>(cond2);
+  auto *cond     = bld.newBinaryOp(BOP_Leq, bld.newLiteralT<int>(6),
+      bld.newLiteralT<int>(7));
+  cond->addAnnotation(precond2);
+  cond->addAnnotation(bld.newAnnotationT<InstrNameAnnot>("COMPARE"));
+
+  auto* let = bld.newLet(vd, cond);
+  let->addAnnotation(bld.newAnnotationT<InstrNameAnnot>("LET"));
+
+  auto* A = bld.newBinaryOp(BOP_Leq, bld.newLiteralT<int>(200),
+      bld.newLiteralT<int>(201));
+  auto* B = bld.newBinaryOp(BOP_Leq, bld.newLiteralT<int>(300),
+      bld.newLiteralT<int>(301));
+
+  auto* Acond = bld.newLiteralT<int>(13);
+  A->addAnnotation(bld.newAnnotationT<PreconditionAnnot>(Acond));
+  B->addAnnotation(bld.newAnnotationT<InstrNameAnnot>("google"));
+
+  auto* C = bld.newBinaryOp(BOP_Leq, bld.newLiteralT<int>(400),
+      bld.newLiteralT<int>(401));
+  auto* tri = bld.newAnnotationT<TestTripletAnnot>(A, B, C);
+  let->addAnnotation(tri);
+
+  return let;
+}
+
+
 void testSerialization() {
   MemRegion    region;
   MemRegionRef arena(&region);
   CFGBuilder   builder(arena);
   char* buf = arena.allocateT<char>(1 << 16);  // 64k buffer
 
+  testSerialization(builder, buf, makeBranch(builder));
   testSerialization(builder, buf, makeSimpleExpr(builder));
   testSerialization(builder, buf, makeModule(builder));
+  testSerialization(builder, buf, makeSimple(builder));
 }
 
 

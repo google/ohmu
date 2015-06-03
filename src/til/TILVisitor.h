@@ -25,7 +25,8 @@ namespace til  {
 /// Implements a post-order visitor.
 template<class Self>
 class Visitor : public Traversal<Self>,
-                public DefaultScopeHandler {
+                public DefaultScopeHandler,
+                public DefaultReducer {
 public:
   typedef Traversal<Self> SuperTv;
 
@@ -48,21 +49,6 @@ public:
     if (Success)
       SuperTv::traverse(E, K);
   }
-
-  /// Default visit behavior.
-  void reduceSExpr(SExpr* Orig) { }
-  void reduceNull() { }
-  void reduceWeak(Instruction* Orig) { }
-  void reduceBBArgument(Phi *Orig) { }
-  void reduceBBInstruction(Instruction *Orig) { }
-
-  template<class T>
-  void reduceLiteralT(LiteralT<T>* E) { self()->reduceSExpr(E); }
-
-  /// Provide default reduce methods for all other node types.
-#define TIL_OPCODE_DEF(X)                                                 \
-  void reduce##X(X *E) { self()->reduceSExpr(E); }
-#include "TILOps.def"
 
 protected:
   bool Success;

@@ -307,6 +307,19 @@ public:
     this->resultAttr().Exp = Orig;
   }
 
+  template <class T>
+  void reduceAnnotationT(T *A) {
+    A->rewrite(attributesAsSExpr());
+  }
+
+  std::vector<SExpr*> attributesAsSExpr() {
+    std::vector<SExpr*> Res;
+    for (int i = 0; i < this->numAttrs(); ++i) {
+      Res.push_back(this->attr(i).Exp);
+    }
+    return Res;
+  }
+
 public:
   InplaceReducer()
     : AttributeGrammar<Attr, ScopeT>(new ScopeT())
