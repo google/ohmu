@@ -726,6 +726,11 @@ void TypedEvaluator::traverseLet(Let *Orig) {
 
   // Eliminate the let by substituting for the let-variable.
   traverse(Orig->variableDecl()->definition(), TRV_Decl);
+  auto* E = lastAttr().Exp;
+  if (auto* I = dyn_cast_or_null<Instruction>(E)) {
+    I->setInstrName(Orig->variableDecl()->varName());
+  }
+
   scope()->enterScope(Orig->variableDecl(), std::move(lastAttr()));
 
   traverse(Orig->body(), TRV_Tail);
