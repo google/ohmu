@@ -145,6 +145,7 @@ public:
     return new (Arena) Variable(Vd);
   }
   Apply* newApply(SExpr* E0, SExpr* E1, Apply::ApplyKind K=Apply::FAK_Apply) {
+    assert(E0 && "Function must not be null.");
     return new (Arena) Apply(E0, E1, K);
   }
   Project* newProject(SExpr* E0, StringRef S) {

@@ -897,6 +897,12 @@ public:
 
   AllocKind allocKind() const { return static_cast<AllocKind>(SubOpcode); }
 
+  void setAllocKind(AllocKind K) { SubOpcode = K; }
+
+  bool isLocal() const { return allocKind() == AK_Local; }
+  bool isStack() const { return allocKind() == AK_Stack; }
+  bool isHeap()  const { return allocKind() == AK_Heap;  }
+
   SExpr *initializer() { return InitExpr.get(); }
   const SExpr *initializer() const { return InitExpr.get(); }
 

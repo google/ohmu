@@ -64,17 +64,66 @@ void SSAPass::exitBlock(BasicBlock *B) {
 }
 
 
+void SSAPass::traverseLoad(Load *E) {
+  // Don't count direct loads from a local variable as a "use".
+  // See reduceWeak, below.
+  auto *Ptr = E->pointer();
+  auto *A = dyn_cast_or_null<Alloc>(Ptr->asCFGInstruction());
+  if (A && A->isLocal())
+    Super::reduceWeak(A);    // Bypass our reduceWeak
+  else
+    self()->traverseArg(Ptr);
+
+  self()->reduceLoad(E);
+}
+
+
+void SSAPass::traverseStore(Store *E) {
+  // Don't count direct stores to a local variable as a "use".
+  // See reduceWeak, below.
+  auto *Ptr = E->destination();
+  auto *A = dyn_cast_or_null<Alloc>(Ptr->asCFGInstruction());
+  if (A && A->isLocal())
+    Super::reduceWeak(A);    // Bypass our reduceWeak
+  else
+    self()->traverseArg(Ptr);
+
+  self()->traverseArg(E->source());
+  self()->reduceStore(E);
+}
+
+
+void SSAPass::reduceWeak(Instruction *I) {
+  // The conversion to SSA will eliminate the Alloc for a local variable,
+  // along with any loads or stores.  However, that's only possible if the
+  // address of the variable is never used outside of a load or store.
+  // Here we count
+  if (auto *A = dyn_cast_or_null<Alloc>(I)) {
+    // Mark variable as stack-allocated, rather than local.
+    if (A->isLocal())
+      A->setAllocKind(Alloc::AK_Stack);
+  }
+}
+
+
 void SSAPass::reduceAlloc(Alloc *Orig) {
   assert(Orig->instrID() > 0 && "Alloc must be a top-level instruction.");
   auto* E0 = attr(0).Exp;
 
-  if (Builder.currentBB()) {
+  if (!Orig->isHeap() && Builder.currentBB()) {
     auto* Fld = dyn_cast<Field>(E0);
     if (Fld) {
-      // Add alloc to current var map.
+      // Add Alloc to current variable map.
       Orig->setAllocID(CurrentVarMap->size());
       CurrentVarMap->push_back(Fld->body());
-      resultAttr().Exp = nullptr;   // Remove Alloc instruction
+
+      // Optimistically upgrade to local; may downgrade again in reduceWeak.
+      Orig->setAllocKind(Alloc::AK_Local);
+
+      // Return future, which will delete the Alloc later if not needed.
+      auto *F = new (FutArena) FutureAlloc(A);
+      PendingAllocs.push_back(F);
+      resultAttr.Exp = F;
       return;
     }
   }
@@ -83,16 +132,20 @@ void SSAPass::reduceAlloc(Alloc *Orig) {
 
 
 void SSAPass::reduceStore(Store *Orig) {
-  // Alloc is rewritten to nullptr above, so attr(0).Exp == nullptr
+  // Alloc is rewritten above, so grab the original
   auto* E0 = Orig->destination();
   auto* E1 = attr(1).Exp;
 
   if (Builder.currentBB()) {
     auto* A = dyn_cast<Alloc>(E0);
-    if (A) {
+    if (A && A->isLocal()) {
       // Update current var map.
       CurrentVarMap->at(A->allocID()) = E1;
-      resultAttr().Exp = nullptr;   // Remove Store instruction
+
+      // Return future, which will delete the Store later if not needed.
+      auto *F = new (FutArena) FutureStore(Orig, A);
+      PendingStores.push_back(F);
+      resultAttr().Exp = F;
       return;
     }
   }
@@ -101,24 +154,23 @@ void SSAPass::reduceStore(Store *Orig) {
 
 
 void SSAPass::reduceLoad(Load *Orig) {
-  // Alloc is rewritten to nullptr above, so attr(0).Exp == nullptr
+  // Alloc is rewritten nullptr above, so grab the original
   auto* E0 = Orig->pointer();
 
   if (Builder.currentBB()) {
-    auto* A = dyn_cast_or_null<Alloc>(E0);
-    if (A) {
+    auto* A = dyn_cast<Alloc>(E0);
+    if (A && A->isLocal()) {
       if (auto *Av = CurrentVarMap->at(A->allocID())) {
         // Replace load with value from current var map.
         resultAttr().Exp = Av;
-        return;
       }
       else {
-        // Replace load with future
-        auto *F = new (FutArena) FutureLoad(A);
-        Pending.push_back(F);
+        // Replace load with a future, which does lazy lookup.
+        auto *F = new (FutArena) FutureLoad(Orig, A);
+        PendingLoads.push_back(F);
         resultAttr().Exp = F;
-        return;
       }
+      return;
     }
   }
   Super::reduceLoad(Orig);
@@ -128,14 +180,37 @@ void SSAPass::reduceLoad(Load *Orig) {
 
 // This is the second pass of the SSA conversion, which looks up values for
 // all loads, and replaces the loads.
-void SSAPass::replacePendingLoads() {
+void SSAPass::replacePending() {
+  // Delete all local variables, but retain stack-allocated ones.
+  for (auto *F : PendingAllocs) {
+    if (F->AllocInstr->isLocal())
+      F->setResult(nullptr);
+    else
+      F->setResult(F->AllocInstr);
+  }
+  PendingAllocs.clear();
+
+  // Delete all stores to local variables.
+  for (auto *F : PendingStores) {
+    if (F->AllocInstr->isLocal())
+      F->setResult(nullptr);
+    else
+      F->setResult(F->StoreInstr);
+  }
+  PendingStores.clear();
+
+
   // Second pass:  Go back and replace all loads with phi nodes or values.
   // VarMapCache holds lookups that we've already done in the current block.
   CurrBB = Builder.currentCFG()->entry();
   unsigned MSize = BInfoMap[CurrBB->blockID()].AllocVarMap.size();
   VarMapCache.resize(MSize, nullptr);
 
-  for (auto *F : Pending) {
+  for (auto *F : PendingLoads) {
+    if (!F->AllocInstr->isLocal()) {
+      F->setResult(F->LoadInstr);
+    }
+
     SExpr *E = F->maybeGetResult();
     if (!E) {
       Alloc *A = F->AllocInstr;
@@ -151,6 +226,8 @@ void SSAPass::replacePendingLoads() {
       F->setResult(E);
     }
   }
+
+  PendingLoads.clear();
   VarMapCache.clear();
 }
 
