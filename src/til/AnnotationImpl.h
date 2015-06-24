@@ -57,6 +57,11 @@ public:
 
   static InstrNameAnnot *deserialize(BytecodeReader* B);
 
+  template <class Comp>
+  void compare(const InstrNameAnnot *A, Comp *C) const {
+    C->compareScalarValues(Name, A->Name);
+  }
+
 private:
   StringRef Name;
 };
@@ -93,6 +98,11 @@ public:
   void serialize(BytecodeWriter *B);
 
   static SourceLocAnnot *deserialize(BytecodeReader *B);
+
+  template <class Comp>
+  void compare(const SourceLocAnnot *A, Comp *C) const {
+    C->compareScalarValues(Position, A->Position);
+  }
 
 private:
   SourcePosition const Position;
@@ -133,6 +143,11 @@ public:
   void serialize(BytecodeWriter *B);
 
   static PreconditionAnnot *deserialize(BytecodeReader* B);
+
+  template <class Comp>
+  void compare(const PreconditionAnnot *A, Comp *C) const {
+    C->compare(Condition.get(), A->Condition.get());
+  }
 
 private:
   SExprRef Condition;
@@ -180,6 +195,13 @@ public:
   void serialize(BytecodeWriter *B);
 
   static TestTripletAnnot *deserialize(BytecodeReader *B);
+
+  template <class Comp>
+  void compare(const TestTripletAnnot *Ann, Comp *Co) const {
+    Co->compare(A.get(), Ann->A.get());
+    Co->compare(B.get(), Ann->B.get());
+    Co->compare(C.get(), Ann->C.get());
+  }
 
 private:
   SExprRef A;

@@ -39,17 +39,21 @@ void TypedEvaluator::exitCFG(SCFG *Cfg) {
 
   ncfg->computeNormalForm();
 
+  /*
   std::cout << "Lowered CFG: \n";
   TILDebugPrinter::print(ncfg, std::cout);
 
   std::cout << "Convert to SSA: \n";
+  */
   SSAPass ssaPass(Builder.arena());
   // indices start at 1, so we push debruin-1 onto the stack.
   ssaPass.scope()->enterNullScope(Builder.deBruinIndex()-1);
   // TODO: also enter builder scope
   ssaPass.traverseAll(ncfg);
 
+  /*
   TILDebugPrinter::print(ncfg, std::cout);
+  */
 }
 
 

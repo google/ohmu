@@ -32,41 +32,53 @@ namespace ohmu {
 /// Wraps a std::ostream to provide custom output for various things.
 class DiagnosticStream {
 public:
-  DiagnosticStream(std::ostream& s) : ss(s) { }
+  DiagnosticStream(std::ostream& s) : ss(s), emitted(false) { }
   ~DiagnosticStream() {
-    ss << "\n";
+    if (emitted)
+      ss << "\n";
   }
 
   DiagnosticStream& operator<<(bool b) {
+    emitted = true;
     if (b) ss << "true";
     else   ss << "false";
     return *this;
   }
 
   DiagnosticStream& operator<<(int i) {
+    emitted = true;
     ss << i;
     return *this;
   }
 
   DiagnosticStream& operator<<(unsigned i) {
+    emitted = true;
     ss << i;
     return *this;
   }
 
   DiagnosticStream& operator<<(const char* msg) {
+    emitted = true;
     ss << msg;
     return *this;
   }
 
   DiagnosticStream& operator<<(StringRef msg) {
+    emitted = true;
     ss << msg.c_str();
     return *this;
   }
 
-  std::ostream& outputStream() { return ss; }
+  std::ostream& outputStream() {
+    emitted = true;
+    return ss;
+  }
 
 public:
   std::ostream& ss;
+
+private:
+  bool emitted;
 };
 
 

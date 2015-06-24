@@ -19,6 +19,7 @@
 //
 // class CharStream:
 // class FileStream:         reads characters from a file.
+// class StringStream:       reads characters from a string.
 // class InteractiveStream:  reads characters line by line from stdin.
 //
 // class Lexer: base class for custom lexers.
@@ -64,6 +65,15 @@ private:
   FILE* file_;
 };
 
+// Convert a string to a stream of characters.
+class StringStream : public CharStream {
+public:
+  StringStream(const char* str) : str_(str) { }
+  virtual unsigned fillBuffer(char* buf, unsigned size);
+
+private:
+  const char* str_;
+};
 
 #ifndef _MSC_VER
 // Reads a stream of characters from standard input, using the readline library.

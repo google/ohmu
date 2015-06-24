@@ -180,12 +180,6 @@ TIL_CastOpcode typeConvertable(BaseType Vt1, BaseType Vt2);
 
 
 
-#define DECLARE_TRAVERSE_AND_COMPARE(X)                       \
-  template <class C>                                          \
-  typename C::CType compare(const X* E, C& Cmp) const;
-
-
-
 class BasicBlock;
 class Instruction;
 
@@ -453,7 +447,7 @@ public:
   /// Set the result of this future, and overwrite occurrences with the result.
   void setResult(SExpr *Res);
 
-  DECLARE_TRAVERSE_AND_COMPARE(Future)
+  SExpr *getResult() const { return Result; }
 
 private:
   FutureStatus Status;
@@ -487,8 +481,6 @@ public:
 
   /// Return the type of this instruction
   BaseType baseType() const { return BType; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(ScalarType)
 
 private:
   BaseType BType;
@@ -540,8 +532,6 @@ public:
   void setVarIndex(unsigned i) { VarIndex = i; }
   void setDefinition(SExpr *E) { Definition.reset(E); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(VarDecl)
-
 private:
   friend class Function;
   friend class Let;
@@ -581,9 +571,7 @@ public:
 
   void setBody(SExpr* B) { Body.reset(B); }
 
-  bool isSelfApplicable() { return VDecl->kind() == VarDecl::VK_SFun; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Function)
+  bool isSelfApplicable() const { return VDecl->kind() == VarDecl::VK_SFun; }
 
 private:
   SExprRefT<VarDecl> VDecl;
@@ -624,8 +612,6 @@ public:
 
   void setBody(SExpr* B) { Body.reset(B); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Code)
-
 private:
   SExprRef ReturnType;
   SExprRef Body;
@@ -649,8 +635,6 @@ public:
 
   SExpr *body() { return Body.get(); }
   const SExpr *body() const { return Body.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Field)
 
 private:
   SExprRef Range;
@@ -685,8 +669,6 @@ public:
   void     setModifier  (SlotKind K) { Flags = Flags | K;  }
   void     clearModifier(SlotKind K) { Flags = Flags & ~K; }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Slot)
-
 private:
   StringRef SlotName;
   SExprRef  Definition;
@@ -717,8 +699,6 @@ public:
 
   Slot* findSlot(StringRef S);
 
-  DECLARE_TRAVERSE_AND_COMPARE(Record)
-
 private:
   SExprRef  Parent;   ///< The record we inherit from
   SlotArray Slots;    ///< The slots in the record.
@@ -743,8 +723,6 @@ public:
   template<class T> LiteralT<T>* as() {
     return static_cast<LiteralT<T>*>(this);
   }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Literal)
 };
 
 
@@ -775,8 +753,6 @@ public:
   VarDecl* variableDecl() { return VDecl.get(); }
 
   StringRef varName() const { return VDecl->varName(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Variable)
 
 private:
   SExprRefT<VarDecl> VDecl;
@@ -816,8 +792,6 @@ public:
 
   SExpr *arg() { return Arg.get(); }
   const SExpr *arg() const { return Arg.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Apply)
 
 private:
   SExprRef Fun;
@@ -870,8 +844,6 @@ public:
 
   StringRef slotName() const { return SlotName; }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Project)
-
 private:
   SExprRef  Rec;
   StringRef SlotName;
@@ -897,8 +869,6 @@ public:
 
   SExpr *target() { return Target.get(); }
   const SExpr *target() const { return Target.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Call)
 
 private:
   SExprRef Target;
@@ -933,8 +903,6 @@ public:
 
   void setAllocID(unsigned I) { AllocID = I; }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Alloc)
-
 private:
   SExprRef InitExpr;
   unsigned AllocID;
@@ -952,8 +920,6 @@ public:
 
   SExpr *pointer() { return Ptr.get(); }
   const SExpr *pointer() const { return Ptr.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Load)
 
 private:
   SExprRef Ptr;
@@ -980,8 +946,6 @@ public:
   SExpr *source() { return Source.get(); }     // Value to store
   const SExpr *source() const { return Source.get(); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Store)
-
 private:
   SExprRef Dest;
   SExprRef Source;
@@ -1007,8 +971,6 @@ public:
 
   SExpr *index() { return Index.get(); }
   const SExpr *index() const { return Index.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(ArrayIndex)
 
 private:
   SExprRef Array;
@@ -1037,8 +999,6 @@ public:
   SExpr *index() { return Index.get(); }
   const SExpr *index() const { return Index.get(); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(ArrayAdd)
-
 private:
   SExprRef Array;
   SExprRef Index;
@@ -1062,8 +1022,6 @@ public:
 
   SExpr *expr() { return Expr0.get(); }
   const SExpr *expr() const { return Expr0.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(UnaryOp)
 
 private:
   SExprRef Expr0;
@@ -1094,8 +1052,6 @@ public:
   SExpr *expr1() { return Expr1.get(); }
   const SExpr *expr1() const { return Expr1.get(); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(BinaryOp)
-
 private:
   SExprRef Expr0;
   SExprRef Expr1;
@@ -1120,8 +1076,6 @@ public:
 
   SExpr *expr() { return Expr0.get(); }
   const SExpr *expr() const { return Expr0.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Cast)
 
 private:
   SExprRef Expr0;
@@ -1159,8 +1113,6 @@ public:
 
   Status status() const { return static_cast<Status>(Flags); }
   void setStatus(Status s) { Flags = s; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Phi)
 
 private:
   ValArray Values;
@@ -1218,8 +1170,6 @@ public:
   /// Return the list of basic blocks that this terminator can branch to.
   BlockArray successors() { return BlockArray(&TargetBlock, 1); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Goto)
-
 private:
   SExprRefT<BasicBlock> TargetBlock;
   unsigned Index;
@@ -1257,8 +1207,6 @@ public:
   /// Return the list of basic blocks that this terminator can branch to.
   BlockArray successors() { return BlockArray(Branches, 2); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(Branch)
-
 private:
   SExprRef              Condition;
   SExprRefT<BasicBlock> Branches[2];
@@ -1280,8 +1228,6 @@ public:
 
   SExpr *returnValue() { return Retval.get(); }
   const SExpr *returnValue() const { return Retval.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Return)
 
 private:
   SExprRef Retval;
@@ -1434,8 +1380,6 @@ public:
   /// Return the index of BB, or Predecessors.size if BB is not a predecessor.
   unsigned findPredecessorIndex(const BasicBlock *BB) const;
 
-  DECLARE_TRAVERSE_AND_COMPARE(BasicBlock)
-
   explicit BasicBlock(MemRegionRef A)
       : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
         TermInstr(nullptr),
@@ -1506,7 +1450,7 @@ public:
   /// Return the total number of instructions in the CFG.
   /// This is useful for building instruction side-tables;
   /// A call to SExpr::id() will return a number less than numInstructions().
-  unsigned numInstructions() { return NumInstructions; }
+  unsigned numInstructions() const { return NumInstructions; }
 
   inline void add(BasicBlock *BB) {
     assert(BB->CFGPtr == nullptr);
@@ -1519,8 +1463,6 @@ public:
 
   void renumber();         // assign unique ids to all instructions and blocks
   void computeNormalForm();
-
-  DECLARE_TRAVERSE_AND_COMPARE(SCFG)
 
   SCFG(MemRegionRef A, unsigned Nblocks)
       : SExpr(COP_SCFG), Arena(A), Blocks(A, Nblocks),
@@ -1543,8 +1485,6 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Undefined; }
 
   Undefined() : Instruction(COP_Undefined) { }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Undefined)
 };
 
 
@@ -1554,8 +1494,6 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Wildcard; }
 
   Wildcard() : SExpr(COP_Wildcard) {}
-
-  DECLARE_TRAVERSE_AND_COMPARE(Wildcard)
 };
 
 
@@ -1568,8 +1506,6 @@ public:
   Identifier(StringRef Id): SExpr(COP_Identifier), IdString(Id) { }
 
   StringRef idString() const { return IdString; }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Identifier)
 
 private:
   StringRef IdString;
@@ -1596,8 +1532,6 @@ public:
 
   SExpr *body() { return Body.get(); }
   const SExpr *body() const { return Body.get(); }
-
-  DECLARE_TRAVERSE_AND_COMPARE(Let)
 
 private:
   SExprRefT<VarDecl> VDecl;
@@ -1630,8 +1564,6 @@ public:
   SExpr *elseExpr() { return ElseExpr.get(); }     // Value to store
   const SExpr *elseExpr() const { return ElseExpr.get(); }
 
-  DECLARE_TRAVERSE_AND_COMPARE(IfThenElse)
-
 private:
   SExprRef Condition;
   SExprRef ThenExpr;
@@ -1642,9 +1574,6 @@ private:
 inline bool Goto::isBackEdge() const {
   return TargetBlock->blockID() <= block()->blockID();
 }
-
-
-#undef DECLARE_TRAVERSE_AND_COMPARE
 
 }  // end namespace til
 }  // end namespace ohmu

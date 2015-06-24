@@ -31,7 +31,7 @@ void printSExpr(SExpr* e) {
 
 
 int main(int argc, const char** argv) {
-  if (argc == 0) {
+  if (argc == 1) {
     std::cerr << "No file to parse.\n";
     return 0;
   }
@@ -45,7 +45,13 @@ int main(int argc, const char** argv) {
     return -1;
 
   // Parse the ohmu source file.
-  success = driver.parseDefinitions(&global, argv[1]);
+  if (strcmp("--",argv[1]) == 0) {
+    InteractiveStream IS("Ohmu > ", ".... > ");
+    success = driver.parseDefinitions(&global, IS);
+  }
+  else {
+    success = driver.parseDefinitions(&global, argv[1]);
+  }
   if (!success)
     return -1;
 

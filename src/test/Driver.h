@@ -48,6 +48,7 @@ public:
   bool initParser(FILE* grammarFile);
   bool initParser(const char* grammarFileName);
 
+  bool parseDefinitions(Global *global, CharStream &stream);
   bool parseDefinitions(Global *global, FILE *file);
   bool parseDefinitions(Global *global, const char* fname);
 
@@ -90,13 +91,10 @@ bool Driver::initParser(const char* grammarFileName) {
 
 
 
-bool Driver::parseDefinitions(Global *global, FILE *file) {
-  // Make sure we parse results into the proper global arenas.
-  tilParser.setArenas(global->StringArena, global->ParseArena);
 
-  // Parse file.
-  FileStream fs(file);
-  lexer.setStream(&fs);
+bool Driver::parseDefinitions(Global *global, CharStream &stream) {
+  tilParser.setArenas(global->StringArena, global->ParseArena);
+  lexer.setStream(&stream);
   // tilParser.setTrace(true);
   ParseResult result = tilParser.parse(startRule);
   if (tilParser.parseError())
@@ -111,6 +109,12 @@ bool Driver::parseDefinitions(Global *global, FILE *file) {
   global->addDefinitions(*v);
   delete v;
   return true;
+}
+
+bool Driver::parseDefinitions(Global *global, FILE *file) {
+  // Parse file.
+  FileStream fs(file);
+  return parseDefinitions(global, fs);
 }
 
 

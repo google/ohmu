@@ -34,6 +34,18 @@ unsigned FileStream::fillBuffer(char* buf, unsigned size) {
   return static_cast<unsigned>(n);
 }
 
+unsigned StringStream::fillBuffer(char* buf, unsigned size)  {
+  if (str_[0] == 0)
+    return 0;
+  unsigned i = 0;
+  while (i < size && str_[0] != 0) {
+    buf[i] = str_[0];
+    ++i;
+    ++str_;
+  }
+  return i;
+}
+
 
 #ifndef _MSC_VER
 bool InteractiveStream::readlineLibraryInitialized_ = false;
