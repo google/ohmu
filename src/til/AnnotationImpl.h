@@ -78,7 +78,7 @@ public:
     return A->kind() == ANNKIND_SourceLocAnnot;
   }
 
-  SourcePosition const position() const { return Position; }
+  SourcePosition position() const { return Position; }
 
   template <class Trav>
   void traverse(Trav *T) {
@@ -158,7 +158,7 @@ private:
 class TestTripletAnnot : public Annotation {
 public:
   TestTripletAnnot(SExpr *A, SExpr *B, SExpr *C) :
-    Annotation(ANNKIND_TestTripletAnnot), A(A), B(B), C(C) {}
+    Annotation(ANNKIND_TestTripletAnnot), ExpA(A), ExpB(B), ExpC(C) {}
 
   static bool classof(const Annotation *A) {
     return A->kind() == ANNKIND_TestTripletAnnot;
@@ -166,9 +166,9 @@ public:
 
   template <class Trav>
   void traverse(Trav *T) {
-    T->self()->traverseArg(A.get());
-    T->self()->traverseArg(B.get());
-    T->self()->traverseArg(C.get());
+    T->self()->traverseArg(ExpA.get());
+    T->self()->traverseArg(ExpB.get());
+    T->self()->traverseArg(ExpC.get());
     T->self()->template reduceAnnotationT<TestTripletAnnot>(this);
   }
 
@@ -176,19 +176,19 @@ public:
       const std::vector<SExpr*> &SubExprs);
 
   void rewrite(const std::vector<SExpr*> &SubExprs) {
-    A.reset(SubExprs.at(0));
-    B.reset(SubExprs.at(1));
-    C.reset(SubExprs.at(2));
+    ExpA.reset(SubExprs.at(0));
+    ExpB.reset(SubExprs.at(1));
+    ExpC.reset(SubExprs.at(2));
   }
 
   template <class Printer, class StreamType>
   void print(Printer *P, StreamType &SS) const {
     SS << "TestTriples(";
-    Printer::print(A.get(), SS);
+    Printer::print(ExpA.get(), SS);
     SS << ", ";
-    Printer::print(B.get(), SS);
+    Printer::print(ExpB.get(), SS);
     SS << ", ";
-    Printer::print(C.get(), SS);
+    Printer::print(ExpC.get(), SS);
     SS << ")";
   }
 
@@ -198,15 +198,15 @@ public:
 
   template <class Comp>
   void compare(const TestTripletAnnot *Ann, Comp *Co) const {
-    Co->compare(A.get(), Ann->A.get());
-    Co->compare(B.get(), Ann->B.get());
-    Co->compare(C.get(), Ann->C.get());
+    Co->compare(ExpA.get(), Ann->ExpA.get());
+    Co->compare(ExpB.get(), Ann->ExpB.get());
+    Co->compare(ExpC.get(), Ann->ExpC.get());
   }
 
 private:
-  SExprRef A;
-  SExprRef B;
-  SExprRef C;
+  SExprRef ExpA;
+  SExprRef ExpB;
+  SExprRef ExpC;
 };
 
 }  // end namespace ohmu

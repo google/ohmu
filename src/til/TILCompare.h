@@ -64,8 +64,6 @@ public:
     case COP_##X:                                                             \
       self()->compare##X(cast<X>(E1), cast<X>(E2)); break;
 #include "TILOps.def"
-    default:
-      self()->fail();
     }
     self()->compareAllAnnotations(E1->annotations(), E2->annotations());
   }
@@ -137,8 +135,6 @@ public:
     case ANNKIND_##X:                                                          \
       cast<X>(A1)->compare(cast<X>(A2), self()); break;
 #include "TILAnnKinds.def"
-    default:
-      self()->fail();
     }
   }
 
@@ -148,8 +144,6 @@ public:
     case ANNKIND_##X:                                                          \
       return self()->ignoreAnnotation(cast<X>(A));
 #include "TILAnnKinds.def"
-    default:
-      return false;
     }
   }
 

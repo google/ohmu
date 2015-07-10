@@ -233,7 +233,7 @@ public:
 
   void addAnnotation(Annotation *A);
 
-  Annotation *const annotations() const { return Annotations; }
+  Annotation *annotations() const { return Annotations; }
 
 protected:
   SExpr(TIL_Opcode Op, unsigned char SubOp = 0)
@@ -683,7 +683,7 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_Record; }
 
   Record(MemRegionRef A, unsigned NSlots, SExpr* P = nullptr)
-    : PValue(COP_Record), Parent(P), Slots(A, NSlots), SMap(nullptr) {}
+    : PValue(COP_Record), Parent(P), Slots(A, NSlots) {}
 
   void rewrite(SExpr *P) { Parent.reset(P); }
 
@@ -700,7 +700,6 @@ public:
 private:
   SExprRef  Parent;   ///< The record we inherit from
   SlotArray Slots;    ///< The slots in the record.
-  SlotMap*  SMap;     ///< A map from slot names to indices.
 };
 
 

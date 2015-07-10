@@ -314,7 +314,7 @@ public:
 
   std::vector<SExpr*> attributesAsSExpr() {
     std::vector<SExpr*> Res;
-    for (int i = 0; i < this->numAttrs(); ++i) {
+    for (unsigned int i = 0; i < this->numAttrs(); ++i) {
       Res.push_back(this->attr(i).Exp);
     }
     return Res;

@@ -235,13 +235,11 @@ SExpr* makeBranch(CFGBuilder& bld) {
   // declare self parameter for enclosing module
   auto *self_vd = bld.newVarDecl(VarDecl::VK_SFun, "self", nullptr);
   bld.enterScope(self_vd);
-  auto *self = bld.newVariable(self_vd);
 
   // declare parameters for sum function
   auto *int_ty = bld.newScalarType(BaseType::getBaseType<int>());
   auto *vd_n = bld.newVarDecl(VarDecl::VK_Fun, "n", int_ty);
   bld.enterScope(vd_n);
-  auto *n = bld.newVariable(vd_n);
 
   bld.beginCFG(nullptr);
   auto *cfg = bld.currentCFG();

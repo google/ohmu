@@ -270,9 +270,9 @@ SExpr *simpleParse(Global &G, const char *inp) {
   return G.global();
 }
 
-int tests = 0;
-int successTests = 0;
-int failedTests = 0;
+static int tests = 0;
+static int successTests = 0;
+static int failedTests = 0;
 
 void testEquals(const SExpr *E1, const SExpr *E2, bool exp) {
 
