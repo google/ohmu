@@ -8,17 +8,23 @@ diff -u "$CLANG_INC"/base/MutArrayRef.h  src/base/MutArrayRef.h
 diff -u "$CLANG_INC"/base/ArrayTree.h    src/base/ArrayTree.h
 
 diff -u "$CLANG_INC"/TILOps.def          src/til/TILOps.def
+diff -u "$CLANG_INC"/TILAnnKinds.def     src/til/TILAnnKinds.def
 diff -u "$CLANG_INC"/TILBaseType.h       src/til/TILBaseType.h
 diff -u "$CLANG_INC"/TIL.h               src/til/TIL.h
 diff -u "$CLANG_INC"/TILTraverse.h       src/til/TILTraverse.h
 diff -u "$CLANG_INC"/TILCompare.h        src/til/TILCompare.h
 diff -u "$CLANG_INC"/TILPrettyPrint.h    src/til/TILPrettyPrint.h
+diff -u "$CLANG_INC"/Annotation.h        src/til/Annotation.h
+diff -u "$CLANG_INC"/AnnotationImpl.h    src/til/AnnotationImpl.h
 diff -u "$CLANG_INC"/CFGBuilder.h        src/til/CFGBuilder.h
 diff -u "$CLANG_INC"/AttributeGrammar.h  src/til/AttributeGrammar.h
 diff -u "$CLANG_INC"/CopyReducer.h       src/til/CopyReducer.h
 diff -u "$CLANG_INC"/InplaceReducer.h    src/til/InplaceReducer.h
 diff -u "$CLANG_INC"/SSAPass.h           src/til/SSAPass.h
+diff -u "$CLANG_INC"/Bytecode.h          src/til/Bytecode.h
 
 diff -u "$CLANG_LIB"/TIL.cpp             src/til/TIL.cpp
 diff -u "$CLANG_LIB"/CFGBuilder.cpp      src/til/CFGBuilder.cpp
 diff -u "$CLANG_LIB"/SSAPass.cpp         src/til/SSAPass.cpp
+diff -u "$CLANG_LIB"/AnnotationImpl.cpp  src/til/AnnotationImpl.cpp
+diff -u "$CLANG_LIB"/Bytecode.cpp        src/til/Bytecode.cpp
