@@ -16,7 +16,7 @@ namespace til {
 
 void ByteStreamWriterBase::flush() {
   if (Pos > 0)
-    writeData(Buffer, Pos);
+    writeData(Buffer.data(), Pos);
   Pos = 0;
 }
 
@@ -30,12 +30,12 @@ void ByteStreamReaderBase::refill() {
 
     int len = length();
     if (len > 0)
-      memcpy(Buffer, Buffer + Pos, len);
+      memcpy(Buffer.data(), Buffer.data() + Pos, len);
     Pos = 0;
     BufferLen = len;
   }
 
-  int read = readData(Buffer + BufferLen, BufferSize - BufferLen);
+  int read = readData(Buffer.data() + BufferLen, BufferSize - BufferLen);
   BufferLen += read;
   if (BufferLen < BufferSize)
     Eof = true;
@@ -64,7 +64,7 @@ void ByteStreamWriterBase::writeBytes(const void *Data, int64_t Size) {
   if (length() - Size <= BytecodeBase::MaxRecordSize)
     flush();
 
-  memcpy(Buffer + Pos, Data, Size);
+  memcpy(Buffer.data() + Pos, Data, Size);
   Pos += Size;
   // Size < BufferSize/2, so we have at least half the buffer left.
 }
@@ -73,7 +73,7 @@ void ByteStreamWriterBase::writeBytes(const void *Data, int64_t Size) {
 void ByteStreamReaderBase::readBytes(void *Data, int64_t Size) {
   int len = length();
   if (Size > len) {
-    memcpy(Data, Buffer + Pos, len);   // Copy out current buffer.
+    memcpy(Data, Buffer.data() + Pos, len);   // Copy out current buffer.
     Size = Size - len;
     Data = reinterpret_cast<char*>(Data) + len;
 
@@ -97,7 +97,7 @@ void ByteStreamReaderBase::readBytes(void *Data, int64_t Size) {
   }
 
   // Size < length() at this point.
-  memcpy(Data, Buffer + Pos, Size);
+  memcpy(Data, Buffer.data() + Pos, Size);
   Pos += Size;
   if (length() < BytecodeBase::MaxRecordSize)
     refill();

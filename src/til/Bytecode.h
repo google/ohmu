@@ -71,7 +71,7 @@ public:
 /// a destination.  (E.g. file, network, etc.)
 class ByteStreamWriterBase {
 public:
-  ByteStreamWriterBase() : Pos(0) { }
+  ByteStreamWriterBase() : Pos(0), Buffer(BufferSize) { }
 
   virtual ~ByteStreamWriterBase() {
     assert(Pos == 0 && "Must flush writer before destruction.");
@@ -126,7 +126,7 @@ private:
   static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
 
   int Pos;
-  uint8_t Buffer[BufferSize];
+  std::vector<uint8_t> Buffer;
 };
 
 
@@ -136,7 +136,8 @@ private:
 /// a source.  (E.g. file, network, etc.)
 class ByteStreamReaderBase {
 public:
-  ByteStreamReaderBase() : BufferLen(0), Pos(0), Eof(false) { }
+  ByteStreamReaderBase() : BufferLen(0), Pos(0), Eof(false), Error(false),
+  Buffer(BufferSize) { }
 
   virtual ~ByteStreamReaderBase() { }
 
@@ -200,7 +201,7 @@ private:
   int     Pos;
   bool    Eof;
   bool    Error;
-  uint8_t Buffer[BufferSize];
+  std::vector<uint8_t> Buffer;
 };
 
 
