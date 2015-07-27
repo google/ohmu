@@ -26,3 +26,14 @@ add_dependencies(test_parser ohmu_grammar)
 #add_executable(test_llvm test_llvm.cpp)
 #target_link_libraries(test_llvm base parser til backend_llvm ${llvm_libs})
 #add_dependencies(test_llvm ohmu_grammar)
+
+add_executable(test_lsa test_lsa.cpp test_lsa_callgraph.cpp)
+
+target_link_libraries(test_lsa lsa)
+
+add_custom_target(run_test_lsa)
+add_custom_command(
+    TARGET  run_test_lsa
+    DEPENDS run_test_lsa.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/run_test_lsa.sh ${CMAKE_CURRENT_BINARY_DIR}/run_test_lsa.sh)
+add_dependencies(test_lsa run_test_lsa)
