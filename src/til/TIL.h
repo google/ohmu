@@ -1301,8 +1301,9 @@ public:
   unsigned firstInstrID() {
     if (Args.size() > 0)
       return Args[0]->instrID();
-    else if (Instrs.size() > 0)
-      return Instrs[0]->instrID();
+    for (auto *Instr : Instrs)
+      if (Instr)
+        return Instr->instrID();
     return 0;
   }
 
@@ -1406,7 +1407,7 @@ private:
                              // IDs are in topological order.
   PredArray   Predecessors;  // Predecessor blocks in the CFG.
   ArgArray    Args;          // Phi nodes.  One argument per predecessor.
-  InstrArray  Instrs;        // Instructions.
+  InstrArray  Instrs;        // Instructions (elements may be null).
   Terminator* TermInstr;     // Terminating instruction
 
   unsigned     PostBlockID;  // ID in post-topological order
