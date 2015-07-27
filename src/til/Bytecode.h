@@ -137,7 +137,7 @@ private:
 class ByteStreamReaderBase {
 public:
   ByteStreamReaderBase() : BufferLen(0), Pos(0), Eof(false), Error(false),
-  Buffer(BufferSize) { }
+      Buffer(BufferSize) { }
 
   virtual ~ByteStreamReaderBase() { }
 

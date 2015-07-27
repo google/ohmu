@@ -20,7 +20,6 @@ include_directories(${CLANG_INCLUDE_DIRS})
 
 
 add_definitions(${LLVM_DEFINITIONS})
-add_definitions("-fno-rtti -std=c++11 -fno-exceptions")
 link_directories("${LLVM_DIR}/../../../lib")
 
 message(STATUS "include ${LLVM_DIR}/../../../tools/clang/include")
@@ -38,6 +37,13 @@ message(STATUS "include ${LLVM_DIR}/../../../tools/clang/include")
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   add_definitions(-std=c++11)
   add_definitions(-fno-exceptions)
+  add_definitions("-fno-rtti")
+endif()
+
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  add_definitions(-std=c++11)
+  add_definitions(-fno-exceptions)
+  add_definitions("-fno-rtti")
 endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
