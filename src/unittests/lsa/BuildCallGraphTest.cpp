@@ -1,8 +1,9 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
-#include "lsa/BuildCallGraph.h"
 #include "gtest/gtest.h"
+#include "lsa/BuildCallGraph.h"
+
 
 /// Helper function running actual test. Creates a virtual file with the
 /// specified content and runs the call graph generation on it. It then checks
