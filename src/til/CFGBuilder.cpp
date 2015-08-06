@@ -163,25 +163,6 @@ BasicBlock* CFGBuilder::newBlock(unsigned Nargs, unsigned Npreds) {
 }
 
 
-Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
-  assert(CurrentBB && "No current block.");
-
-  if (B0) {
-    assert(B0->numArguments() == 0 && "Cannot branch to a block with args.");
-    B0->addPredecessor(CurrentBB);
-  }
-  if (B1) {
-    assert(B1->numArguments() == 0 && "Cannot branch to a block with args.");
-    B1->addPredecessor(CurrentBB);
-  }
-
-  // Terminate current basic block with a branch
-  auto *Nt = new (Arena) Branch(Cond, B0, B1);
-  endBlock(Nt);
-  return Nt;
-}
-
-
 void CFGBuilder::setPhiArgument(Phi* Ph, SExpr* E, unsigned Idx) {
   if (!E)
     return;
@@ -243,6 +224,45 @@ Goto* CFGBuilder::newGoto(BasicBlock *B, ArrayRef<SExpr*> Args) {
   endBlock(Nt);
   return Nt;
 }
+
+
+Branch* CFGBuilder::newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1) {
+  assert(CurrentBB && "No current block.");
+
+  if (B0) {
+    assert(B0->numArguments() == 0 && "Cannot branch to a block with args.");
+    B0->addPredecessor(CurrentBB);
+  }
+  if (B1) {
+    assert(B1->numArguments() == 0 && "Cannot branch to a block with args.");
+    B1->addPredecessor(CurrentBB);
+  }
+
+  // Terminate current basic block with a branch
+  auto *Nt = new (Arena) Branch(Cond, B0, B1);
+  endBlock(Nt);
+  return Nt;
+}
+
+
+Switch* CFGBuilder::newSwitch(SExpr *Cond, int numCases) {
+  assert(CurrentBB && "No current block.");
+
+  // Terminate current basic block with a branch
+  auto *Nt = new (Arena) Switch(Cond, Arena, numCases);
+  endBlock(Nt);
+  return Nt;
+}
+
+
+void CFGBuilder::addSwitchCase(Switch* S, SExpr* Lab, BasicBlock *B) {
+  if (B && S->block()) {
+    assert(B->numArguments() == 0 && "Cannot branch to a block with args.");
+    B->addPredecessor(S->block());
+  }
+  S->addCase(Lab, B);
+}
+
 
 
 }  // end namespace til

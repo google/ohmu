@@ -27,6 +27,7 @@ TIL_OPCODE_DEF(Code)
 TIL_OPCODE_DEF(Field)
 TIL_OPCODE_DEF(Slot)
 TIL_OPCODE_DEF(Record)
+TIL_OPCODE_DEF(Array)
 TIL_OPCODE_DEF(ScalarType)
 
 // CFG constructs
@@ -55,6 +56,7 @@ TIL_OPCODE_DEF(Phi)
 // Terminator instructions
 TIL_OPCODE_DEF(Goto)
 TIL_OPCODE_DEF(Branch)
+TIL_OPCODE_DEF(Switch)
 TIL_OPCODE_DEF(Return)
 
 // Future and Undefined are instructions for rewriting purposes.

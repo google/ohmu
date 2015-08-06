@@ -333,6 +333,7 @@ public:
   void reduceField(Field *E);
   void reduceSlot(Slot *E);
   void reduceRecord(Record *E);
+  void reduceArray(Array *E);
   void reduceScalarType(ScalarType *E);
   void reduceSCFG(SCFG *E);
   void reduceBasicBlock(BasicBlock *E);
@@ -352,6 +353,7 @@ public:
   void reducePhi(Phi *E);
   void reduceGoto(Goto *E);
   void reduceBranch(Branch *E);
+  void reduceSwitch(Switch *E);
   void reduceReturn(Return *E);
   void reduceUndefined(Undefined *E);
   void reduceWildcard(Wildcard *E);
@@ -456,6 +458,7 @@ protected:
   void readField();
   void readSlot();
   void readRecord();
+  void readArray();
   void readScalarType();
   void readSCFG();
   void readBasicBlock();
@@ -475,6 +478,7 @@ protected:
   void readPhi();
   void readGoto();
   void readBranch();
+  void readSwitch();
   void readReturn();
   void readFuture() { }        ///< Can't happen.
   void readUndefined();

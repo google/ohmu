@@ -109,6 +109,12 @@ public:
     Data[Size++] = Elem;
   }
 
+  template<typename... Params>
+  void emplace_back(Params... Ps) {
+    assert(Size < Capacity);
+    new (&Data[Size++]) T(Ps...);
+  }
+
   /// drop last n elements from array
   void drop(unsigned n = 0) {
     assert(Size > n);

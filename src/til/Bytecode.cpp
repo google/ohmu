@@ -480,6 +480,13 @@ void BytecodeReader::readRecord() {
 }
 
 
+void BytecodeWriter::reduceArray(Array *E) {
+  writeOpcode(COP_Array);
+}
+
+void BytecodeReader::readArray() { }
+
+
 void BytecodeWriter::reduceScalarType(ScalarType *E) {
   writeOpcode(COP_ScalarType);
   writeBaseType(E->baseType());
@@ -741,6 +748,15 @@ void BytecodeReader::readBranch() {
   Builder.newBranch(arg(0), Bbt, Bbe);
   drop(1);
   // No need to push terminator
+}
+
+
+void BytecodeWriter::reduceSwitch(Switch *E) {
+  writeOpcode(COP_Switch);
+}
+
+void BytecodeReader::readSwitch() {
+
 }
 
 

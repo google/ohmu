@@ -703,7 +703,6 @@ private:
 };
 
 
-
 template <class T> class LiteralT;
 
 /// Base class for literal values.
@@ -734,6 +733,61 @@ public:
 
 private:
   T Val;
+};
+
+
+/// An array, which is a sequence of equal-sized elements that are stored
+/// consecutively in memory.
+class Array : public PValue {
+public:
+  typedef ArrayTree<SExprRef> ElemArray;
+
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Array; }
+
+  /// Create an array type.
+  Array(SExpr* ETyp, SExpr* Sz)
+    : PValue(COP_Array), ElemType(ETyp), ArrSize(Sz), Concrete(false)
+  { }
+
+  /// Create a concrete array value.
+  Array(SExpr* ETyp, LiteralT<uint64_t>* Sz, MemRegionRef A)
+    : PValue(COP_Array), ElemType(ETyp), ArrSize(Sz),
+      Elements(A, Sz->value()), Concrete(true)
+  { }
+
+  void rewrite(SExpr *ETyp, SExpr *Sz) {
+    ElemType.reset(ETyp);
+    ArrSize.reset(Sz);
+  }
+
+  /// Return true if this is an array value, or false if it's an array type.
+  bool concrete() const { return Concrete; }
+
+  /// Return the type of elements in the array.
+  SExpr* elemType() { return ElemType.get(); }
+  const SExpr* elemType() const { return ElemType.get(); }
+
+  /// Return an expression which holds the size of the array.
+  SExpr* sizeExpr() { return ArrSize.get(); }
+  const SExpr* sizeExpr() const { return ArrSize.get(); }
+
+  /// Return the number of elements for array constants, or zero for an
+  /// array type.
+  uint64_t numElements() const { return Elements.size(); }
+
+  /// Return the i^th element.
+  SExpr* element(unsigned i) { return Elements[i].get(); }
+  const SExpr* element(unsigned i) const { return Elements[i].get(); }
+
+  /// Return a reference to the array of elements.
+  ElemArray& elements() { return Elements; }
+  const ElemArray& elements() const { return Elements; }
+
+private:
+  SExprRef  ElemType;
+  SExprRef  ArrSize;
+  ElemArray Elements;
+  bool      Concrete;
 };
 
 
@@ -1159,11 +1213,6 @@ public:
   Goto(BasicBlock *B, unsigned I)
       : Terminator(COP_Goto), TargetBlock(B), Index(I) {}
 
-  void rewrite(BasicBlock* B, unsigned Idx) {
-    TargetBlock.reset(B);
-    Index = Idx;
-  }
-
   const BasicBlock *targetBlock() const { return TargetBlock.get(); }
   BasicBlock *targetBlock() { return TargetBlock.get(); }
 
@@ -1194,11 +1243,7 @@ public:
     Branches[1].reset(E);
   }
 
-  void rewrite(SExpr *C, BasicBlock *B1, BasicBlock *B2) {
-    Condition.reset(C);
-    Branches[0].reset(B1);
-    Branches[1].reset(B2);
-  }
+  void rewrite(SExpr *C) { Condition.reset(C); }
 
   const SExpr *condition() const { return Condition.get(); }
   SExpr *condition() { return Condition.get(); }
@@ -1215,6 +1260,59 @@ public:
 private:
   SExprRef              Condition;
   SExprRefT<BasicBlock> Branches[2];
+};
+
+
+/// A switch statement, which is an n-way branch for non-boolean data types.
+/// Like branch, the target blocks must be child-blocks.
+class Switch : public Terminator {
+public:
+  static bool classof(const SExpr *E) { return E->opcode() == COP_Switch; }
+
+  Switch(SExpr *C, MemRegionRef A, int NumC)
+      : Terminator(COP_Switch), Condition(C), Labels(A, NumC), Cases(A, NumC)
+  { }
+
+  void rewrite(SExpr *C) { Condition.reset(C); }
+  void rewriteLabel(int i, SExpr* Lab) { Labels[i].reset(Lab); }
+
+  /// Return the number of cases.
+  int numCases() const { return Cases.size(); }
+
+  /// Return the conditional expression
+  const SExpr *condition() const { return Condition.get(); }
+  SExpr *condition() { return Condition.get(); }
+
+  /// Return the basic block for i^th case
+  const BasicBlock *caseBlock(int i) const { return Cases[i].get(); }
+  BasicBlock *caseBlock(int i) { return Cases[i].get(); }
+
+  /// Return the label for the i^th case
+  /// A Wildcard signifies the default case
+  const SExpr *label(int i) const { return Labels[i].get(); }
+  SExpr *label(int i) { return Labels[i].get(); }
+
+  /// Set the label and block for the i^th case.
+  void setCase(int i, SExpr* Lab, BasicBlock* Cb) {
+    Labels[i].reset(Lab);
+    Cases[i].reset(Cb);
+  }
+
+  /// Add a new case.
+  void addCase(SExpr* Lab, BasicBlock* B) {
+    Labels.emplace_back(Lab);
+    Cases.emplace_back(B);
+  }
+
+  BlockArray successors() { return BlockArray(&Cases[0], Cases.size()); }
+
+private:
+  SExprRef Condition;
+
+  // TODO: this should really use an ArrayTree, except that we need to
+  // implement successors()
+  SimpleArray<SExprRef> Labels;
+  SimpleArray<SExprRefT<BasicBlock>> Cases;
 };
 
 
@@ -1243,6 +1341,7 @@ inline Terminator::BlockArray Terminator::successors() {
   switch (opcode()) {
     case COP_Goto:   return cast<Goto>(this)->successors();
     case COP_Branch: return cast<Branch>(this)->successors();
+    case COP_Switch: return cast<Switch>(this)->successors();
     case COP_Return: return cast<Return>(this)->successors();
     default:
       return BlockArray();

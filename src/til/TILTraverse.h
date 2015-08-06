@@ -274,6 +274,16 @@ void Traversal<S>::traverseRecord(Record *E) {
 }
 
 template <class S>
+void Traversal<S>::traverseArray(Array *E) {
+  self()->traverse(E->elemType(), TRV_Type);
+  self()->traverseArg(E->sizeExpr());
+  for (auto &El : E->elements()) {
+    self()->traverseArg(El.get());
+  }
+  self()->reduceArray(E);
+}
+
+template <class S>
 void Traversal<S>::traverseScalarType(ScalarType *E) {
   self()->reduceScalarType(E);
 }
@@ -407,6 +417,15 @@ template <class S>
 void Traversal<S>::traverseBranch(Branch *E) {
   self()->traverseArg(E->condition());
   self()->reduceBranch(E);
+}
+
+template <class S>
+void Traversal<S>::traverseSwitch(Switch *E) {
+  self()->traverseArg(E->condition());
+  for (int i=0,n=E->numCases(); i < n; ++i) {
+    self()->traverseArg(E->label(i));
+  }
+  self()->reduceSwitch(E);
 }
 
 template <class S>

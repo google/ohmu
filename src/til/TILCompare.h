@@ -145,6 +145,7 @@ public:
       return self()->ignoreAnnotation(cast<X>(A));
 #include "TILAnnKinds.def"
     }
+    return true;  // Kill gcc warning
   }
 
   template <class Ann>
@@ -173,7 +174,7 @@ public:
     }
   }
 
-public:
+protected:
   // Relate blocks with possibly different IDs.
   std::vector<size_t> BlockMap;
 
@@ -238,10 +239,27 @@ void Comparator<S,C>::compareRecord(const Record *E1, const Record *E2) {
   self()->compare(E1->parent(), E2->parent());
 }
 
+template<class S, class C>
+void Comparator<S,C>::compareArray(const Array *E1, const Array *E2) {
+  self()->compare(E1->elemType(), E2->elemType());
+  self()->compare(E1->sizeExpr(), E2->sizeExpr());
+
+  uint64_t n = E1->numElements();
+  if (E2->numElements() != n)
+    self()->fail();
+
+  for (uint64_t i = 0; i < n; ++i) {
+    if (!self()->success())
+      break;
+    self()->compare(E1->element(i), E2->element(i));
+  }
+}
+
 template <class S, class C>
 void Comparator<S,C>::compareScalarType(const ScalarType *E1,
     const ScalarType *E2) {
-  self()->compareScalarValues(E1->baseType().asUInt16(), E2->baseType().asUInt16());
+  self()->compareScalarValues(E1->baseType().asUInt16(),
+                              E2->baseType().asUInt16());
 }
 
 
@@ -369,6 +387,9 @@ void Comparator<S,C>::compareGoto(const Goto *E1, const Goto *E2) {
     auto Iter1 = A1.begin();
     auto Iter2 = A2.begin();
     while (Iter1 != A1.end()) {
+      if (!self()->success())
+        break;
+
       self()->compare((*Iter1)->values().at(E1->phiIndex()).get(),
           (*Iter2)->values().at(E2->phiIndex()).get());
       ++Iter1;
@@ -384,6 +405,22 @@ void Comparator<S,C>::compareBranch(const Branch *E1, const Branch *E2) {
       E2->thenBlock()->blockID());
   self()->blockMapCompare(E1->elseBlock()->blockID(),
       E2->elseBlock()->blockID());
+}
+
+template <class S, class C>
+void Comparator<S,C>::compareSwitch(const Switch *E1, const Switch *E2) {
+  self()->compare(E1->condition(), E2->condition());
+  int Nc = E1->numCases();
+  if (E2->numCases() != Nc)
+    self()->fail();
+
+  for (int i = 0; i < Nc; ++i) {
+    if (!self()->success())
+      break;
+    self()->compare(E1->label(i), E2->label(i));
+    self()->blockMapCompare(E1->caseBlock(i)->blockID(),
+                            E2->caseBlock(i)->blockID());
+  }
 }
 
 template <class S, class C>
@@ -541,7 +578,6 @@ public:
           cast<Variable>(E2)->variableDecl()->kind() == VarDecl::VK_Let)
         this->self()->compare(E1,
             cast<Variable>(E2)->variableDecl()->definition());
-
       else
         this->self()->compareOpcodes(E1->opcode(), E2->opcode());
     } else {

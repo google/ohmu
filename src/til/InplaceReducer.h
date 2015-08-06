@@ -140,6 +140,20 @@ public:
     this->resultAttr().Exp = Orig;
   }
 
+  void reduceArray(Array *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Orig->rewrite(E0, E1);
+
+    if (Orig->concrete()) {
+      uint64_t Nelems = Orig->numElements();
+      for (uint64_t i = 0; i < Nelems; ++i) {
+        Orig->elements()[i].reset( this->attr(i+2).Exp );
+      }
+    }
+    this->resultAttr().Exp = Orig;
+  }
+
   void reduceScalarType(ScalarType *Orig) {
     this->resultAttr().Exp = Orig;
   }
@@ -260,9 +274,19 @@ public:
 
   void reduceBranch(Branch *Orig) {
     auto *E0 = this->attr(0).Exp;
-    BasicBlock *B0 = Orig->thenBlock();
-    BasicBlock *B1 = Orig->elseBlock();
-    Orig->rewrite(E0, B0, B1);
+    Orig->rewrite(E0);
+    Builder.endBlock(Orig);
+  }
+
+  void reduceSwitch(Switch *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    Orig->rewrite(E0);
+
+    int Nc = Orig->numCases();
+    for (int i=0; i < Nc; ++i) {
+      Orig->rewriteLabel(i, this->attr(i+1).Exp);
+    }
+
     Builder.endBlock(Orig);
   }
 

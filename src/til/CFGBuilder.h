@@ -130,6 +130,12 @@ public:
   Record* newRecord(unsigned NSlots = 0, SExpr* Parent = nullptr) {
     return new (Arena) Record(Arena, NSlots, Parent);
   }
+  Array* newArray(SExpr* Typ, SExpr* Ne) {
+    return new (Arena) Array(Typ, Ne);
+  }
+  Array* newArray(SExpr *Typ, uint64_t Ne) {
+    return new (Arena) Array(Typ, newLiteralT<uint64_t>(Ne), Arena);
+  }
 
   ScalarType* newScalarType(BaseType Bt) {
     return new (Arena) ScalarType(Bt);
@@ -180,9 +186,6 @@ public:
     return addInstr(new (Arena) Cast(Op, E0));
   }
 
-  /// Terminate the current block with a branch instruction.
-  Branch* newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1);
-
   /// Terminate the current block with a Goto instruction.
   /// If result is specified, then passes result as an argument.
   Goto* newGoto(BasicBlock *B, SExpr* Result = nullptr);
@@ -190,6 +193,15 @@ public:
   /// Terminate the current block with a Goto instruction.
   /// Passes args as arguments.
   Goto* newGoto(BasicBlock *B, ArrayRef<SExpr*> Args);
+
+  /// Terminate the current block with a branch instruction.
+  Branch* newBranch(SExpr *Cond, BasicBlock *B0, BasicBlock *B1);
+
+  /// Terminate the current block with a switch statement.
+  Switch* newSwitch(SExpr *Cond, int numCases);
+
+  /// Add cases to the given switch instruction.
+  void addSwitchCase(Switch *S, SExpr* Lab, BasicBlock* B);
 
   /// Terminate the current block with a Return instruction.
   Return* newReturn(SExpr* E) {

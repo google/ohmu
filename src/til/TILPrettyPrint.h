@@ -68,6 +68,7 @@ protected:
       case COP_Field:      return Prec_Decl;
       case COP_Slot:       return Prec_Decl;
       case COP_Record:     return Prec_Atom;
+      case COP_Array:      return Prec_Atom;
       case COP_ScalarType: return Prec_Atom;
 
       case COP_Literal:    return Prec_Atom;
@@ -91,6 +92,7 @@ protected:
       case COP_Phi:        return Prec_Atom;
       case COP_Goto:       return Prec_Atom;
       case COP_Branch:     return Prec_Atom;
+      case COP_Switch:     return Prec_Atom;
       case COP_Return:     return Prec_Other;
 
       case COP_Future:     return Prec_Atom;
@@ -354,6 +356,31 @@ protected:
     SS << "}";
   }
 
+  void printArray(const Array *E, StreamType &SS) {
+    if (E->concrete()) {
+      SS << "[";
+      bool First = true;
+      for (auto &El : E->elements()) {
+        if (!First) {
+          SS << ", ";
+          First = false;
+        }
+        self()->printSExpr(El.get(), SS, Prec_Other);
+      }
+      SS << " : ";
+      self()->printSExpr(E->elemType(), SS, Prec_Postfix);
+      SS << "]";
+    }
+    else {
+      SS << "Array(";
+      self()->printSExpr(E->elemType(), SS, Prec_MAX);
+      SS << ",";
+      self()->printSExpr(E->sizeExpr(), SS, Prec_MAX);
+      SS << ")";
+    }
+  }
+
+
   void printApply(const Apply *E, StreamType &SS, bool sugared = false) {
     const SExpr *F = E->fun();
 
@@ -582,9 +609,25 @@ protected:
     SS << "branch (";
     self()->printSExpr(E->condition(), SS, Prec_MAX);
     SS << ") ";
-    printBlockLabel(SS, E->thenBlock(), -1);
+    self()->printBlockLabel(SS, E->thenBlock(), -1);
     SS << " ";
-    printBlockLabel(SS, E->elseBlock(), -1);
+    self()->printBlockLabel(SS, E->elseBlock(), -1);
+  }
+
+  void printSwitch(const Switch *E, StreamType &SS) {
+    SS << "switch (";
+    self()->printSExpr(E->condition(), SS, Prec_MAX);
+    SS << ") {";
+    self()->indent();
+    for (int i=0,n=E->numCases(); i<n; ++i) {
+      self()->newline(SS);
+      self()->printSExpr(E->label(i), SS, Prec_Postfix);
+      SS << " -> ";
+      self()->printBlockLabel(SS, E->caseBlock(i), -1);
+    }
+    self()->unindent();
+    self()->newline(SS);
+    SS << "}";
   }
 
   void printReturn(const Return *E, StreamType &SS) {
@@ -656,7 +699,7 @@ protected:
   }
 
   void printWildcard(const Wildcard *E, StreamType &SS) {
-    SS << "*";
+    SS << "_";
   }
 
 

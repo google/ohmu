@@ -216,6 +216,24 @@ public:
     this->resultAttr().Exp = Res;
   }
 
+  void reduceArray(Array *Orig) {
+    auto *E0 = this->attr(0).Exp;
+    auto *E1 = this->attr(1).Exp;
+    Array* Arr;
+
+    if (Orig->concrete()) {
+      uint64_t Nelems = Orig->numElements();
+      Arr = Builder.newArray(E0, Nelems);
+      for (uint64_t i=0; i < Nelems; ++i) {
+        Arr->elements()[i].reset( this->attr(i+2).Exp );
+      }
+    }
+    else {
+      Arr = Builder.newArray(E0, E1);
+    }
+    this->resultAttr().Exp = Arr;
+  }
+
   void reduceScalarType(ScalarType *Orig) {
     // Scalar types are globally defined; we share pointers.
     this->resultAttr().Exp = Orig;
@@ -332,6 +350,17 @@ public:
     BasicBlock *B0 = lookupBlock(Orig->thenBlock());
     BasicBlock *B1 = lookupBlock(Orig->elseBlock());
     this->resultAttr().Exp = Builder.newBranch(C, B0, B1);
+  }
+
+  void reduceSwitch(Switch *Orig) {
+    int Nc = Orig->numCases();
+    auto *C = this->attr(0).Exp;
+    auto *E = Builder.newSwitch(C, Nc);
+    for (int i=0; i < Nc; ++i) {
+      auto *L = this->attr(i+1).Exp;
+      Builder.addSwitchCase(E, L, lookupBlock(Orig->caseBlock(i)));
+    }
+    this->resultAttr().Exp = E;
   }
 
   void reduceReturn(Return *Orig) {
