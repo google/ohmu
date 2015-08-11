@@ -917,6 +917,17 @@ SExpr* BytecodeReader::read() {
   return Stack[0];
 }
 
+void BytecodeStringWriter::dump() {
+  std::string Str = Buffer.str();
+  int Sz  = Str.size();
+
+  for (int64_t i = 0; i < Sz; ++i) {
+    unsigned val = static_cast<uint8_t>(Str[i]);
+    std::cout << " " << val;
+  }
+  std::cout << "\n";
+}
+
 
 }  // end namespace til
 }  // end namespace ohmu

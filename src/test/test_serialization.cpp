@@ -37,88 +37,13 @@ using namespace til;
       exit(-1);                             \
   }
 
-/// Simple writer that serializes to memory.
-class InMemoryWriter : public ByteStreamWriterBase {
-public:
-  InMemoryWriter(char* Buf) :  TargetPos(0), TargetBuffer(Buf) { }
-  virtual ~InMemoryWriter() { flush(); }
-
-  /// Write a block of data to disk.
-  virtual void writeData(const void *Buf, int64_t Size) override {
-    memcpy(TargetBuffer + TargetPos, Buf, Size);
-    TargetPos += Size;
-  }
-
-  int totalLength() { return TargetPos; }
-
-  void dump() {
-    char* Buf = TargetBuffer;
-    int   Sz  = TargetPos;
-
-    // bool prevChar = true;
-    for (int64_t i = 0; i < Sz; ++i) {
-      /*
-      if (Buf[i] >= '0' && Buf[i] <= 'z') {
-        if (!prevChar)
-          std::cout << " ";
-        std::cout << Buf[i];
-        prevChar = true;
-        continue;
-      }
-      */
-      unsigned val = static_cast<uint8_t>(Buf[i]);
-      std::cout << " " << val;
-      // prevChar = false;
-    }
-    std::cout << "\n";
-  }
-
-private:
-  int   TargetPos;
-  char* TargetBuffer;
-};
-
-
-/// Simple reader that serializes from memory.
-class InMemoryReader : public ByteStreamReaderBase {
-public:
-  InMemoryReader(char* Buf, int Sz, MemRegionRef A)
-      : SourcePos(0), SourceSize(Sz), SourceBuffer(Buf), Arena(A)  {
-    refill();
-  }
-
-  /// Write a block of data to disk.
-  virtual int64_t readData(void *Buf, int64_t Sz) override {
-    if (Sz > totalLength())
-      Sz = totalLength();
-    memcpy(Buf, SourceBuffer + SourcePos, Sz);
-    SourcePos += Sz;
-    return Sz;
-  }
-
-  virtual char* allocStringData(uint32_t Sz) override {
-    return Arena.allocateT<char>(Sz + 1);
-  }
-
-private:
-  int totalLength() { return SourceSize - SourcePos; }
-
-  int   SourcePos;
-  int   SourceSize;
-  char* SourceBuffer;
-  MemRegionRef Arena;
-};
-
 
 void testByteStream() {
   MemRegion    region;
   MemRegionRef arena(&region);
-
-  char* buf = arena.allocateT<char>(1 << 16);  // 64k buffer.
-  int len = 0;
-
+  std::string Buffer;
   {
-    InMemoryWriter writer(buf);
+    BytecodeStringWriter writer;
 
     writer.writeBool(true);
     writer.writeBool(false);
@@ -147,12 +72,12 @@ void testByteStream() {
 
     writer.writeString("Done.");
     writer.flush();
-    len = writer.totalLength();
 
     // writer.dump();
+    Buffer = writer.str();
   }
 
-  InMemoryReader reader(buf, len, arena);
+  InMemoryReader reader(Buffer.data(), Buffer.size(), arena);
 
   bool b = reader.readBool();
   CHECK(b == true);
@@ -390,24 +315,23 @@ SExpr* makeModule(CFGBuilder& bld) {
 }
 
 
-void testSerialization(CFGBuilder& bld, char* buf, SExpr *e) {
+void testSerialization(CFGBuilder& bld, SExpr *e) {
   std::cout << "\n";
   TILDebugPrinter::print(e, std::cout);
   std::cout << "\n\n";
 
-  int len = 0;
-
-  InMemoryWriter writeStream(buf);
+  BytecodeStringWriter writeStream;
   BytecodeWriter writer(&writeStream);
 
   writer.traverseAll(e);
   writeStream.flush();
-  len = writeStream.totalLength();
+  std::string buffer = writeStream.str();
+  int len = buffer.size();
   std::cout << "Output " << len << " bytes.\n";
   writeStream.dump();
   std::cout << "\n";
 
-  InMemoryReader readStream(buf, len, bld.arena());
+  InMemoryReader readStream(buffer.data(), len, bld.arena());
   BytecodeReader reader(bld, &readStream);
   auto* e2 = reader.read();
 
@@ -463,12 +387,11 @@ void testSerialization() {
   MemRegion    region;
   MemRegionRef arena(&region);
   CFGBuilder   builder(arena);
-  char* buf = arena.allocateT<char>(1 << 16);  // 64k buffer
 
-  testSerialization(builder, buf, makeBranch(builder));
-  testSerialization(builder, buf, makeSimpleExpr(builder));
-  testSerialization(builder, buf, makeModule(builder));
-  testSerialization(builder, buf, makeSimple(builder));
+  testSerialization(builder, makeBranch(builder));
+  testSerialization(builder, makeSimpleExpr(builder));
+  testSerialization(builder, makeModule(builder));
+  testSerialization(builder, makeSimple(builder));
 }
 
 

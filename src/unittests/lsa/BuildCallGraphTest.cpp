@@ -1,35 +1,43 @@
+#include "clang/Analysis/Til/Bytecode.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
 #include "lsa/BuildCallGraph.h"
+#include "til/TILCompare.h"
 
+/// Registers the necessary matcher and runs the call graph generation tool.
+void RunToolWithBuilder(ohmu::lsa::DefaultCallGraphBuilder &Builder,
+                        const std::string &content) {
+  clang::ast_matchers::MatchFinder Finder;
+  ohmu::lsa::CallGraphBuilderTool Tool;
+  Tool.RegisterMatchers(Builder, &Finder);
+  clang::FrontendAction *Action =
+      clang::tooling::newFrontendActionFactory(&Finder)->create();
+  bool Success = clang::tooling::runToolOnCode(Action, content);
+  ASSERT_TRUE(Success);
+}
 
-/// Helper function running actual test. Creates a virtual file with the
+/// Helper function running actual tests. Creates a virtual file with the
 /// specified content and runs the call graph generation on it. It then checks
 /// whether the generated call graph matches the provided expected mapping.
 void TestCallGraph(
     const std::string &content,
     const std::map<std::string, std::vector<std::string>> &expected) {
 
-  ohmu::lsa::DefaultCallGraphBuilder Builder;
-  clang::ast_matchers::MatchFinder Finder;
-  ohmu::lsa::CallGraphBuilderTool Tool;
-  Tool.RegisterMatchers(Builder, &Finder);
-  clang::FrontendAction *Action =
-      clang::tooling::newFrontendActionFactory(&Finder)->create();
-  ASSERT_TRUE(clang::tooling::runToolOnCode(Action, content));
+  ohmu::lsa::DefaultCallGraphBuilder GraphBuilder;
+  RunToolWithBuilder(GraphBuilder, content);
 
-  const auto& graph = Builder.GetGraph();
+  const auto &graph = GraphBuilder.GetGraph();
   EXPECT_EQ(expected.size(), graph.size());
 
-  for (auto I = expected.begin(); I != expected.end(); ++I) {
-    std::string Func = (*I).first;
-    std::vector<std::string> ExpCalls = (*I).second;
+  for (auto &El : expected) {
+    std::string Func = El.first;
+    const std::vector<std::string> &ExpCalls = El.second;
 
     auto Element = graph.find(Func);
     EXPECT_NE(Element, graph.end()) << "Searching function-node " << Func
-        << ".";
+                                    << ".";
 
     if (Element != graph.end()) {
       ohmu::lsa::DefaultCallGraphBuilder::CallGraphNode *Node =
@@ -37,19 +45,63 @@ void TestCallGraph(
       EXPECT_NE(Node, nullptr) << "Searching function-node " << Func << ".";
 
       if (Node != nullptr) {
-        std::cout << Node->GetIR() << std::endl;
         const std::set<std::string> *Calls = Node->GetCalls();
         EXPECT_EQ(ExpCalls.size(), Calls->size()) << "Within function-node "
-            << Func << ".";
+                                                  << Func << ".";
 
         auto NotFound = Calls->end();
-        for (auto C = ExpCalls.begin(); C != ExpCalls.end(); ++C) {
-          EXPECT_NE(Calls->find(*C), NotFound) << "Within function-node "
-              << Func << " did not find expected call " << (*C) << ".";
+        for (auto &C : ExpCalls) {
+          EXPECT_NE(Calls->find(C), NotFound)
+              << "Within function-node " << Func
+              << " did not find expected call " << C << ".";
         }
       }
     }
   }
+}
+
+/// Testing that the OhmuIR is generated and stored correctly. Does not intend
+/// to test the correctness of the generated IR, hence using a minimal function.
+TEST(BuildCallGraph, StoreOhmuIR) {
+
+  std::string data = "void f() { }";
+
+  // Note: this encoding only works under GNU C++ name mangling.
+  const std::string f = "_Z1fv";
+
+  ohmu::lsa::DefaultCallGraphBuilder GraphBuilder;
+  RunToolWithBuilder(GraphBuilder, data);
+
+  const auto &graph = GraphBuilder.GetGraph();
+  ASSERT_EQ(1, graph.size());
+  auto Element = graph.find(f);
+  ASSERT_NE(Element, graph.end()) << "Searching function-node " << f << ".";
+  ohmu::lsa::DefaultCallGraphBuilder::CallGraphNode *Node =
+      (*Element).second.get();
+  const std::string &OhmuIR = Node->GetIR();
+
+  ohmu::MemRegion Region;
+  ohmu::MemRegionRef Arena(&Region);
+  ohmu::til::CFGBuilder Builder(Arena);
+
+  ohmu::til::InMemoryReader ReadStream(OhmuIR.data(), OhmuIR.length(), Arena);
+  ohmu::til::BytecodeReader Reader(Builder, &ReadStream);
+  auto *Expr = Reader.read();
+  ASSERT_NE(nullptr, Expr);
+
+  // Build expected SCFG
+  Builder.beginCFG(nullptr);
+  auto *SCFG = Builder.currentCFG();
+  Builder.beginBlock(SCFG->entry());
+  Builder.newGoto(SCFG->exit(), nullptr);
+  Builder.endCFG();
+  auto *VoidType =
+      Builder.newScalarType(ohmu::til::BaseType::getBaseType<void>());
+  auto *Code = Builder.newCode(VoidType, SCFG);
+  auto *Expected = Builder.newSlot("f", Code);
+
+  bool IRCorrect = ohmu::til::EqualsComparator::compareExprs(Expected, Expr);
+  ASSERT_TRUE(IRCorrect);
 }
 
 TEST(BuildCallGraph, BasicSingleFunction) {
@@ -76,7 +128,6 @@ TEST(BuildCallGraph, BasicFunctionCallGraph) {
   TestCallGraph(data,
                 {{f, {i, j}}, {g, {f}}, {h, {f, g}}, {i, {f, g, h}}, {j, {}}});
 }
-
 
 TEST(BuildCallGraph, MemberFunction) {
 

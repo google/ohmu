@@ -8,6 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Analysis/CFG.h"
+#include "clang/Analysis/Til/Bytecode.h"
+#include "clang/Analysis/Til/ClangCFGWalker.h"
+#include "clang/Analysis/Til/ClangTranslator.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Mangle.h"
 #include "BuildCallGraph.h"
@@ -37,24 +40,22 @@ std::string getMangledName(const clang::NamedDecl &D) {
 /// function to the provided GraphConstructor.
 class ExtendCallGraph : public clang::ast_matchers::MatchFinder::MatchCallback {
 public:
-  explicit ExtendCallGraph(ohmu::lsa::CallGraphBuilder &C) : Constructor(C) {}
+  explicit ExtendCallGraph(ohmu::lsa::CallGraphBuilder &C) : Builder(C) {}
 
   void
   run(const clang::ast_matchers::MatchFinder::MatchResult &Result) override;
 
 private:
-  /// Returns the CFG of the body of the provided function declaration.
-  std::unique_ptr<clang::CFG> BuildCFG(const clang::FunctionDecl &Fun);
-
   /// Traverses the CFG for calls to functions, constructors and destructors.
   void DiscoverCallGraph(const std::string &FName, clang::ASTContext &Ctxt,
                          clang::CFG *CFG);
 
-  /// Generates the Ohmu IR of the CFG.
-  std::string GenerateOhmuIR(clang::CFG *CFG);
+  /// Generates the Ohmu IR of the function.
+  void GenerateOhmuIR(const std::string &FName, const clang::Decl *Fun,
+                      clang::AnalysisDeclContext &AC);
 
 private:
-  ohmu::lsa::CallGraphBuilder &Constructor;
+  ohmu::lsa::CallGraphBuilder &Builder;
 };
 
 void ExtendCallGraph::run(
@@ -69,19 +70,11 @@ void ExtendCallGraph::run(
     return;
 
   std::string FName = getMangledName(*Fun);
-  std::unique_ptr<clang::CFG> CFG = BuildCFG(*Fun);
+  clang::AnalysisDeclContextManager ADCM(true, true, true, true, true, true);
+  clang::AnalysisDeclContext AC(&ADCM, Fun, ADCM.getCFGBuildOptions());
 
-  Constructor.SetOhmuIR(FName, GenerateOhmuIR(CFG.get()));
-  DiscoverCallGraph(FName, Fun->getASTContext(), CFG.get());
-}
-
-std::unique_ptr<clang::CFG>
-ExtendCallGraph::BuildCFG(const clang::FunctionDecl &Fun) {
-  clang::CFG::BuildOptions opt;
-  opt.AddTemporaryDtors = true;
-  opt.AddImplicitDtors = true;
-  clang::ASTContext *Ctxt = &Fun.getASTContext();
-  return clang::CFG::buildCFG(&Fun, Fun.getBody(), Ctxt, opt);
+  GenerateOhmuIR(FName, Fun, AC);
+  DiscoverCallGraph(FName, Fun->getASTContext(), AC.getCFG());
 }
 
 void ExtendCallGraph::DiscoverCallGraph(const std::string &FName,
@@ -116,15 +109,31 @@ void ExtendCallGraph::DiscoverCallGraph(const std::string &FName,
 
       if (Call) {
         std::string CName = getMangledName(*Call);
-        Constructor.AddCall(FName.data(), CName);
+        Builder.AddCall(FName.data(), CName);
       }
     }
   }
 }
 
-std::string ExtendCallGraph::GenerateOhmuIR(clang::CFG *cfg) {
-  // TODO Generate Ohmu IR.
-  return "add Ohmu IR here";
+void ExtendCallGraph::GenerateOhmuIR(const std::string &FName,
+                                     const clang::Decl *Fun,
+                                     clang::AnalysisDeclContext &AC) {
+  clang::tilcpp::ClangCFGWalker Walker;
+  if (!Walker.init(AC))
+    return;
+
+  ohmu::MemRegion Region;
+  ohmu::MemRegionRef Arena(&Region);
+  clang::tilcpp::ClangTranslator SxBuilder(Arena);
+  SxBuilder.setSSAMode(true);
+  Walker.walk(SxBuilder);
+
+  ohmu::til::BytecodeStringWriter WriteStream;
+  ohmu::til::BytecodeWriter Writer(&WriteStream);
+
+  Writer.traverseAll(SxBuilder.topLevelSlot());
+  WriteStream.flush();
+  Builder.SetOhmuIR(FName, WriteStream.str());
 }
 
 } // end namespace
@@ -163,7 +172,17 @@ void DefaultCallGraphBuilder::Print(std::ostream &Out) {
 void DefaultCallGraphBuilder::CallGraphNode::Print(std::ostream &Out) {
   for (std::string Called : OutgoingCalls)
     Out << "--> " << Called << "\n";
-  Out << "IR: " << OhmuIR << "\n";
+
+  ohmu::MemRegion Region;
+  ohmu::MemRegionRef Arena(&Region);
+  ohmu::til::CFGBuilder Builder(Arena);
+  ohmu::til::InMemoryReader ReadStream(OhmuIR.data(), OhmuIR.length(), Arena);
+  ohmu::til::BytecodeReader Reader(Builder, &ReadStream);
+  auto *Expr = Reader.read();
+
+  Out << "IR: ";
+  ohmu::til::TILDebugPrinter::print(Expr, Out);
+  Out << "\n";
 }
 
 void CallGraphBuilderTool::RegisterMatchers(

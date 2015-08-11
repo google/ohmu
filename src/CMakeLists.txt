@@ -23,7 +23,12 @@ add_definitions(${LLVM_DEFINITIONS})
 link_directories("${LLVM_DIR}/../../../lib")
 link_directories("${LLVM_DIR}/../../../tools/clang/lib")
 
-# Find the libraries that correspond to the LLVM components that we wish to use
+message(STATUS "include ${LLVM_DIR}/../../../tools/clang/include")
+
+#link_directories("${LLVM_DIR}/../../../tools/clang/lib")
+
+# Find the libraries that correspond to the LLVM components
+# that we wish to use
 # llvm_map_components_to_libnames(llvm_libs support core irreader mc option)
 
 
@@ -60,7 +65,6 @@ add_subdirectory(base)
 add_subdirectory(grammar)
 add_subdirectory(parser)
 add_subdirectory(til)
-
 # add_subdirectory(backend)
 add_subdirectory(lsa)
 add_subdirectory(test)

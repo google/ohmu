@@ -15,6 +15,7 @@
 #include "TIL.h"
 #include "TILTraverse.h"
 
+#include <sstream>
 
 namespace ohmu {
 namespace til {
@@ -515,6 +516,58 @@ private:
   std::vector<VarDecl*>     Vars;
   std::vector<BasicBlock*>  Blocks;
   std::vector<Instruction*> Instrs;
+};
+
+
+
+/// Simple writer that serializes to a string.
+class BytecodeStringWriter : public ByteStreamWriterBase {
+public:
+  virtual ~BytecodeStringWriter() { flush(); }
+
+  /// Write a block of data to the string.
+  virtual void writeData(const void *Buf, int64_t Size) override {
+    Buffer.write(static_cast<const char *>(Buf), Size);
+  }
+
+  std::string str() { return Buffer.str(); }
+
+  /// Print this buffer to std::cout in numeric representation.
+  void dump();
+
+private:
+  std::stringstream Buffer;
+};
+
+
+/// Simple reader that serializes from memory.
+class InMemoryReader : public ByteStreamReaderBase {
+public:
+  InMemoryReader(const char* Buf, int Sz, MemRegionRef A)
+      : SourcePos(0), SourceSize(Sz), SourceBuffer(Buf), Arena(A)  {
+    refill();
+  }
+
+  /// Read a block of data from memory.
+  virtual int64_t readData(void *Buf, int64_t Sz) override {
+    if (Sz > totalLength())
+      Sz = totalLength();
+    memcpy(Buf, SourceBuffer + SourcePos, Sz);
+    SourcePos += Sz;
+    return Sz;
+  }
+
+  virtual char* allocStringData(uint32_t Sz) override {
+    return Arena.allocateT<char>(Sz + 1);
+  }
+
+private:
+  int totalLength() { return SourceSize - SourcePos; }
+
+  int   SourcePos;
+  int   SourceSize;
+  const char* SourceBuffer;
+  MemRegionRef Arena;
 };
 
 
