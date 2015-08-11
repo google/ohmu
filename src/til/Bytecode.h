@@ -366,6 +366,8 @@ public:
 
   ByteStreamWriterBase *getWriter() { return Writer; }
 
+  void write(SExpr* E) { traverseAll(E); }
+
 private:
   ByteStreamWriterBase *Writer;
   bool WritingAnn;
