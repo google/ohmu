@@ -482,9 +482,24 @@ void BytecodeReader::readRecord() {
 
 void BytecodeWriter::reduceArray(Array *E) {
   writeOpcode(COP_Array);
+  Writer->writeUInt64(E->numElements());
 }
 
-void BytecodeReader::readArray() { }
+void BytecodeReader::readArray() {
+  uint64_t Ne = Reader->readUInt64();
+  Array *E;
+  if (Ne == 0) {
+    E = Builder.newArray(arg(1), arg(0));
+  }
+  else {
+    E = Builder.newArray(arg(Ne + 1), Ne);
+    for (uint64_t i = 0; i < Ne; ++i) {
+      E->elements()[i].reset(arg(Ne-1 - i));
+    }
+  }
+  drop(Ne + 2);
+  push(E);
+}
 
 
 void BytecodeWriter::reduceScalarType(ScalarType *E) {
@@ -753,10 +768,23 @@ void BytecodeReader::readBranch() {
 
 void BytecodeWriter::reduceSwitch(Switch *E) {
   writeOpcode(COP_Switch);
+  int Nc = E->numCases();
+  Writer->writeUInt32(Nc);
+  for (int i = 0; i < Nc; ++i) {
+    Writer->writeUInt32( E->caseBlock(i)->blockID() );
+  }
 }
 
 void BytecodeReader::readSwitch() {
-
+  int Nc = Reader->readUInt32();
+  Switch* E = Builder.newSwitch(arg(Nc), Nc);
+  for (int i = 0; i < Nc; ++i) {
+    unsigned Bid = Reader->readUInt32();
+    BasicBlock* Bb = getBlock(Bid, 0);
+    Builder.addSwitchCase(E, arg(Nc-1-i), Bb);
+  }
+  drop(Nc+1);
+  push(E);
 }
 
 

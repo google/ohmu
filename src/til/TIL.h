@@ -1310,7 +1310,7 @@ private:
   SExprRef Condition;
 
   // TODO: this should really use an ArrayTree, except that we need to
-  // implement successors()
+  // implement successors().  Don't resize Labels or Cases!
   SimpleArray<SExprRef> Labels;
   SimpleArray<SExprRefT<BasicBlock>> Cases;
 };
