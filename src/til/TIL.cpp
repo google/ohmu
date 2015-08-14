@@ -260,6 +260,7 @@ void Future::setResult(SExpr *Res) {
     if (IPos) {
       auto *I = dyn_cast_or_null<Instruction>(Res);
       if (I && I->block() == nullptr && !Res->isTrivial()) {
+        assert(!isa<Phi>(I) && "Phi nodes are arguments.");
         I->setBlock(this->block());
         *IPos = I;
       }

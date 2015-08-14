@@ -288,6 +288,8 @@ void BytecodeWriter::enterBlock(BasicBlock *B) {
 }
 
 void BytecodeReader::enterBlock() {
+  assert(Stack.size() == CFGStackSize && "Internal error.");
+
   unsigned Bid = Reader->readUInt32();
   CurrentInstrID = Reader->readUInt32();
   unsigned Nargs = Reader->readUInt32();
@@ -318,11 +320,42 @@ void BytecodeReader::enterCFG() {
   Instrs.resize(Ni, nullptr);
   Blocks[Eid] = Builder.currentCFG()->entry();
   Blocks[Xid] = Builder.currentCFG()->exit();
+  CFGStackSize = Stack.size();
+}
+
+
+void BytecodeWriter::reduceBasicBlock(BasicBlock *E) {
+  writeOpcode(COP_BasicBlock);
+}
+
+
+void BytecodeReader::readBasicBlock() {
+  assert(Stack.size() == CFGStackSize && "Internal error.");
+
+  if (Builder.currentBB())
+    Builder.endBlock(nullptr);
+}
+
+
+void BytecodeWriter::reduceSCFG(SCFG *E) {
+  writeOpcode(COP_SCFG);
+}
+
+
+void BytecodeReader::readSCFG() {
+  assert(Stack.size() == CFGStackSize && "Internal error.");
+  CFGStackSize = 0;
+
+  auto *E = Builder.currentCFG();
+  Builder.endCFG();
+  Blocks.clear();
+  Instrs.clear();
+  push(E);
 }
 
 
 VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
-  if (Vidx > Vars.size()) {
+  if (Vidx >= Vars.size()) {
     fail("Invalid variable ID.");
     return nullptr;
   }
@@ -331,7 +364,10 @@ VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
 
 
 BasicBlock *BytecodeReader::getBlock(unsigned Bid, unsigned Nargs) {
-  if (Bid > Blocks.size()) {
+  if (Bid == BasicBlock::InvalidBlockID)
+    return nullptr;
+
+  if (Bid >= Blocks.size()) {
     fail("Invalid block ID.");
     return nullptr;
   }
@@ -364,7 +400,7 @@ void BytecodeWriter::reduceWeak(Instruction *I) {
 
 void BytecodeReader::readWeak() {
   unsigned i = Reader->readUInt32();
-  if (i > Instrs.size()) {
+  if (i >= Instrs.size()) {
     fail("Invalid instruction ID.");
     return;
   }
@@ -372,9 +408,13 @@ void BytecodeReader::readWeak() {
 }
 
 
-void BytecodeWriter::reduceBBArgument(Phi *E) { }
+void BytecodeWriter::reduceBBArgument(Phi *E) {
+  writePseudoOpcode(PSOP_BBArgument);
+}
 
-void BytecodeReader::readBBArgument() { }
+void BytecodeReader::readBBArgument() {
+  drop(1); // Ignore: arguments should already have been added.
+}
 
 
 void BytecodeWriter::reduceBBInstruction(Instruction *E) {
@@ -382,8 +422,12 @@ void BytecodeWriter::reduceBBInstruction(Instruction *E) {
 }
 
 void BytecodeReader::readBBInstruction() {
-  Instruction *I = dyn_cast<Instruction>(arg(0));
-  if (!I) {
+  if (Stack.size() <= CFGStackSize) {
+    fail("Internal error: corrupted stack.");
+    return;
+  }
+  Instruction *I = dyn_cast_or_null<Instruction>(arg(0));
+  if (arg(0) && !I) {
     fail("Expected instruction.");
     return;
   }
@@ -512,30 +556,6 @@ void BytecodeReader::readScalarType() {
   auto *E = Builder.newScalarType(Bt);
   push(E);
 }
-
-
-void BytecodeWriter::reduceSCFG(SCFG *E) {
-  writeOpcode(COP_SCFG);
-}
-
-void BytecodeReader::readSCFG() {
-  auto *E = Builder.currentCFG();
-  Builder.endCFG();
-  Blocks.clear();
-  Instrs.clear();
-  push(E);
-}
-
-
-void BytecodeWriter::reduceBasicBlock(BasicBlock *E) {
-  writeOpcode(COP_BasicBlock);
-}
-
-void BytecodeReader::readBasicBlock() {
-  if (Builder.currentBB())
-    Builder.endBlock(nullptr);
-}
-
 
 void BytecodeWriter::reduceLiteral(Literal *E) {
   writeOpcode(COP_Literal);
@@ -728,9 +748,17 @@ void BytecodeReader::readCast() {
 }
 
 
-void BytecodeWriter::reducePhi(Phi *E) { /* Handled by reduceGoto. */ }
+void BytecodeWriter::reducePhi(Phi *E) {
+  // Phi nodes are handled by reduceGoto.
+  // This is here in case we encounter one by accident.
+  reduceNull();
+}
 
-void BytecodeReader::readPhi() { /* Handled by readGoto. */ }
+void BytecodeReader::readPhi() {
+  // Phi nodes are handled by reduceGoto.
+  // This is here in case we encounter one by accident.
+  readNull();
+}
 
 
 void BytecodeWriter::reduceGoto(Goto *E) {
@@ -751,8 +779,12 @@ void BytecodeReader::readGoto() {
 
 void BytecodeWriter::reduceBranch(Branch *E) {
   writeOpcode(COP_Branch);
-  Writer->writeUInt32(E->thenBlock()->blockID());
-  Writer->writeUInt32(E->elseBlock()->blockID());
+  unsigned Id1 = E->thenBlock() ?
+      E->thenBlock()->blockID() : BasicBlock::InvalidBlockID;
+  unsigned Id2 = E->elseBlock() ?
+      E->elseBlock()->blockID() : BasicBlock::InvalidBlockID;
+  Writer->writeUInt32(Id1);
+  Writer->writeUInt32(Id2);
 }
 
 void BytecodeReader::readBranch() {
@@ -771,7 +803,8 @@ void BytecodeWriter::reduceSwitch(Switch *E) {
   int Nc = E->numCases();
   Writer->writeUInt32(Nc);
   for (int i = 0; i < Nc; ++i) {
-    Writer->writeUInt32( E->caseBlock(i)->blockID() );
+    auto* Cb = E->caseBlock(i);
+    Writer->writeUInt32( Cb ? Cb->blockID() : BasicBlock::InvalidBlockID );
   }
 }
 
@@ -784,7 +817,7 @@ void BytecodeReader::readSwitch() {
     Builder.addSwitchCase(E, arg(Nc-1-i), Bb);
   }
   drop(Nc+1);
-  push(E);
+  // No need to push terminator.
 }
 
 
@@ -855,6 +888,7 @@ void BytecodeReader::readIfThenElse() {
 
 
 void BytecodeReader::readAllAnnotations() {
+  assert(false && "Should be no annotations.");
   auto Akind = readPseudoAnnKind();
   while (Akind != PSANN_ExitAnn) {
     readAnnotationByKind(getAnnotationKind(Akind));
@@ -904,8 +938,10 @@ void BytecodeReader::readAnnotationByKind(TIL_AnnKind Ak) {
 }
 
 SExpr* BytecodeReader::read() {
-  while (!Reader->empty())
+  while (!Reader->empty() && success())
     readSExpr();
+  if (!success())
+    return nullptr;
   if (Stack.size() == 0) {
     fail("Empty stack.");
     return nullptr;

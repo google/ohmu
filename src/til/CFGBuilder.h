@@ -278,6 +278,7 @@ inline T* CFGBuilder::addInstr(T* I) {
   if (!I || !CurrentState.EmitInstrs)
     return I;
   assert(!I->block() && "Instruction was already added to a block.");
+  assert(!isa<Phi>(I) && "Phi nodes should be arguments.");
   I->setBlock(CurrentBB);        // Mark I as having been added.
   CurrentInstrs.push_back(I);
   return I;

@@ -261,14 +261,15 @@ protected:
 public:
   template<class T>
   void traverse(T *E, TraversalKind K) {
-    if (WritingAnn)
-      writePseudoAnnKind(PSANN_ExitAnn);
-    bool PrevWriting = WritingAnn;
+    // if (WritingAnn)
+    //   writePseudoAnnKind(PSANN_ExitAnn);
+    // bool PrevWriting = WritingAnn;
 
-    WritingAnn = false;
+    // WritingAnn = false;
     SuperTv::traverse(E, K);
     Writer->endRecord();
 
+    /*
     if (E->annotations()) {
       writePseudoOpcode(PSOP_EnterAnn);
       WritingAnn = true;
@@ -281,6 +282,7 @@ public:
       if (WritingAnn)
         writePseudoOpcode(PSOP_EnterAnn);
     }
+    */
   }
 
   // Postpone traversal until their SExpr is fully written.
@@ -362,15 +364,19 @@ public:
   void reduceLet(Let *E);
   void reduceIfThenElse(IfThenElse *E);
 
-  BytecodeWriter(ByteStreamWriterBase *W) : Writer(W), WritingAnn(false) { }
+  BytecodeWriter(ByteStreamWriterBase *W) : Writer(W) { }
+      // WritingAnn(false) { }
 
   ByteStreamWriterBase *getWriter() { return Writer; }
 
-  void write(SExpr* E) { traverseAll(E); }
+  void write(SExpr* E) {
+    traverseAll(E);
+    Writer->flush();
+  }
 
 private:
   ByteStreamWriterBase *Writer;
-  bool WritingAnn;
+  // bool WritingAnn;
 };
 
 
@@ -496,13 +502,22 @@ public:
   bool success() { return Success; }
 
   BytecodeReader(CFGBuilder& B, ByteStreamReaderBase* R)
-      : Builder(B), Reader(R), CurrentInstrID(0), Success(true) {
+      : Builder(B), Reader(R), CurrentInstrID(0), CFGStackSize(0),
+        Success(true) {
     Vars.push_back(nullptr);  // indices start at 1.
   }
 
-  SExpr  *arg(int i)    { return Stack[Stack.size()-1 - i]; }
-  void   push(SExpr* E) { Stack.push_back(E); }
-  void   drop(int n)    { Stack.resize(Stack.size() - n); }
+  SExpr *arg(int i) {
+    assert(static_cast<unsigned>(i) < Stack.size() && "Index out of range.");
+    return Stack[Stack.size()-1 - i];
+  }
+  void push(SExpr* E) {
+    Stack.push_back(E);
+  }
+  void drop(int n) {
+    assert(!Builder.currentCFG() || (Stack.size() - n >= CFGStackSize));
+    Stack.resize(Stack.size() - n);
+  }
 
   ByteStreamReaderBase *getReader() { return Reader; }
 
@@ -513,6 +528,7 @@ private:
   ByteStreamReaderBase*  Reader;
 
   unsigned                  CurrentInstrID;
+  unsigned                  CFGStackSize;  // Sanity checks
   bool                      Success;
   std::vector<SExpr*>       Stack;
   std::vector<VarDecl*>     Vars;

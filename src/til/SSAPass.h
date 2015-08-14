@@ -115,7 +115,7 @@ protected:
 
 public:
   SSAPass(MemRegionRef A)
-      : InplaceReducer(A), CurrentVarMap(nullptr), CurrBB(nullptr) {
+      : InplaceReducer(A), CurrentVarMap(nullptr) {
     FutArena.setRegion(&FutRegion);
   }
 
@@ -136,9 +136,6 @@ private:
   std::vector<FutureLoad*>  PendingLoads;  ///< Loads that need to be forced.
 
   std::vector<int> NumUses;
-  LocalVarMap VarMapCache;
-
-  BasicBlock* CurrBB;
 };
 
 

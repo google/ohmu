@@ -33,7 +33,6 @@ void SSAPass::enterCFG(SCFG *Cfg) {
 
 void SSAPass::exitCFG(SCFG *Cfg) {
   replacePending();
-  CurrBB = nullptr;
 
   // TODO: clear the Future arena.
   BInfoMap.clear();
@@ -89,17 +88,20 @@ void SSAPass::reduceAlloc(Alloc *Orig) {
 
   if (Builder.currentBB() && !Orig->isHeap()) {
     auto* Fld = dyn_cast<Field>(E0);
-    if (Fld) {
+    SExpr* Fbdy = Fld ? Fld->body() : nullptr;
+    if (Fld && (Fbdy == nullptr || isa<Instruction>(Fbdy))) {
       // Add the new variable to the map for the current block.
       unsigned Id = CurrentVarMap->size();
       Orig->setAllocID(Id);
 
-      if (Fld->body()) {
-        CurrentVarMap->push_back(Fld->body());
+      if (Fbdy) {
+        CurrentVarMap->push_back(Fbdy);
       }
       else {
+        // Variable is undefined or has an invalid definition.
         // Push undefined value into variable map.
-        // It will hopefully be defined before a load instruction.
+        // It will hopefully be defined before a load instruction;
+        // otherwise we can't eliminate it.
         auto* Un = Builder.newUndefined();
         if (auto* Ty = dyn_cast<ScalarType>(Fld->range())) {
           Un->setBaseType(Ty->baseType());
@@ -217,10 +219,9 @@ void SSAPass::replacePending() {
 
 
   // Second pass:  Go back and replace all loads with phi nodes or values.
-  // VarMapCache holds lookups that we've already done in the current block.
-  CurrBB = Builder.currentCFG()->entry();
-  unsigned MSize = BInfoMap[CurrBB->blockID()].AllocVarMap.size();
-  VarMapCache.resize(MSize, nullptr);
+  // CurrVarMapCache holds lookups that we've already done in the current block.
+  BasicBlock* CurrBB = nullptr;
+  LocalVarMap CurrVarMapCache;
 
   for (auto *F : PendingLoads) {
     Alloc *A = F->AllocInstr;
@@ -233,12 +234,17 @@ void SSAPass::replacePending() {
     BasicBlock *B = F->block();
     if (B != CurrBB) {
       // We've switched to a new block.  Clear the cache.
-      VarMapCache.clear();
-      MSize = BInfoMap[B->blockID()].AllocVarMap.size();
-      VarMapCache.resize(MSize, nullptr);
+      CurrVarMapCache.clear();
+      unsigned MSize = BInfoMap[B->blockID()].AllocVarMap.size();
+      CurrVarMapCache.resize(MSize, nullptr);
       CurrBB = B;
     }
-    auto* E = lookupInPredecessors(B, A->allocID(), A->instrName());
+    auto  LvarID = A->allocID();
+    auto* E = CurrVarMapCache[LvarID];
+    if (!E) {
+      E = lookupInPredecessors(B, LvarID, A->instrName());
+      CurrVarMapCache[LvarID] = E;
+    }
     if (E) {
       F->setResult(E);  // Replace load
     }
@@ -251,7 +257,6 @@ void SSAPass::replacePending() {
   PendingAllocs.clear();
   PendingStores.clear();
   PendingLoads.clear();
-  VarMapCache.clear();
 }
 
 
@@ -265,22 +270,28 @@ SExpr* SSAPass::lookupInCache(LocalVarMap *LvarMap, unsigned LvarID) {
 
   // The cached value may be an incomplete and temporary Phi node, that was
   // later eliminated. If so, grab the real value and update the cache.
-  if (auto *Ph = dyn_cast<Phi>(E)) {
-    if (Ph->status() == Phi::PH_SingleVal) {
+  // Phi nodes may contain other phi nodes.
+  do {
+    auto *Ph = dyn_cast<Phi>(E);
+    if (Ph && Ph->status() == Phi::PH_SingleVal) {
       E = Ph->values()[0].get();
       LvarMap->at(LvarID) = E;
+      continue;
     }
-  }
+    break;
+  } while (true);
 
   // The cached value may be a Future that has since been resolved.
+  // If so, grab the forced value and update the cache.
+  // Futures may contain other futures.
   do {
     auto* Fut = dyn_cast_or_null<Future>(E);
     if (Fut && Fut->maybeGetResult()) {
       E = Fut->maybeGetResult();
       LvarMap->at(LvarID) = E;
+      continue;
     }
-    else
-      break;
+    break;
   } while (true);
 
   return E;
@@ -303,12 +314,6 @@ Phi* SSAPass::makeNewPhiNode(unsigned i, SExpr *E, unsigned numPreds) {
 SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
                                      StringRef Nm) {
   assert(LvarID > 0 && "Invalid variable ID");
-
-  if (B == CurrBB) {
-    // See if we have a cached value at the start of the current block.
-    if (SExpr* E = VarMapCache[LvarID])
-      return E;
-  }
 
   auto* LvarMap = &BInfoMap[B->blockID()].AllocVarMap;
   if (LvarID >= LvarMap->size())
@@ -335,7 +340,7 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
     // eliminated.  The variable must have been declared in a dominating block.
     E2 = lookup(P.get(), LvarID, Nm);
     if (!E2) {
-      // TODO: error on undefined variable. (Should at least be Undefined)
+      // TODO: error on undefined variable. Should at least be Undefined.
       continue;
     }
 
@@ -396,11 +401,6 @@ SExpr* SSAPass::lookupInPredecessors(BasicBlock *B, unsigned LvarID,
       Ph->setInstrName(Builder, Nm);
       B->addArgument(Ph);
     }
-  }
-
-  // Cache the result to avoid creating duplicate phi nodes.
-  if (B == CurrBB) {
-    VarMapCache[LvarID] = E;
   }
   return E;
 }
