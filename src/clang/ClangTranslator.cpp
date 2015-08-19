@@ -210,11 +210,71 @@ static void setBaseTypeFromClangExpr(til::Instruction* I, const Expr *E) {
 }
 
 
-til::SExpr* ClangTranslator::translateClangType(QualType Qt, ASTContext& Ac) {
-  if (Qt->isVoidType())
-    return Builder.newScalarType( til::BaseType::getBaseType<void>() );
-  if (Qt.isTrivialType(Ac))
-    return Builder.newScalarType( getBaseTypeFromClangType(Qt) );
+til::SExpr* ClangTranslator::translateClangType(QualType Qt, ASTContext& Ac,
+                                                bool LValue) {
+  if (Qt->isVoidType()) {
+    auto *Vt = Builder.newScalarType( til::BaseType::getBaseType<void>() );
+    if (!LValue)
+      return Vt;
+    else
+      return Builder.newScalarType( til::BaseType::getBaseType<void*>() );
+  }
+
+  const Type *Ty = Qt.getTypePtr();
+
+  if (isa<BuiltinType>(Ty)) {
+    // A scalar (e.g. int) which is stored in a register is just a scalar.
+    // However, a scalar which is stored in memory (as a slot or array element)
+    // must be a field, so that it can be the target of store instructions.
+    auto *Et = Builder.newScalarType( getBaseTypeFromClangType(Qt) );
+    if (!LValue)
+      return Et;
+    else
+      return Builder.newField(Et, nullptr);
+  }
+
+  if (auto* Ety = dyn_cast<EnumType>(Ty)) {
+    StringRef S = getDeclName(Builder.arena(), Ety->getDecl(), true);
+    auto* Et = Builder.newProject(nullptr, S);
+    if (!LValue)
+      return Et;
+    else
+      return Builder.newField(Et, nullptr);
+  }
+
+  if (auto *Rty = dyn_cast<RecordType>(Ty)) {
+    // Note, records are always passed by reference, so the following types
+    // are the same:
+    //   void f(Foo x)
+    //   void f(Foo &x)
+    //   void f(Foo *x)
+    // The only difference is whether the caller has to create a copy.
+    // TODO: return an owned type if !LValue
+    StringRef S = getDeclName(Builder.arena(), Rty->getDecl(), true);
+    return Builder.newProject(nullptr, S);
+  }
+
+  if (auto *Pty = dyn_cast<PointerType>(Ty)) {
+    // Ohmu doesn't have a type that corresponds to "pointer to T".
+    // PValues (e.g. records, functions, or fields) are pointers by
+    // default, much like reference types in Java, while scalars are not.
+    // If InMemory is true, then the recursive call will automatically "box"
+    // non-pointer values into pointer types.
+    auto *Et = translateClangType(Pty->getPointeeType(), Ac, true);
+    if (!LValue)
+      return Et;
+    else
+      return Builder.newField(Et, nullptr);
+  }
+
+  if (auto* Pty = dyn_cast<ReferenceType>(Ty)) {
+    auto *Et = translateClangType(Pty->getPointeeType(), Ac, true);
+    if (!LValue)
+      return Et;
+    else
+      return Builder.newField(Et, nullptr);
+  }
+
   return Builder.newUndefined();
 }
 
@@ -486,7 +546,8 @@ til::SExpr *ClangTranslator::translateCXXOperatorCallExpr(
 
 
 // Return a literal 1 of the given type.
-til::SExpr *getLiteralOne(til::BaseType Bt, til::CFGBuilder& Builder) {
+til::Instruction *getLiteralOne(til::BaseType Bt, til::CFGBuilder& Builder,
+                                bool Neg) {
   switch (Bt.Size) {
     case til::BaseType::ST_32: {
       switch (Bt.Base) {
@@ -508,7 +569,12 @@ til::SExpr *getLiteralOne(til::BaseType Bt, til::CFGBuilder& Builder) {
     }
     default: break;
   }
-  return Builder.newLiteralT<int32_t>(1);
+
+  // This case occurs for pointer types
+  if (Neg)
+    return Builder.newLiteralT<int32_t>(-1);
+  else
+    return Builder.newLiteralT<int32_t>(1);
 }
 
 
@@ -526,9 +592,24 @@ til::SExpr *ClangTranslator::translateUnaryIncDec(const UnaryOperator *Uo,
   auto* Ld = Builder.newLoad(E0);
   Ld->setBaseType(Bt);
 
-  auto* One = getLiteralOne(Bt, Builder);
-  auto* Be  = Builder.newBinaryOp(Op, Ld, One);
-  Be->setBaseType(Bt);
+  til::Instruction* Be;
+
+  // Pointer arithmetic
+  if (Ld->baseType().isPointer()) {
+    til::Instruction* One;
+    if (Op == til::BOP_Sub)
+      One = getLiteralOne(Bt, Builder, true);
+    else
+      One = getLiteralOne(Bt, Builder, false);
+
+    Be = Builder.newArrayAdd(Ld, One);
+    Be->setBaseType( til::BaseType::getBaseType<void*>() );
+  }
+  else {
+    auto* One = getLiteralOne(Bt, Builder, false);
+    Be = Builder.newBinaryOp(Op, Ld, One);
+    Be->setBaseType(Bt);
+  }
 
   Builder.newStore(E0, Be);
 
@@ -603,17 +684,57 @@ til::SExpr *ClangTranslator::translateUnaryOperator(const UnaryOperator *Uo,
 }
 
 
+
+til::Instruction* makeBinaryOp(til::CFGBuilder& Builder,
+                               til::TIL_BinaryOpcode Op,
+                               til::Instruction *E0,
+                               til::Instruction *E1) {
+  // Handle pointer arithmetic
+  if (Op == til::BOP_Add) {
+    if (E0->baseType().isPointer()) {
+      auto* Ebop = Builder.newArrayAdd(E0, E1);
+      Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
+      return Ebop;
+    }
+    else if (E1->baseType().isPointer()) {
+      auto* Ebop = Builder.newArrayAdd(E1, E0);
+      Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
+      return Ebop;
+    }
+  }
+
+  if (Op == til::BOP_Sub) {
+    if (E0->baseType().isPointer()) {
+      auto* SE1  = Builder.newUnaryOp(til::UOP_Negative, E1);
+      SE1->setBaseType(E1->baseType());
+      auto* Ebop = Builder.newArrayAdd(E0, SE1);
+      Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
+      return Ebop;
+    }
+  }
+
+  return Builder.newBinaryOp(Op, E0, E1);
+}
+
+
+
 til::SExpr *ClangTranslator::translateBinOp(til::TIL_BinaryOpcode Op,
                                             const BinaryOperator *Bo,
                                             CallingContext *Ctx,
                                             bool Reverse) {
    til::SExpr *E0 = translate(Bo->getLHS(), Ctx);
    til::SExpr *E1 = translate(Bo->getRHS(), Ctx);
-   til::BinaryOp* Ebop;
-   if (Reverse)
+
+   til::Instruction* Ebop;
+   if (Reverse) {
+     // Only for > or >=
      Ebop = Builder.newBinaryOp(Op, E1, E0);
-   else
-     Ebop = Builder.newBinaryOp(Op, E0, E1);
+   }
+   else {
+     auto* I0 = dyn_cast_or_null<til::Instruction>(E0);
+     auto* I1 = dyn_cast_or_null<til::Instruction>(E1);
+     Ebop = makeBinaryOp(Builder, Op, I0, I1);
+   }
    setBaseTypeFromClangExpr(Ebop, Bo);
    return Ebop;
 }
@@ -631,9 +752,11 @@ til::SExpr *ClangTranslator::translateBinAssign(til::TIL_BinaryOpcode Op,
   if (Op != til::BOP_Eq) {
     auto* Ld = Builder.newLoad(E0);
     setBaseTypeFromClangExpr(Ld, Bo->getLHS());
-    auto* I1 = Builder.newBinaryOp(Op, Ld, E1);
-    setBaseTypeFromClangExpr(I1, Bo);
-    E1 = I1;
+
+    auto* I1 = dyn_cast_or_null<til::Instruction>(E1);
+    auto* Bop = makeBinaryOp(Builder, Op, Ld, I1);
+    setBaseTypeFromClangExpr(Bop, Bo);
+    E1 = Bop;
   }
   Builder.newStore(E0, E1);
   return E0;
@@ -761,7 +884,7 @@ ClangTranslator::translateDeclStmt(const DeclStmt *S, CallingContext *Ctx) {
         insertLocalVar(Vd, Alc);
       }
       else {
-        // TODO: this needs work.  What about constructor calls?
+        // TODO: fix constructor calls
         Builder.newAlloc(Einit, til::Alloc::AK_Stack);
       }
     }

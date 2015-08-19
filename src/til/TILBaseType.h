@@ -63,7 +63,11 @@ struct BaseType {
 
   /// Return true if this is a simple (i.e. non-pointer) type
   bool isSimple() {
-    return (Base != BT_Pointer);
+    return Base != BT_Pointer;
+  }
+
+  bool isPointer() {
+    return Base == BT_Pointer;
   }
 
   /// Return true if this is a numeric (int or float) type
