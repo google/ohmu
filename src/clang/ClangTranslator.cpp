@@ -687,16 +687,19 @@ til::SExpr *ClangTranslator::translateUnaryOperator(const UnaryOperator *Uo,
 
 til::Instruction* makeBinaryOp(til::CFGBuilder& Builder,
                                til::TIL_BinaryOpcode Op,
-                               til::Instruction *E0,
-                               til::Instruction *E1) {
+                               til::SExpr *E0,
+                               til::SExpr *E1) {
+  auto* I0 = dyn_cast_or_null<til::Instruction>(E0);
+  auto* I1 = dyn_cast_or_null<til::Instruction>(E1);
+
   // Handle pointer arithmetic
   if (Op == til::BOP_Add) {
-    if (E0->baseType().isPointer()) {
+    if (I0 && I0->baseType().isPointer()) {
       auto* Ebop = Builder.newArrayAdd(E0, E1);
       Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
       return Ebop;
     }
-    else if (E1->baseType().isPointer()) {
+    else if (I1 && I1->baseType().isPointer()) {
       auto* Ebop = Builder.newArrayAdd(E1, E0);
       Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
       return Ebop;
@@ -704,9 +707,10 @@ til::Instruction* makeBinaryOp(til::CFGBuilder& Builder,
   }
 
   if (Op == til::BOP_Sub) {
-    if (E0->baseType().isPointer()) {
-      auto* SE1  = Builder.newUnaryOp(til::UOP_Negative, E1);
-      SE1->setBaseType(E1->baseType());
+    if (I0 && I0->baseType().isPointer()) {
+      auto* SE1 = Builder.newUnaryOp(til::UOP_Negative, E1);
+      if (I1)
+        SE1->setBaseType(I1->baseType());
       auto* Ebop = Builder.newArrayAdd(E0, SE1);
       Ebop->setBaseType( til::BaseType::getBaseType<void*>() );
       return Ebop;
@@ -726,15 +730,11 @@ til::SExpr *ClangTranslator::translateBinOp(til::TIL_BinaryOpcode Op,
    til::SExpr *E1 = translate(Bo->getRHS(), Ctx);
 
    til::Instruction* Ebop;
-   if (Reverse) {
-     // Only for > or >=
-     Ebop = Builder.newBinaryOp(Op, E1, E0);
-   }
-   else {
-     auto* I0 = dyn_cast_or_null<til::Instruction>(E0);
-     auto* I1 = dyn_cast_or_null<til::Instruction>(E1);
-     Ebop = makeBinaryOp(Builder, Op, I0, I1);
-   }
+   if (Reverse)
+     Ebop = Builder.newBinaryOp(Op, E1, E0);   // Only for > or >=
+   else
+     Ebop = makeBinaryOp(Builder, Op, E0, E1);
+
    setBaseTypeFromClangExpr(Ebop, Bo);
    return Ebop;
 }
@@ -753,8 +753,7 @@ til::SExpr *ClangTranslator::translateBinAssign(til::TIL_BinaryOpcode Op,
     auto* Ld = Builder.newLoad(E0);
     setBaseTypeFromClangExpr(Ld, Bo->getLHS());
 
-    auto* I1 = dyn_cast_or_null<til::Instruction>(E1);
-    auto* Bop = makeBinaryOp(Builder, Op, Ld, I1);
+    auto* Bop = makeBinaryOp(Builder, Op, Ld, E1);
     setBaseTypeFromClangExpr(Bop, Bo);
     E1 = Bop;
   }
