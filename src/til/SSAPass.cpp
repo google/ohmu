@@ -161,28 +161,35 @@ void SSAPass::reduceLoad(Load *Orig) {
     auto* A = dyn_cast<Alloc>(E0);
 
     if (A && A->allocID() > 0 && A->allocID() < CurrentVarMap->size()) {
-      // Remove the use that we marked for this load during traversal.
-      assert(NumUses[A->instrID()] > 0);
-      --NumUses[A->instrID()];
+      int useCount = NumUses[A->instrID()];
+      if (useCount == 1) {
+        // The use count should be exactly 1, since this load is the only
+        // known use.  If it is greater than 1, then the variable has already
+        // escaped; do not do any further replacements.
 
-      auto* Av = CurrentVarMap->at(A->allocID());
-      if (Av) {
-        if (isa<Undefined>(Av)) {
-          // Load value is undefined -- keep the load and alloc.
-          ++NumUses[A->instrID()];
-          resultAttr().Exp = Orig;
+        // Remove the use that we marked for this load during traversal.
+       --NumUses[A->instrID()];
+
+        auto* Av = CurrentVarMap->at(A->allocID());
+        if (Av) {
+          // The value was set in the current basic block.
+          if (isa<Undefined>(Av)) {
+            // Load value is undefined -- keep the load and alloc.
+            ++NumUses[A->instrID()];
+            resultAttr().Exp = Orig;
+          }
+          else {
+            // Replace load with value from current var map.
+            resultAttr().Exp = Av;
+          }
         }
         else {
-          // Replace load with value from current var map.
-          resultAttr().Exp = Av;
+          // Replace load with a future, which does lazy lookup.
+          auto *F = new (FutArena) FutureLoad(Orig, A);
+          PendingLoads.push_back(F);
+          resultAttr().Exp = F;
         }
-      }
-      else {
-        // Replace load with a future, which does lazy lookup.
-        auto *F = new (FutArena) FutureLoad(Orig, A);
-        PendingLoads.push_back(F);
-        resultAttr().Exp = F;
-      }
+      }    // end if (useCount > 0) ...
     }
   }
 }

@@ -272,7 +272,7 @@ protected:
       SS << " = ";
       break;
     }
-    printSExpr(E->definition(), SS, Prec_Decl);
+    printSExpr(E->definition(), SS, Prec_Binary);
     printAnnotations(E, SS);
   }
 
