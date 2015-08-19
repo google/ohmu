@@ -127,7 +127,11 @@ protected:
     BMap[Cb->getBlockID()] = Ob;
   }
 
-  til::SExpr* translateClangType(QualType Qt, ASTContext& Ac);
+  /// Translate a clang type to an Ohmu type.
+  /// LValue is false for values passed in registers, like function params,
+  /// or SSA values, and true for types in writable memory locations, like
+  /// record slots.
+  til::SExpr* translateClangType(QualType Qt, bool LValue = false);
 
 private:
   til::SExpr *translateDeclRefExpr(const DeclRefExpr *Dre,
@@ -159,6 +163,11 @@ private:
   til::SExpr *translateAbstractConditionalOperator(
       const AbstractConditionalOperator *C, CallingContext *Ctx);
 
+  til::SExpr *translateCXXNewExpr(const CXXNewExpr *Ne, CallingContext *Ctx);
+  til::SExpr *translateCXXDeleteExpr(const CXXDeleteExpr *De,
+                                     CallingContext *Ctx);
+  til::SExpr *translateCXXConstructExpr(const CXXConstructExpr *Ce,
+                                        CallingContext *Ctx, til::SExpr *Self);
   til::SExpr *translateDeclStmt(const DeclStmt *S, CallingContext *Ctx);
 
 
@@ -192,7 +201,8 @@ private:
 
   void enterCFGBlockBody(const CFGBlock *B);
   void handleStatement(const Stmt *S);
-  void handleDestructorCall(const VarDecl *VD, const CXXDestructorDecl *DD);
+  void handleDestructorCall(const VarDecl *Vd, const CXXDestructorDecl *Dd);
+  void handleDestructorCall(const Expr *E, const CXXDestructorDecl *Dd);
   void exitCFGBlockBody(const CFGBlock *B);
 
   bool visitSuccessors() { return false; }

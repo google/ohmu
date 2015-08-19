@@ -82,7 +82,7 @@ CapabilityExpr ClangTranslator::translateAttrExpr(const Expr *AttrExp,
     Ctx.NumArgs = CE->getNumArgs();
     Ctx.FunArgs = CE->getArgs();
   } else if (const CXXConstructExpr *CE =
-             dyn_cast<CXXConstructExpr>(DeclExp)) {
+      dyn_cast<CXXConstructExpr>(DeclExp)) {
     Ctx.SelfArg = nullptr;  // Will be set below
     Ctx.NumArgs = CE->getNumArgs();
     Ctx.FunArgs = CE->getArgs();
@@ -210,8 +210,7 @@ static void setBaseTypeFromClangExpr(til::Instruction* I, const Expr *E) {
 }
 
 
-til::SExpr* ClangTranslator::translateClangType(QualType Qt, ASTContext& Ac,
-                                                bool LValue) {
+til::SExpr* ClangTranslator::translateClangType(QualType Qt, bool LValue) {
   if (Qt->isVoidType()) {
     auto *Vt = Builder.newScalarType( til::BaseType::getBaseType<void>() );
     if (!LValue)
@@ -260,7 +259,7 @@ til::SExpr* ClangTranslator::translateClangType(QualType Qt, ASTContext& Ac,
     // default, much like reference types in Java, while scalars are not.
     // If InMemory is true, then the recursive call will automatically "box"
     // non-pointer values into pointer types.
-    auto *Et = translateClangType(Pty->getPointeeType(), Ac, true);
+    auto *Et = translateClangType(Pty->getPointeeType(), true);
     if (!LValue)
       return Et;
     else
@@ -268,11 +267,15 @@ til::SExpr* ClangTranslator::translateClangType(QualType Qt, ASTContext& Ac,
   }
 
   if (auto* Pty = dyn_cast<ReferenceType>(Ty)) {
-    auto *Et = translateClangType(Pty->getPointeeType(), Ac, true);
+    auto *Et = translateClangType(Pty->getPointeeType(), true);
     if (!LValue)
       return Et;
     else
       return Builder.newField(Et, nullptr);
+  }
+
+  if (auto* Tdty = dyn_cast<TypedefType>(Ty)) {
+    return translateClangType(Tdty->desugar(), LValue);
   }
 
   return Builder.newUndefined();
@@ -369,6 +372,12 @@ til::SExpr *ClangTranslator::translate(const Stmt *S, CallingContext *Ctx) {
     Res = translateGNUNullExpr(cast<GNUNullExpr>(S), Ctx);
     break;
 
+  case Stmt::CXXNewExprClass:
+    Res = translateCXXNewExpr(cast<CXXNewExpr>(S), Ctx);
+    break;
+  case Stmt::CXXDeleteExprClass:
+    Res = translateCXXDeleteExpr(cast<CXXDeleteExpr>(S), Ctx);
+    break;
   case Stmt::DeclStmtClass:
     Res = translateDeclStmt(cast<DeclStmt>(S), Ctx);
     break;
@@ -864,6 +873,53 @@ ClangTranslator::translateAbstractConditionalOperator(
 }
 
 
+til::SExpr *ClangTranslator::translateCXXNewExpr(const CXXNewExpr *Ne,
+                                                 CallingContext *Ctx) {
+  QualType Qt = Ne->getAllocatedType();
+  auto *Typ = translateClangType(Qt);
+  auto *Alc = Builder.newAlloc(Typ, til::Alloc::AK_Heap);
+
+  // TODO: handle arrays, operator new, and placement args.
+  if (auto* Ein = Ne->getInitializer()) {
+    if (auto* Ce = dyn_cast<CXXConstructExpr>(Ein)) {
+      translateCXXConstructExpr(Ce, Ctx, Alc);
+    }
+    else {
+      // We don't understand the initializer
+      ensureAddInstr( Builder.newUndefined() );
+    }
+  }
+
+  return Alc;
+}
+
+
+til::SExpr *ClangTranslator::translateCXXDeleteExpr(const CXXDeleteExpr *De,
+                                                    CallingContext *Ctx) {
+  // TODO: need Ohmu free opcode.
+  auto *E = Builder.newUndefined();
+  ensureAddInstr(E);
+  return E;
+}
+
+
+til::SExpr *
+ClangTranslator::translateCXXConstructExpr(const CXXConstructExpr *Ce,
+                                           CallingContext *Ctx,
+                                           til::SExpr *Self) {
+  StringRef Cname = getDeclName(Builder.arena(), Ce->getConstructor(), true);
+  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
+
+  Fun = Builder.newApply(Fun, Self);
+  for (const Expr* Arg : Ce->arguments()) {
+    auto *A = translate(Arg, Ctx);
+    Fun = Builder.newApply(Fun, A);
+  }
+  auto* C = Builder.newCall(Fun);
+  return C;
+}
+
+
 til::SExpr *
 ClangTranslator::translateDeclStmt(const DeclStmt *S, CallingContext *Ctx) {
   if (CapabilityExprMode)
@@ -871,23 +927,34 @@ ClangTranslator::translateDeclStmt(const DeclStmt *S, CallingContext *Ctx) {
 
   for (Decl* D : S->getDeclGroup()) {
     if (VarDecl *Vd = dyn_cast_or_null<VarDecl>(D)) {
-      til::SExpr* Einit = translate(Vd->getInit(), Ctx);
-
       // Add local variables with trivial type to the variable map
       QualType Qt = Vd->getType();
       if (Qt.isTrivialType(Vd->getASTContext())) {
-        auto *Typ = translateClangType(Qt, Vd->getASTContext());
+        auto *Einit = translate(Vd->getInit(), Ctx);
+        auto *Typ = translateClangType(Qt);
         auto *Fld = Builder.newField(Typ, Einit);
         auto* Alc = Builder.newAlloc(Fld, til::Alloc::AK_Stack);
         Alc->setInstrName(Builder, Vd->getName());
         insertLocalVar(Vd, Alc);
       }
       else {
-        // TODO: fix constructor calls
-        Builder.newAlloc(Einit, til::Alloc::AK_Stack);
+        auto *Typ = translateClangType(Qt);
+        auto *Alc = Builder.newAlloc(Typ, til::Alloc::AK_Stack);
+        Alc->setInstrName(Builder, Vd->getName());
+
+        if (auto* Ein = Vd->getInit()) {
+          if (auto* Ce = dyn_cast<CXXConstructExpr>(Ein)) {
+            translateCXXConstructExpr(Ce, Ctx, Alc);
+          }
+          else {
+            // We don't understand the initializer
+            ensureAddInstr( Builder.newUndefined() );
+          }
+        }
+        insertLocalVar(Vd, Alc);
       }
     }
-    // TODO: don't just ignore these...
+    // TODO: don't just ignore these.
   }
   return nullptr;
 }
@@ -1007,17 +1074,15 @@ void ClangTranslator::enterCFG(CFG *Cfg, const NamedDecl *D,
   // Get parameters and return type from clang Decl
   QualType RType;
   ArrayRef<ParmVarDecl*> Parms;
-  ASTContext* AstCtx;
+
   if (auto* Fcd = dyn_cast<ObjCMethodDecl>(D)) {
     Parms  = Fcd->parameters();
     RType  = Fcd->getReturnType();
-    AstCtx = &Fcd->getASTContext();
   }
   else {
     auto* Fd = dyn_cast<FunctionDecl>(D);
     Parms  = Fd->parameters();
     RType  = Fd->getReturnType();
-    AstCtx = &Fd->getASTContext();
   }
 
   std::vector<std::pair<til::SExpr*, til::Variable*>>  FunParams;
@@ -1035,7 +1100,7 @@ void ClangTranslator::enterCFG(CFG *Cfg, const NamedDecl *D,
   }
 
   for (auto *Pm : Parms) {
-    til::SExpr* Typ = translateClangType(Pm->getType(), *AstCtx);
+    til::SExpr* Typ = translateClangType(Pm->getType());
     auto* Fvd = Builder.newVarDecl(til::VarDecl::VK_Fun, Pm->getName(), Typ);
     auto *Fun = Builder.newFunction(Fvd, nullptr);
 
@@ -1050,7 +1115,7 @@ void ClangTranslator::enterCFG(CFG *Cfg, const NamedDecl *D,
     OldFun = Fun;
   }
 
-  til::SExpr* Rty = translateClangType(RType, *AstCtx);
+  til::SExpr* Rty = translateClangType(RType);
   auto* Funbody = Builder.newCode(Rty, nullptr);
   if (OldFun)
     OldFun->setBody(Funbody);
@@ -1123,15 +1188,25 @@ void ClangTranslator::handleStatement(const Stmt *S) {
 }
 
 
-void ClangTranslator::handleDestructorCall(const VarDecl *VD,
-                                           const CXXDestructorDecl *DD) {
-  /*
-  til::SExpr *Sf = new (Arena) til::LiteralPtr(VD);
-  til::SExpr *Dr = new (Arena) til::LiteralPtr(DD);
-  til::SExpr *Ap = new (Arena) til::Apply(Dr, Sf);
-  til::SExpr *E = new (Arena) til::Call(Ap);
-  addStatement(E, nullptr);
-  */
+void ClangTranslator::handleDestructorCall(const VarDecl *Vd,
+                                           const CXXDestructorDecl *Dd) {
+  auto* V = lookupLocalVar(Vd);
+
+  StringRef Cname = getDeclName(Builder.arena(), Dd, true);
+  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
+  Fun = Builder.newApply(Fun, V);
+  Builder.newCall(Fun);
+}
+
+
+void ClangTranslator::handleDestructorCall(const Expr *E,
+                                           const CXXDestructorDecl *Dd) {
+  auto *Ep = translate(E, nullptr);
+
+  StringRef Cname = getDeclName(Builder.arena(), Dd, true);
+  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
+  Fun = Builder.newApply(Fun, Ep);
+  Builder.newCall(Fun);
 }
 
 

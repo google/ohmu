@@ -42,7 +42,8 @@ class CFGVisitor {
   void handleStatement(const Stmt *S) {}
 
   // Process a destructor call
-  void handleDestructorCall(const VarDecl *VD, const CXXDestructorDecl *DD) {}
+  void handleDestructorCall(const Expr *E, const CXXDestructorDecl *Dd) {}
+  void handleDestructorCall(const VarDecl *Vd, const CXXDestructorDecl *Dd) {}
 
   // Called after all statements have been handled.
   void exitCFGBlockBody(const CFGBlock *B) {}
@@ -124,18 +125,29 @@ public:
       V.enterCFGBlockBody(CurrBlock);
 
       // Process statements
-      for (const auto &BI : *CurrBlock) {
-        switch (BI.getKind()) {
+      for (const auto &Bi : *CurrBlock) {
+        switch (Bi.getKind()) {
         case CFGElement::Statement: {
-          V.handleStatement(BI.castAs<CFGStmt>().getStmt());
+          const CFGStmt* S = reinterpret_cast<const CFGStmt*>(&Bi);
+          V.handleStatement(S->getStmt());
+          break;
+        }
+        case CFGElement::DeleteDtor: {
+          const CFGDeleteDtor* Dtor =
+              reinterpret_cast<const CFGDeleteDtor*>(&Bi);
+          CXXDestructorDecl *Dd = const_cast<CXXDestructorDecl*>(
+              Dtor->getDestructorDecl(ACtx->getASTContext()));
+          const Expr *E = Dtor->getDeleteExpr()->getArgument();
+          V.handleDestructorCall(E, Dd);
           break;
         }
         case CFGElement::AutomaticObjectDtor: {
-          CFGAutomaticObjDtor AD = BI.castAs<CFGAutomaticObjDtor>();
-          CXXDestructorDecl *DD = const_cast<CXXDestructorDecl*>(
-              AD.getDestructorDecl(ACtx->getASTContext()));
-          VarDecl *VD = const_cast<VarDecl*>(AD.getVarDecl());
-          V.handleDestructorCall(VD, DD);
+          const CFGAutomaticObjDtor* Dtor =
+              reinterpret_cast<const CFGAutomaticObjDtor*>(&Bi);
+          CXXDestructorDecl *Dd = const_cast<CXXDestructorDecl*>(
+              Dtor->getDestructorDecl(ACtx->getASTContext()));
+          VarDecl *Vd = const_cast<VarDecl*>(Dtor->getVarDecl());
+          V.handleDestructorCall(Vd, Dd);
           break;
         }
         default:
