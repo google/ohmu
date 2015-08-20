@@ -1,39 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
-add_executable(test_base test_base.cpp)
-target_link_libraries(test_base base)
-
-add_library(test_visitor test_visitor.cpp)
-
-add_executable(test_serialization test_serialization.cpp)
-target_link_libraries(test_serialization til)
-
-add_executable(test_copier test_copier.cpp)
-target_link_libraries(test_copier til)
-
-add_executable(test_compare test_compare.cpp)
-target_link_libraries(test_compare parser til)
-add_dependencies(test_compare ohmu_grammar)
-
-add_executable(test_BNFParser test_BNFParser.cpp)
-target_link_libraries(test_BNFParser base parser til)
-add_dependencies(test_BNFParser parser_grammar)
-
-add_executable(test_parser test_parser.cpp)
-target_link_libraries(test_parser parser til)
-add_dependencies(test_parser ohmu_grammar)
-
-#add_executable(test_llvm test_llvm.cpp)
-#target_link_libraries(test_llvm base parser til backend_llvm ${llvm_libs})
-#add_dependencies(test_llvm ohmu_grammar)
-
-add_executable(test_lsa test_lsa.cpp test_lsa_callgraph.cpp)
-
-target_link_libraries(test_lsa lsa)
-
-add_custom_target(run_test_lsa)
-add_custom_command(
-    TARGET  run_test_lsa
-    DEPENDS run_test_lsa.sh
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/run_test_lsa.sh ${CMAKE_CURRENT_BINARY_DIR}/run_test_lsa.sh)
-add_dependencies(test_lsa run_test_lsa)
+add_subdirectory(backend)
+add_subdirectory(base)
+add_subdirectory(lsa)
+add_subdirectory(parser)
+add_subdirectory(til)

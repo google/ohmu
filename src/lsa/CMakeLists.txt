@@ -41,3 +41,5 @@ target_link_libraries(lsa
   LLVMCore
   LLVMSupport
 )
+
+add_subdirectory (examples)

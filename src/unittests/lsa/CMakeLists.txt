@@ -1,3 +1,12 @@
-add_executable(lsa_unittests BuildCallGraphTest.cpp)
-target_link_libraries(lsa_unittests lsa)
-run_test(lsa_unittests)
+add_executable(lsa_callgraph_unittests BuildCallGraphTest.cpp)
+target_link_libraries(lsa_callgraph_unittests lsa)
+run_test(lsa_callgraph_unittests)
+
+add_executable(lsa_standalone_graph_unittests
+  StandaloneGraphComputationTest.cpp)
+target_link_libraries(lsa_standalone_graph_unittests lsa)
+run_test(lsa_standalone_graph_unittests)
+
+add_executable(lsa_scc_unittests SCCComputationTest.cpp)
+target_link_libraries(lsa_scc_unittests lsa_examples)
+run_test(lsa_scc_unittests)
