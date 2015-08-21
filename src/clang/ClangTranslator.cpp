@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <iostream>
 
@@ -47,6 +48,56 @@ static StringRef getDeclName(MemRegionRef A, const NamedDecl *D,
     return getStringRefFromString(A, D->getNameAsString());
   return D->getName();
 }
+
+
+StringRef ClangTranslator::getMangledValueName(const NamedDecl* Nd) {
+  if (!isa<FunctionDecl>(Nd) && !isa<VarDecl>(Nd))
+    return getDeclName(Builder.arena(), Nd, true);
+
+  if (!Mangler) {
+    // Grab ourselves a mangler on first use...
+    Mangler.reset(Nd->getASTContext().createMangleContext());
+  }
+
+  std::string mangledName;
+  llvm::raw_string_ostream Sos(mangledName);
+
+  if (auto *Cd = dyn_cast<CXXConstructorDecl>(Nd))
+    Mangler->mangleCXXCtor(Cd, Ctor_Base, Sos);
+  else if (auto *Dd = dyn_cast<CXXDestructorDecl>(Nd))
+    Mangler->mangleCXXDtor(Dd, Dtor_Base, Sos);
+  else
+    Mangler->mangleName(Nd, Sos);
+
+  return getStringRefFromString(Builder.arena(), Sos.str());
+}
+
+
+StringRef ClangTranslator::getMangledTypeName(const Type* Ty,
+                                              const NamedDecl *Nd) {
+  if (!Mangler) {
+    // Grab ourselves a mangler on first use...
+    Mangler.reset(Nd->getASTContext().createMangleContext());
+  }
+
+  // Grab the generic version with no qualifiers
+  QualType Qt(Ty, Qualifiers().getAsOpaqueValue());
+
+  std::string mangledName;
+  llvm::raw_string_ostream Sos(mangledName);
+  Mangler->mangleTypeName(Qt, Sos);
+  return getStringRefFromString(Builder.arena(), Sos.str());
+}
+
+
+til::Project* ClangTranslator::makeProjectFromDecl(til::SExpr* E,
+                                                   const NamedDecl *D) {
+  StringRef S = getMangledValueName(D);
+  auto *P = Builder.newProject(E, S);
+  P->setForeignSlotDecl(D);
+  return P;
+}
+
 
 
 
@@ -172,8 +223,10 @@ static til::BaseType getBaseTypeFromClangType(QualType Qt) {
         return til::BaseType::getBaseType<void>();
       case BuiltinType::Bool:
         return til::BaseType::getBaseType<bool>();
+      case BuiltinType::Char_U:
       case BuiltinType::UChar:
         return til::BaseType::getBaseType<unsigned char>();
+      case BuiltinType::Char_S:
       case BuiltinType::SChar:
         return til::BaseType::getBaseType<signed char>();
 
@@ -233,8 +286,11 @@ til::SExpr* ClangTranslator::translateClangType(QualType Qt, bool LValue) {
   }
 
   if (auto* Ety = dyn_cast<EnumType>(Ty)) {
-    StringRef S = getDeclName(Builder.arena(), Ety->getDecl(), true);
+    auto* Ed = Ety->getDecl();
+    StringRef S = getMangledTypeName(Ety, Ed);
     auto* Et = Builder.newProject(nullptr, S);
+    Et->setForeignSlotDecl(Ed);
+
     if (!LValue)
       return Et;
     else
@@ -249,8 +305,19 @@ til::SExpr* ClangTranslator::translateClangType(QualType Qt, bool LValue) {
     //   void f(Foo *x)
     // The only difference is whether the caller has to create a copy.
     // TODO: return an owned type if !LValue
-    StringRef S = getDeclName(Builder.arena(), Rty->getDecl(), true);
-    return Builder.newProject(nullptr, S);
+
+    RecordDecl* Rd = Rty->getDecl();
+    StringRef S = getMangledTypeName(Rty, Rd);
+    auto* P = Builder.newProject(nullptr, S);
+    P->setForeignSlotDecl(Rd);
+    return P;
+  }
+
+  if (auto *Tmty = dyn_cast<TemplateSpecializationType>(Ty)) {
+    // Non-dependent specializations are always sugar, so we only worry about
+    // sugared types.
+    if (Tmty->isSugared())
+      return translateClangType(Tmty->desugar(), LValue);
   }
 
   if (auto *Pty = dyn_cast<PointerType>(Ty)) {
@@ -277,6 +344,13 @@ til::SExpr* ClangTranslator::translateClangType(QualType Qt, bool LValue) {
   if (auto* Tdty = dyn_cast<TypedefType>(Ty)) {
     return translateClangType(Tdty->desugar(), LValue);
   }
+
+  if (auto* Pt = dyn_cast<ParenType>(Ty)) {
+    return translateClangType(Pt->desugar(), LValue);
+  }
+
+  // For debugging
+  // Ty->dump();
 
   return Builder.newUndefined();
 }
@@ -388,6 +462,9 @@ til::SExpr *ClangTranslator::translate(const Stmt *S, CallingContext *Ctx) {
   }
   }
 
+  // For debugging:
+  // S->dump();
+
   if (!Res)
     Res = Builder.newUndefined();
 
@@ -425,10 +502,7 @@ til::SExpr *ClangTranslator::translateDeclRefExpr(const DeclRefExpr *Dre,
   }
 
   // Treat global variables as projections from the global scope
-  auto *P = Builder.newProject(nullptr, getDeclName(Builder.arena(), Vd));
-  P->setForeignSlotDecl(Vd);
-
-  return P;
+  return makeProjectFromDecl(nullptr, Vd);
 }
 
 
@@ -483,9 +557,7 @@ til::SExpr *ClangTranslator::translateMemberExpr(const MemberExpr *Me,
   if (auto *Vd = dyn_cast<CXXMethodDecl>(D))
     D = getFirstVirtualDecl(Vd);
 
-  StringRef Nm = getDeclName(Builder.arena(), D);
-  til::Project *P = Builder.newProject(E, Nm);
-  P->setForeignSlotDecl(D);
+  auto* P = makeProjectFromDecl(E, D);
 
   if (hasCppPointerType(Be))
     P->setArrow(true);
@@ -907,8 +979,7 @@ til::SExpr *
 ClangTranslator::translateCXXConstructExpr(const CXXConstructExpr *Ce,
                                            CallingContext *Ctx,
                                            til::SExpr *Self) {
-  StringRef Cname = getDeclName(Builder.arena(), Ce->getConstructor(), true);
-  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
+  til::SExpr* Fun = makeProjectFromDecl(nullptr, Ce->getConstructor());
 
   Fun = Builder.newApply(Fun, Self);
   for (const Expr* Arg : Ce->arguments()) {
@@ -1127,7 +1198,7 @@ void ClangTranslator::enterCFG(CFG *Cfg, const NamedDecl *D,
     Topdef = TopFun;
   else
     Topdef = Funbody;
-  StringRef SltNm = getDeclName(Builder.arena(), D, true);
+  StringRef SltNm = getMangledValueName(D);
   TopLevelSlot = Builder.newSlot(SltNm, Topdef);
 
   // Create a new CFG
@@ -1191,9 +1262,8 @@ void ClangTranslator::handleStatement(const Stmt *S) {
 void ClangTranslator::handleDestructorCall(const VarDecl *Vd,
                                            const CXXDestructorDecl *Dd) {
   auto* V = lookupLocalVar(Vd);
+  til::SExpr* Fun = makeProjectFromDecl(nullptr, Dd);
 
-  StringRef Cname = getDeclName(Builder.arena(), Dd, true);
-  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
   Fun = Builder.newApply(Fun, V);
   Builder.newCall(Fun);
 }
@@ -1202,9 +1272,8 @@ void ClangTranslator::handleDestructorCall(const VarDecl *Vd,
 void ClangTranslator::handleDestructorCall(const Expr *E,
                                            const CXXDestructorDecl *Dd) {
   auto *Ep = translate(E, nullptr);
+  til::SExpr* Fun = makeProjectFromDecl(nullptr, Dd);
 
-  StringRef Cname = getDeclName(Builder.arena(), Dd, true);
-  til::SExpr* Fun = Builder.newProject(nullptr, Cname);
   Fun = Builder.newApply(Fun, Ep);
   Builder.newCall(Fun);
 }
