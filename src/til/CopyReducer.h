@@ -115,7 +115,7 @@ public:
   void enterCFG(SCFG *Cfg) {
     if (Cfg) {
       // We are rewriting a CFG to a CFG.
-      Builder.beginCFG(nullptr, Cfg->numBlocks(), Cfg->numInstructions());
+      Builder.beginCFG(nullptr);
       this->scope()->enterCFG(Cfg, Builder.currentCFG());
     }
     else {

@@ -94,22 +94,22 @@ public:
   void exitScope();
 
   /// Start working on the given CFG.
-  /// If Cfg is null, then create a new one.
-  /// If Cfg is not null, then NumBlocks and NumInstrs are ignored.
-  virtual SCFG* beginCFG(SCFG *Cfg, unsigned NumBlocks = 0,
-                                    unsigned NumInstrs = 0);
+  /// If Cfg is not null, then start building Cfg.
+  /// If Cfg is null, then create a new one, and if createEntryExit,
+  /// then initialize the new CFG with entry and exit blocks.
+  SCFG* beginCFG(SCFG *Cfg, bool createEntryExit = true);
 
   /// Finish working on the current CFG.
-  virtual void endCFG();
+  void endCFG();
 
   /// Start working on the given basic block.
   /// If Overwrite is true, any existing instructions will marked as "removed"
   /// from the block.  They will not actually be removed until endBlock() is
   /// is called, so in-place rewriting passes can still traverse them.
-  virtual void beginBlock(BasicBlock *B, bool Overwrite = false);
+  void beginBlock(BasicBlock *B, bool Overwrite = false);
 
   /// Finish working on the current basic block.
-  virtual void endBlock(Terminator *Term);
+  void endBlock(Terminator *Term);
 
 
   VarDecl* newVarDecl(VarDecl::VariableKind K, StringRef S, SExpr* E) {
@@ -184,6 +184,15 @@ public:
   }
   Cast* newCast(TIL_CastOpcode Op, SExpr* E0) {
     return addInstr(new (Arena) Cast(Op, E0));
+  }
+
+  /// Create a new Phi node. This should only be used in special circumstances;
+  /// Phi nodes are normally handled at block creation time.
+  Phi* newPhi(int numPreds, bool addAsArgument = true) {
+    auto* Ph = new (arena()) Phi(arena(), numPreds);
+    if (addAsArgument)
+      addArg(Ph);
+    return Ph;
   }
 
   /// Terminate the current block with a Goto instruction.

@@ -14,8 +14,9 @@
 namespace ohmu {
 namespace til {
 
+
 InstrNameAnnot *InstrNameAnnot::copy(CFGBuilder &Builder,
-    const std::vector<SExpr*> &SubExprs) {
+                                     const std::vector<SExpr*> &SubExprs) {
   return Builder.newAnnotationT<InstrNameAnnot>(Name);
 }
 
@@ -28,8 +29,9 @@ InstrNameAnnot *InstrNameAnnot::deserialize(BytecodeReader *B) {
   return B->getBuilder().newAnnotationT<InstrNameAnnot>(Nm);
 }
 
+
 SourceLocAnnot *SourceLocAnnot::copy(CFGBuilder &Builder,
-    const std::vector<SExpr*> &SubExprs) {
+                                     const std::vector<SExpr*> &SubExprs) {
   return Builder.newAnnotationT<SourceLocAnnot>(Position);
 }
 
@@ -42,13 +44,14 @@ SourceLocAnnot *SourceLocAnnot::deserialize(BytecodeReader *B) {
   return B->getBuilder().newAnnotationT<SourceLocAnnot>(P);
 }
 
-PreconditionAnnot *PreconditionAnnot::copy(CFGBuilder &Builder,
-    const std::vector<SExpr*> &SubExprs) {
+
+PreconditionAnnot*
+PreconditionAnnot::copy(CFGBuilder &Builder,
+                        const std::vector<SExpr*> &SubExprs) {
   return Builder.newAnnotationT<PreconditionAnnot>(SubExprs.at(0));
 }
 
-void PreconditionAnnot::serialize(BytecodeWriter *B) {
-}
+void PreconditionAnnot::serialize(BytecodeWriter *B) { }
 
 PreconditionAnnot *PreconditionAnnot::deserialize(BytecodeReader *B) {
   PreconditionAnnot *A =
@@ -57,14 +60,14 @@ PreconditionAnnot *PreconditionAnnot::deserialize(BytecodeReader *B) {
   return A;
 }
 
+
 TestTripletAnnot *TestTripletAnnot::copy(CFGBuilder &Builder,
     const std::vector<SExpr*> &SubExprs) {
   return Builder.newAnnotationT<TestTripletAnnot>(
       SubExprs.at(0), SubExprs.at(1), SubExprs.at(2));
 }
 
-void TestTripletAnnot::serialize(BytecodeWriter *B) {
-}
+void TestTripletAnnot::serialize(BytecodeWriter *B) { }
 
 TestTripletAnnot *TestTripletAnnot::deserialize(BytecodeReader *B) {
   TestTripletAnnot *A = B->getBuilder().newAnnotationT<TestTripletAnnot>(

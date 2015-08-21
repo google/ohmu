@@ -42,14 +42,14 @@ void ByteStreamReaderBase::refill() {
 }
 
 
-void ByteStreamWriterBase::endRecord() {
-  if (length() <= BytecodeBase::MaxRecordSize)
+void ByteStreamWriterBase::endAtom() {
+  if (length() <= BytecodeBase::MaxAtomSize)
     flush();
 }
 
 
-void ByteStreamReaderBase::endRecord() {
-  if (length() <= BytecodeBase::MaxRecordSize)
+void ByteStreamReaderBase::endAtom() {
+  if (length() <= BytecodeBase::MaxAtomSize)
     refill();
 }
 
@@ -61,7 +61,7 @@ void ByteStreamWriterBase::writeBytes(const void *Data, int64_t Size) {
     return;
   }
   // Flush buffer if the write would fill it up.
-  if (length() - Size <= BytecodeBase::MaxRecordSize)
+  if (length() - Size <= BytecodeBase::MaxAtomSize)
     flush();
 
   memcpy(Buffer.data() + Pos, Data, Size);
@@ -99,7 +99,7 @@ void ByteStreamReaderBase::readBytes(void *Data, int64_t Size) {
   // Size < length() at this point.
   memcpy(Data, Buffer.data() + Pos, Size);
   Pos += Size;
-  if (length() < BytecodeBase::MaxRecordSize)
+  if (length() < BytecodeBase::MaxAtomSize)
     refill();
 }
 
@@ -258,6 +258,37 @@ StringRef ByteStreamReaderBase::readString() {
 
 /** BytecodeWriter and BytecodeReader **/
 
+VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
+  if (Vidx >= Vars.size()) {
+    fail("Invalid variable ID.");
+    return nullptr;
+  }
+  return Vars[Vidx];
+}
+
+
+BasicBlock *BytecodeReader::getBlock(int Bid, int Nargs) {
+  if (Bid == BasicBlock::InvalidBlockID)
+    return nullptr;
+
+  if (Bid >= static_cast<int>(Blocks.size())) {
+    fail("Invalid block ID.");
+    return nullptr;
+  }
+
+  auto *Bb = Blocks[Bid];
+  if (!Bb) {
+    Bb = Builder.newBlock(Nargs);
+    Blocks[Bid] = Bb;
+  }
+  else if (Bb->numArguments() != Nargs) {
+    fail("Block has wrong number of arguments.");
+  }
+  return Bb;
+}
+
+
+
 void BytecodeWriter::enterScope(VarDecl *Vd) {
   writePseudoOpcode(PSOP_EnterScope);
 }
@@ -299,6 +330,9 @@ void BytecodeReader::enterBlock() {
   auto *Bb = Builder.currentBB();
   for (unsigned i = 0, n = Bb->numArguments(); i < n; ++i)
     Instrs[CurrentInstrID++] = Bb->arguments()[i];
+
+  // Reset current argument
+  CurrentArg = 0;
 }
 
 
@@ -346,42 +380,27 @@ void BytecodeReader::readSCFG() {
   assert(Stack.size() == CFGStackSize && "Internal error.");
   CFGStackSize = 0;
 
-  auto *E = Builder.currentCFG();
+  auto *Cfg = Builder.currentCFG();
+
+  // We added the blocks in an arbitrary order, so renumber blocks to match
+  // the original.
+  if (Cfg->numBlocks() != Blocks.size()) {
+    fail("Failed to read all blocks.");
+    return;
+  }
+
+  for (int i = 0, n = Blocks.size(); i < n; ++i) {
+    auto* B = Blocks[i];
+    Cfg->blocks()[i].reset(B);
+    B->setBlockID(i);
+  }
+
   Builder.endCFG();
   Blocks.clear();
   Instrs.clear();
-  push(E);
+  push(Cfg);
 }
 
-
-VarDecl *BytecodeReader::getVarDecl(unsigned Vidx) {
-  if (Vidx >= Vars.size()) {
-    fail("Invalid variable ID.");
-    return nullptr;
-  }
-  return Vars[Vidx];
-}
-
-
-BasicBlock *BytecodeReader::getBlock(unsigned Bid, unsigned Nargs) {
-  if (Bid == BasicBlock::InvalidBlockID)
-    return nullptr;
-
-  if (Bid >= Blocks.size()) {
-    fail("Invalid block ID.");
-    return nullptr;
-  }
-
-  auto *Bb = Blocks[Bid];
-  if (!Bb) {
-    Bb = Builder.newBlock(Nargs);
-    Blocks[Bid] = Bb;
-  }
-  else if (Bb->numArguments() != Nargs) {
-    fail("Block has wrong number of arguments.");
-  }
-  return Bb;
-}
 
 
 void BytecodeWriter::reduceNull() {
@@ -413,7 +432,8 @@ void BytecodeWriter::reduceBBArgument(Phi *E) {
 }
 
 void BytecodeReader::readBBArgument() {
-  drop(1); // Ignore: arguments should already have been added.
+  ++CurrentArg;
+  drop(1);        // Arguments should already have been added.
 }
 
 
@@ -463,7 +483,6 @@ void BytecodeReader::readFunction() {
   drop(2);
   push(E);
 }
-
 
 
 void BytecodeWriter::reduceCode(Code *E) {
@@ -557,11 +576,11 @@ void BytecodeReader::readScalarType() {
   push(E);
 }
 
+
 void BytecodeWriter::reduceLiteral(Literal *E) {
   writeOpcode(COP_Literal);
   writeBaseType(BaseType::getBaseType<void>());
 }
-
 
 template<class T>
 class BytecodeReader::ReadLiteralFun {
@@ -749,15 +768,17 @@ void BytecodeReader::readCast() {
 
 
 void BytecodeWriter::reducePhi(Phi *E) {
-  // Phi nodes are handled by reduceGoto.
-  // This is here in case we encounter one by accident.
-  reduceNull();
+  writeOpcode(COP_Phi);
 }
 
 void BytecodeReader::readPhi() {
-  // Phi nodes are handled by reduceGoto.
-  // This is here in case we encounter one by accident.
-  readNull();
+  if (Builder.currentBB() && CurrentArg < Builder.currentBB()->numArguments())
+    // Grab the current argument, which was previously created.
+    // See also readBBArgument().
+    push(Builder.currentBB()->arguments()[CurrentArg]);
+  else
+    // This should never happen -- all Phi nodes should be arguments.
+    push(Builder.newPhi(0,false));
 }
 
 
@@ -887,20 +908,9 @@ void BytecodeReader::readIfThenElse() {
 }
 
 
-void BytecodeReader::readAllAnnotations() {
-  assert(false && "Should be no annotations.");
-  auto Akind = readPseudoAnnKind();
-  while (Akind != PSANN_ExitAnn) {
-    readAnnotationByKind(getAnnotationKind(Akind));
-    Akind = readPseudoAnnKind();
-  }
-}
-
 
 void BytecodeReader::readSExpr() {
   auto Psop = readPseudoOpcode();
-  // if (Psop < PSOP_Last)
-  //   std::cerr << "Psop: " << Psop << "\n";
   switch (Psop) {
     case PSOP_Null:          readNull();          break;
     case PSOP_WeakInstrRef:  readWeak();          break;
@@ -910,20 +920,25 @@ void BytecodeReader::readSExpr() {
     case PSOP_ExitScope:     exitScope();         break;
     case PSOP_EnterBlock:    enterBlock();        break;
     case PSOP_EnterCFG:      enterCFG();          break;
-    case PSOP_EnterAnn:      readAllAnnotations();    break;
+    case PSOP_Annotation:    readAnnotation();    break;
     default:
       readSExprByType(getOpcode(Psop));  break;
   }
-  Reader->endRecord();
+  Reader->endAtom();
 }
 
 void BytecodeReader::readSExprByType(TIL_Opcode op) {
-  // std::cerr << "Op: " << getOpcodeString(op) << "\n";
   switch(op) {
 #define TIL_OPCODE_DEF(X) \
     case COP_##X: read##X(); break;
 #include "TILOps.def"
   }
+}
+
+
+void BytecodeReader::readAnnotation() {
+  TIL_AnnKind Ak = readFlag<TIL_AnnKind>();
+  readAnnotationByKind(Ak);
 }
 
 
@@ -937,9 +952,11 @@ void BytecodeReader::readAnnotationByKind(TIL_AnnKind Ak) {
   arg(0)->addAnnotation(A);
 }
 
+
 SExpr* BytecodeReader::read() {
-  while (!Reader->empty() && success())
+  while (!Reader->empty() && success()) {
     readSExpr();
+  }
   if (!success())
     return nullptr;
   if (Stack.size() == 0) {
@@ -952,6 +969,7 @@ SExpr* BytecodeReader::read() {
   }
   return Stack[0];
 }
+
 
 void BytecodeStringWriter::dump() {
   std::string Str = Buffer.str();

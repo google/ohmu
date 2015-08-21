@@ -41,7 +41,7 @@ void CFGBuilder::exitScope() {
 
 
 
-SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
+SCFG* CFGBuilder::beginCFG(SCFG *Cfg, bool createEntryExit) {
   assert(!CurrentCFG && !CurrentBB && "Already inside a CFG");
 
   CurrentState.EmitInstrs = true;
@@ -52,20 +52,22 @@ SCFG* CFGBuilder::beginCFG(SCFG *Cfg, unsigned NumBlocks, unsigned NumInstrs) {
 
   CurrentCFG = new (Arena) SCFG(Arena, 0);
 
-  auto* Entry = new (Arena) BasicBlock(Arena);
-  auto* Exit  = new (Arena) BasicBlock(Arena);
-  auto *V     = new (Arena) Phi();
-  auto *Ret   = new (Arena) Return(V);
+  if (createEntryExit) {
+    auto* Entry = new (Arena) BasicBlock(Arena);
+    auto* Exit  = new (Arena) BasicBlock(Arena);
+    auto *V     = new (Arena) Phi();
+    auto *Ret   = new (Arena) Return(V);
 
-  Exit->addArgument(V);
-  Exit->setTerminator(Ret);
-  Entry->setBlockID(0);
-  Exit->setBlockID(1);
+    Exit->addArgument(V);
+    Exit->setTerminator(Ret);
+    Entry->setBlockID(0);
+    Exit->setBlockID(1);
 
-  CurrentCFG->add(Entry);
-  CurrentCFG->add(Exit);
-  CurrentCFG->setEntry(Entry);
-  CurrentCFG->setExit(Exit);
+    CurrentCFG->add(Entry);
+    CurrentCFG->add(Exit);
+    CurrentCFG->setEntry(Entry);
+    CurrentCFG->setExit(Exit);
+  }
 
   return CurrentCFG;
 }

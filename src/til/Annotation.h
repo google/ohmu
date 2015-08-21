@@ -47,8 +47,9 @@ public:
       return;
     assert(A->kind() >= kind() && "Keep annotations sorted, change list head.");
     Annotation *Ap = this;
-    while (Ap->next() && A->kind() >= Ap->kind())
+    while (Ap->next() && A->kind() >= Ap->kind()) {
       Ap = Ap->next();
+    }
     A->Next = Ap->next();
     Ap->Next = A;
   }

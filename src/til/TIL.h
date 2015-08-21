@@ -1362,7 +1362,7 @@ public:
   typedef ArrayTree<SExprRefT<BasicBlock>, 2>  PredArray;
   typedef ArrayTree<SExprRefT<BasicBlock>>     BlockArray;
 
-  static const unsigned InvalidBlockID = 0x7FFFFFFF;
+  static const int InvalidBlockID = -1;
 
   // TopologyNodes are used to overlay tree structures on top of the CFG,
   // such as dominator and postdominator trees.  Each block is assigned an
@@ -1389,15 +1389,15 @@ public:
   static bool classof(const SExpr *E) { return E->opcode() == COP_BasicBlock; }
 
   /// Returns the block ID.  Every block has a unique ID in the CFG.
-  size_t  blockID() const { return BlockID; }
-  void setBlockID(size_t i) { BlockID = i; }
+  int  blockID() const { return BlockID; }
+  void setBlockID(int i) { BlockID = i; }
 
-  size_t numArguments()    const { return Args.size(); }
-  size_t numInstructions() const { return Instrs.size(); }
-  size_t numPredecessors() const { return Predecessors.size(); }
-  size_t numSuccessors()   const { return successors().size(); }
+  int numArguments()    const { return Args.size(); }
+  int numInstructions() const { return Instrs.size(); }
+  int numPredecessors() const { return Predecessors.size(); }
+  int numSuccessors()   const { return successors().size(); }
 
-  unsigned firstInstrID() {
+  int firstInstrID() {
     if (Args.size() > 0)
       return Args[0]->instrID();
     for (auto *Instr : Instrs)
@@ -1486,9 +1486,10 @@ public:
   unsigned findPredecessorIndex(const BasicBlock *BB) const;
 
   explicit BasicBlock(MemRegionRef A)
-      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr), BlockID(0),
-        TermInstr(nullptr),
-        PostBlockID(0), Depth(0), LoopDepth(0) { }
+      : SExpr(COP_BasicBlock), Arena(A), CFGPtr(nullptr),
+        BlockID(0), PostBlockID(0), Depth(0), LoopDepth(0),
+        TermInstr(nullptr)
+  { }
 
 private:
   friend class SCFG;
@@ -1502,16 +1503,17 @@ private:
 private:
   MemRegionRef Arena;        // The arena used to allocate this block.
   SCFG         *CFGPtr;      // The CFG that contains this block.
-  unsigned     BlockID;      // unique id for this BB in the containing CFG.
+
+  int BlockID;               // unique id for this BB in the containing CFG.
                              // IDs are in topological order.
+  int PostBlockID;           // ID in post-topological order
+  int Depth;                 // The instruction Depth of the first instruction.
+  int LoopDepth;             // The level of nesting within loops.
+
   PredArray   Predecessors;  // Predecessor blocks in the CFG.
   ArgArray    Args;          // Phi nodes.  One argument per predecessor.
   InstrArray  Instrs;        // Instructions (elements may be null).
   Terminator* TermInstr;     // Terminating instruction
-
-  unsigned     PostBlockID;  // ID in post-topological order
-  unsigned     Depth;        // The instruction Depth of the first instruction.
-  unsigned     LoopDepth;    // The level of nesting within loops.
 
   TopologyNode DominatorNode;       // The dominator tree
   TopologyNode PostDominatorNode;   // The post-dominator tree

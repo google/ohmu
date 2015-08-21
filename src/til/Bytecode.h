@@ -25,8 +25,8 @@ namespace til {
 /// Common information about opcodes and bit widths are stored here.
 class BytecodeBase {
 public:
-  // Maximum size of a single record (e.g. AST node).
-  static const int MaxRecordSize = (1 << 12);  // 4k
+  // Maximum size of a single atom.
+  static const int MaxAtomSize = (1 << 12);  // 4k
 
   enum PseudoOpcode : uint8_t {
     PSOP_Null = 0,
@@ -37,21 +37,15 @@ public:
     PSOP_ExitScope,
     PSOP_EnterBlock,
     PSOP_EnterCFG,
-    PSOP_EnterAnn,
+    PSOP_Annotation,
     PSOP_Last
-  };
-
-  enum PseudoAnnKind : uint8_t {
-    PSANN_ExitAnn = 0,
-    PSANN_Last
   };
 
   void getBitSize(uint32_t) { }  // trigger an error for unhandled types.
 
   unsigned getBitSizeImpl(PseudoOpcode)     { return 6; }
   unsigned getBitSizeImpl(TIL_Opcode)       { return 6; }
-  unsigned getBitSizeImpl(PseudoAnnKind)    { return 6; }
-  unsigned getBitSizeImpl(TIL_AnnKind)      { return 6; }
+  unsigned getBitSizeImpl(TIL_AnnKind)      { return 8; }
   unsigned getBitSizeImpl(TIL_UnaryOpcode)  { return 6; }
   unsigned getBitSizeImpl(TIL_BinaryOpcode) { return 6; }
   unsigned getBitSizeImpl(TIL_CastOpcode)   { return 6; }
@@ -85,8 +79,9 @@ public:
   /// Derived classes should call this method in the destructor.
   void flush();
 
-  /// Mark the end of a record.
-  void endRecord();
+  /// Mark the end of an atom (an indivisible sequence of bytes).
+  /// Flushes are performed on atomic boundaries, rather than byte boundaries.
+  void endAtom();
 
   /// Emit a block of bytes.
   void writeBytes(const void *Data, int64_t Size);
@@ -105,12 +100,12 @@ public:
 
   void writeBool(bool V) { writeBits32(V, 1); }
 
-  void writeUInt8(uint8_t  V)  { writeBits32(V, 8);  }
+  void writeUInt8 (uint8_t  V) { writeBits32(V, 8);  }
   void writeUInt16(uint16_t V) { writeUInt32_Vbr(V); }
   void writeUInt32(uint32_t V) { writeUInt32_Vbr(V); }
   void writeUInt64(uint64_t V) { writeUInt64_Vbr(V); }
 
-  void writeInt8(int8_t  V)  { writeBits32(static_cast<uint8_t> (V), 8);  }
+  void writeInt8 (int8_t  V) { writeBits32(static_cast<uint8_t> (V), 8);  }
   void writeInt16(int16_t V) { writeBits32(static_cast<uint16_t>(V), 16); }
   void writeInt32(int32_t V) { writeBits32(static_cast<uint32_t>(V), 32); }
   void writeInt64(int64_t V) { writeBits64(static_cast<uint64_t>(V), 64); }
@@ -124,7 +119,7 @@ private:
   int length() { return BufferSize - Pos; }
 
   /// Size of the buffer.  Default is 64k.
-  static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
+  static const int BufferSize = BytecodeBase::MaxAtomSize << 16;
 
   int Pos;
   std::vector<uint8_t> Buffer;
@@ -154,8 +149,9 @@ public:
   /// Allocate memory for a new string.
   virtual char* allocStringData(uint32_t Size) = 0;
 
-  /// Finish reading the current record.
-  void endRecord();
+  /// Finish reading the current atom.
+  /// Refill operations are done on an atom-by-atom rather than byte basis.
+  void endAtom();
 
   /// Read an interpreted blob of bytes.
   void readBytes(void *Data, int64_t Size);
@@ -184,9 +180,8 @@ public:
   int32_t  readInt32()  { return static_cast<int32_t>(readBits32(32)); }
   int64_t  readInt64()  { return static_cast<int64_t>(readBits64(64)); }
 
-  float  readFloat();
-  double readDouble();
-
+  float     readFloat();
+  double    readDouble();
   StringRef readString();
 
   bool empty() { return Eof && length() <= 0; }
@@ -196,12 +191,12 @@ private:
   int length() { return BufferLen - Pos; }
 
   /// Size of the buffer.  Default is 64k.
-  static const int BufferSize = BytecodeBase::MaxRecordSize << 4;
+  static const int BufferSize = BytecodeBase::MaxAtomSize << 16;
 
-  int     BufferLen;
-  int     Pos;
-  bool    Eof;
-  bool    Error;
+  int  BufferLen;
+  int  Pos;
+  bool Eof;
+  bool Error;
   std::vector<uint8_t> Buffer;
 };
 
@@ -217,18 +212,12 @@ protected:
   void writeFlag(T Flag) { Writer->writeBits32(Flag, getBitSize<T>()); }
 
   void writePseudoOpcode(PseudoOpcode Psop) {
-    // std::cerr << "Psop: " << Psop << "\n";
     writeFlag(Psop);
   }
 
   void writeOpcode(TIL_Opcode Op) {
-    // std::cerr << "Op: " << getOpcodeString(Op) << "\n";
     unsigned Psop = static_cast<unsigned>(PSOP_Last) + Op;
     writePseudoOpcode(static_cast<PseudoOpcode>(Psop));
-  }
-
-  void writePseudoAnnKind(PseudoAnnKind Psann) {
-    writeFlag(Psann);
   }
 
   void writeBaseType(BaseType Bt) {
@@ -261,43 +250,24 @@ protected:
 public:
   template<class T>
   void traverse(T *E, TraversalKind K) {
-    // if (WritingAnn)
-    //   writePseudoAnnKind(PSANN_ExitAnn);
-    // bool PrevWriting = WritingAnn;
-
-    // WritingAnn = false;
     SuperTv::traverse(E, K);
-    Writer->endRecord();
+    Writer->endAtom();
 
-    /*
-    if (E->annotations()) {
-      writePseudoOpcode(PSOP_EnterAnn);
-      WritingAnn = true;
-      postTraverseAllAnnotations(E->annotations());
-      WritingAnn = PrevWriting;
-      if (!WritingAnn)
-        writePseudoAnnKind(PSANN_ExitAnn);
-    } else {
-      WritingAnn = PrevWriting;
-      if (WritingAnn)
-        writePseudoOpcode(PSOP_EnterAnn);
-    }
-    */
-  }
-
-  // Postpone traversal until their SExpr is fully written.
-  void traverseAllAnnotations(Annotation *A) { }
-
-  void postTraverseAllAnnotations(Annotation *A) {
-    while (A != nullptr) {
+    Annotation* A = E->annotations();
+    while (A) {
       self()->traverseAnnotation(A);
+      Writer->endAtom();
       A = A->next();
     }
   }
 
+  // Postpone traversal until the SExpr is fully written.
+  void traverseAllAnnotations(Annotation *A) { }
+
   template <class T>
   void reduceAnnotationT(T *A) {
-    writeAnnKind(A->kind());
+    writePseudoOpcode(PSOP_Annotation);
+    writeFlag(A->kind());
     A->serialize(this);
   }
 
@@ -306,11 +276,6 @@ public:
     writeOpcode(COP_Literal);
     writeBaseType(E->baseType());
     writeLitVal(E->value());
-  }
-
-  void writeAnnKind(TIL_AnnKind Akind) {
-    unsigned Psann = static_cast<unsigned>(PSANN_Last) + Akind;
-    writePseudoAnnKind(static_cast<PseudoAnnKind>(Psann));
   }
 
   typedef bool LocationState;
@@ -376,7 +341,6 @@ public:
 
 private:
   ByteStreamWriterBase *Writer;
-  // bool WritingAnn;
 };
 
 
@@ -389,14 +353,8 @@ protected:
 
   PseudoOpcode readPseudoOpcode() { return readFlag<PseudoOpcode>(); }
 
-  PseudoAnnKind readPseudoAnnKind() { return readFlag<PseudoAnnKind>(); }
-
   TIL_Opcode getOpcode(PseudoOpcode Psop) {
     return static_cast<TIL_Opcode>(Psop - PSOP_Last);
-  }
-
-  TIL_AnnKind getAnnotationKind(PseudoAnnKind Psann) {
-    return static_cast<TIL_AnnKind>(Psann - PSANN_Last);
   }
 
   BaseType readBaseType() {
@@ -440,6 +398,9 @@ protected:
   /// Read a SExpr, branching on the Opcode.
   void readSExprByType(TIL_Opcode Op);
 
+  /// Read an Annotation from the byte stream.
+  void readAnnotation();
+
   /// Read an Ann, branching on the AnnKind.
   void readAnnotationByKind(TIL_AnnKind Ak);
 
@@ -447,14 +408,13 @@ protected:
   void exitScope();
   void enterBlock();
   void enterCFG();
-  void readAllAnnotations();
 
   /// Get the VarDecl for the given variable index.
   VarDecl* getVarDecl(unsigned Vidx);
 
   /// Get the Block for the given BlockID.
   /// Nargs is the expected number of arguments.
-  BasicBlock* getBlock(unsigned Bid, unsigned Nargs);
+  BasicBlock* getBlock(int Bid, int Nargs);
 
   void readNull();
   void readWeak();
@@ -497,23 +457,25 @@ protected:
   void readIfThenElse();
 
 public:
+  BytecodeReader(CFGBuilder& B, ByteStreamReaderBase* R)
+      : Builder(B), Reader(R), Success(true),
+        CurrentInstrID(0), CurrentArg(0), CFGStackSize(0) {
+    Vars.push_back(nullptr);  // indices start at 1.
+  }
+
   SExpr* read();
 
   bool success() { return Success; }
-
-  BytecodeReader(CFGBuilder& B, ByteStreamReaderBase* R)
-      : Builder(B), Reader(R), CurrentInstrID(0), CFGStackSize(0),
-        Success(true) {
-    Vars.push_back(nullptr);  // indices start at 1.
-  }
 
   SExpr *arg(int i) {
     assert(static_cast<unsigned>(i) < Stack.size() && "Index out of range.");
     return Stack[Stack.size()-1 - i];
   }
+
   void push(SExpr* E) {
     Stack.push_back(E);
   }
+
   void drop(int n) {
     assert(!Builder.currentCFG() || (Stack.size() - n >= CFGStackSize));
     Stack.resize(Stack.size() - n);
@@ -526,10 +488,12 @@ public:
 private:
   CFGBuilder&            Builder;
   ByteStreamReaderBase*  Reader;
+  bool                   Success;
 
-  unsigned                  CurrentInstrID;
-  unsigned                  CFGStackSize;  // Sanity checks
-  bool                      Success;
+  unsigned  CurrentInstrID;
+  int       CurrentArg;
+  unsigned  CFGStackSize;  // Sanity checks
+
   std::vector<SExpr*>       Stack;
   std::vector<VarDecl*>     Vars;
   std::vector<BasicBlock*>  Blocks;

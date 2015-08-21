@@ -1203,7 +1203,7 @@ void ClangTranslator::enterCFG(CFG *Cfg, const NamedDecl *D,
 
   // Create a new CFG
   unsigned NBlocks = Cfg->getNumBlockIDs();
-  Builder.beginCFG(nullptr, NBlocks, 0);
+  Builder.beginCFG(nullptr);
   Funbody->setBody(Builder.currentCFG());
 
   // Create map from clang blocks to til::BasicBlocks

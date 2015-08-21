@@ -20,10 +20,13 @@ namespace til {
 class BytecodeReader;
 class BytecodeWriter;
 class CFGBuilder;
+
 template <class Self, class StreamType>
 class PrettyPrinter;
+
 template <class S>
 class Traversal;
+
 
 /// Sample annotation for storing instruction names.
 class InstrNameAnnot : public Annotation {
@@ -44,7 +47,7 @@ public:
   }
 
   InstrNameAnnot *copy(CFGBuilder &Builder,
-      const std::vector<SExpr*> &SubExprs);
+                       const std::vector<SExpr*> &SubExprs);
 
   void rewrite(const std::vector<SExpr*> &SubExprs) { }
 
@@ -66,6 +69,7 @@ private:
   StringRef Name;
 };
 
+
 /// Annotation for storing source code positions.
 class SourceLocAnnot : public Annotation {
 public:
@@ -86,7 +90,7 @@ public:
   }
 
   SourceLocAnnot *copy(CFGBuilder &Builder,
-      const std::vector<SExpr*> &SubExprs);
+                       const std::vector<SExpr*> &SubExprs);
 
   void rewrite(const std::vector<SExpr*> &SubExprs) { }
 
@@ -107,6 +111,7 @@ public:
 private:
   SourcePosition const Position;
 };
+
 
 /// Annotation for storing preconditions.
 class PreconditionAnnot : public Annotation {
@@ -208,6 +213,7 @@ private:
   SExprRef ExpB;
   SExprRef ExpC;
 };
+
 
 }  // end namespace ohmu
 }  // end namespace til
