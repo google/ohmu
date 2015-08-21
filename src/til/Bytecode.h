@@ -119,7 +119,7 @@ private:
   int length() { return BufferSize - Pos; }
 
   /// Size of the buffer.  Default is 64k.
-  static const int BufferSize = BytecodeBase::MaxAtomSize << 16;
+  static const int BufferSize = BytecodeBase::MaxAtomSize << 4;
 
   int Pos;
   std::vector<uint8_t> Buffer;
@@ -191,7 +191,7 @@ private:
   int length() { return BufferLen - Pos; }
 
   /// Size of the buffer.  Default is 64k.
-  static const int BufferSize = BytecodeBase::MaxAtomSize << 16;
+  static const int BufferSize = BytecodeBase::MaxAtomSize << 4;
 
   int  BufferLen;
   int  Pos;

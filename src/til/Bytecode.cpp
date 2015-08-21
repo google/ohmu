@@ -957,8 +957,9 @@ SExpr* BytecodeReader::read() {
   while (!Reader->empty() && success()) {
     readSExpr();
   }
-  if (!success())
+  if (!success()) {
     return nullptr;
+  }
   if (Stack.size() == 0) {
     fail("Empty stack.");
     return nullptr;
