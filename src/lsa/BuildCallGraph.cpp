@@ -20,10 +20,10 @@
 namespace {
 
 /// Return the c++ mangled name for this declaration.
-std::string getMangledName(const clang::NamedDecl &D) {
+std::string getMangledName(clang::MangleContext *Mc,
+                           const clang::NamedDecl &D) {
   std::string Buffer;
   llvm::raw_string_ostream Out(Buffer);
-  clang::MangleContext *Mc = D.getASTContext().createMangleContext();
 
   if (const auto *CD = llvm::dyn_cast<clang::CXXConstructorDecl>(&D))
     Mc->mangleCXXCtor(CD, clang::Ctor_Base, Out);
@@ -47,8 +47,8 @@ public:
 
 private:
   /// Traverses the CFG for calls to functions, constructors and destructors.
-  void DiscoverCallGraph(const std::string &FName, clang::ASTContext &Ctxt,
-                         clang::CFG *CFG);
+  void DiscoverCallGraph(clang::MangleContext *Mc, const std::string &FName,
+                         clang::ASTContext &Ctxt, clang::CFG *CFG);
 
   /// Generates the Ohmu IR of the function.
   void GenerateOhmuIR(const std::string &FName, const clang::Decl *Fun,
@@ -69,15 +69,18 @@ void ExtendCallGraph::run(
   if (Fun->isDependentContext())
     return;
 
-  std::string FName = getMangledName(*Fun);
+  std::unique_ptr<clang::MangleContext> Mc(
+      Fun->getASTContext().createMangleContext());
+  std::string FName = getMangledName(Mc.get(), *Fun);
   clang::AnalysisDeclContextManager ADCM(true, true, true, true, true, true);
   clang::AnalysisDeclContext AC(&ADCM, Fun, ADCM.getCFGBuildOptions());
 
   GenerateOhmuIR(FName, Fun, AC);
-  DiscoverCallGraph(FName, Fun->getASTContext(), AC.getCFG());
+  DiscoverCallGraph(Mc.get(), FName, Fun->getASTContext(), AC.getCFG());
 }
 
-void ExtendCallGraph::DiscoverCallGraph(const std::string &FName,
+void ExtendCallGraph::DiscoverCallGraph(clang::MangleContext *Mc,
+                                        const std::string &FName,
                                         clang::ASTContext &Ctxt,
                                         clang::CFG *CFG) {
   if (CFG == nullptr)
@@ -108,7 +111,7 @@ void ExtendCallGraph::DiscoverCallGraph(const std::string &FName,
       }
 
       if (Call) {
-        std::string CName = getMangledName(*Call);
+        std::string CName = getMangledName(Mc, *Call);
         Builder.AddCall(FName.data(), CName);
       }
     }
