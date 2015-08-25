@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <thread>
+#include <unordered_map>
 
 #include "clang/Analysis/Til/Bytecode.h"
 #include "clang/Analysis/Til/CFGBuilder.h"
@@ -170,7 +171,7 @@ private:
   bool ReiterateVote;
   std::vector<Edge<EdgeValueType>> OutEdges;
 
-  std::map<string, MessageList> OutMessagesCache;
+  std::unordered_map<string, MessageList> OutMessagesCache;
 
 private:
   /// To access internal representation without exposing an interface to the
@@ -316,9 +317,7 @@ private:
   /// Returns the vertex with identity 'Id'. If no such vertex exists, one is
   /// created with the default value.
   GraphVertex &getVertex(const string &Id) {
-    unsigned index =
-        VertexMap.emplace(Id, Vertices.size())
-            .first->second;
+    unsigned index = VertexMap.emplace(Id, Vertices.size()).first->second;
     if (index == Vertices.size())
       Vertices.emplace_back(GraphVertex(Id));
     return Vertices[index];
@@ -374,9 +373,9 @@ private:
   bool ReiterateResult;
   string Phase;
   unsigned NCores;
-  std::map<string, unsigned> VertexMap;
+  std::unordered_map<string, unsigned> VertexMap;
   std::vector<GraphVertex> Vertices;
-  std::map<string, MessageList> Messages;
+  std::unordered_map<string, MessageList> Messages;
 
   /// 'NCores' computations to be run multithreaded, each caching the graph
   /// changes made in a computation step.

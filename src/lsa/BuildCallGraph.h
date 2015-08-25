@@ -16,8 +16,9 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 
 #include <ostream>
-#include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace ohmu {
 namespace lsa {
@@ -53,15 +54,18 @@ public:
     void SetIR(const std::string &IR) { OhmuIR = IR; }
     void Print(std::ostream &Out);
 
-    const std::set<std::string> *GetCalls() const { return &OutgoingCalls; }
+    const std::unordered_set<std::string> *GetCalls() const {
+      return &OutgoingCalls;
+    }
     const std::string &GetIR() const { return OhmuIR; }
 
   private:
-    std::set<std::string> OutgoingCalls;
+    std::unordered_set<std::string> OutgoingCalls;
     std::string OhmuIR;
   };
 
-  const std::map<std::string, std::unique_ptr<CallGraphNode>> &GetGraph() {
+  const std::unordered_map<std::string, std::unique_ptr<CallGraphNode>> &
+  GetGraph() {
     return Graph;
   }
 
@@ -70,7 +74,7 @@ private:
   /// Func. Creates a new node if none is associated with this function yet.
   CallGraphNode *GetNodeByName(const std::string &Func);
 
-  std::map<std::string, std::unique_ptr<CallGraphNode>>
+  std::unordered_map<std::string, std::unique_ptr<CallGraphNode>>
       Graph; // Mapping function names to their nodes.
 };
 

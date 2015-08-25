@@ -23,7 +23,7 @@ void RunToolWithBuilder(ohmu::lsa::DefaultCallGraphBuilder &Builder,
 /// whether the generated call graph matches the provided expected mapping.
 void TestCallGraph(
     const std::string &content,
-    const std::map<std::string, std::vector<std::string>> &expected) {
+    const std::unordered_map<std::string, std::vector<std::string>> &expected) {
 
   ohmu::lsa::DefaultCallGraphBuilder GraphBuilder;
   RunToolWithBuilder(GraphBuilder, content);
@@ -45,15 +45,15 @@ void TestCallGraph(
       EXPECT_NE(Node, nullptr) << "Searching function-node " << Func << ".";
 
       if (Node != nullptr) {
-        const std::set<std::string> *Calls = Node->GetCalls();
+        const std::unordered_set<std::string> *Calls = Node->GetCalls();
         EXPECT_EQ(ExpCalls.size(), Calls->size()) << "Within function-node "
                                                   << Func << ".";
 
         auto NotFound = Calls->end();
         for (auto &C : ExpCalls) {
-          EXPECT_NE(Calls->find(C), NotFound)
-              << "Within function-node " << Func
-              << " did not find expected call " << C << ".";
+          EXPECT_NE(Calls->find(C), NotFound) << "Within function-node " << Func
+                                              << " did not find expected call "
+                                              << C << ".";
         }
       }
     }
@@ -107,7 +107,7 @@ TEST(BuildCallGraph, StoreOhmuIR) {
 TEST(BuildCallGraph, BasicSingleFunction) {
 
   std::string data = "void f() { }";
-  std::map<std::string, std::vector<std::string>> expected;
+  std::unordered_map<std::string, std::vector<std::string>> expected;
   expected["_Z1fv"] = std::vector<std::string>();
 
   TestCallGraph(data, expected);

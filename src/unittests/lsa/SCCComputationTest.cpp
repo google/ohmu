@@ -1,3 +1,5 @@
+#include <unordered_map>
+
 #include "gtest/gtest.h"
 #include "lsa/examples/SCCComputation.h"
 
@@ -10,7 +12,7 @@ string partition(string id) { return id + ":" + id; }
 /// expected SCC (partition).
 void TestSCC(const std::vector<string> &vertices,
              const std::vector<std::pair<string, string>> &edges,
-             const std::map<string, string> &expected) {
+             const std::unordered_map<string, string> &expected) {
   ohmu::lsa::StandaloneGraphBuilder<ohmu::lsa::SCCComputation> Builder;
 
   for (const string &vertex : vertices) {
@@ -35,7 +37,7 @@ void TestSCC(const std::vector<string> &vertices,
   }
 }
 
-}  // end namespace
+} // end namespace
 
 TEST(SCCComputation, SingletonSCC) {
   string aId = "a", bId = "b", cId = "c";
@@ -50,7 +52,7 @@ TEST(SCCComputation, SingletonSCC) {
 
   std::vector<string> vertices = {aId, bId, cId};
   std::vector<std::pair<string, string>> edges = {};
-  std::map<string, string> expected = {
+  std::unordered_map<string, string> expected = {
       {aId, partition(aId)}, {bId, partition(bId)}, {cId, partition(cId)}};
 
   TestSCC(vertices, edges, expected);
@@ -70,7 +72,7 @@ TEST(SCCComputation, OneSCC) {
   std::vector<string> vertices = {aId, bId, cId};
   std::vector<std::pair<string, string>> edges = {
       {aId, bId}, {bId, cId}, {cId, aId}};
-  std::map<string, string> expected = {
+  std::unordered_map<string, string> expected = {
       {aId, partition(aId)}, {bId, partition(aId)}, {cId, partition(aId)}};
 
   TestSCC(vertices, edges, expected);
@@ -95,7 +97,7 @@ TEST(SCCComputation, TwoSCC) {
   std::vector<std::pair<string, string>> edges = {
       {aId, bId}, {bId, cId}, {cId, fId}, {cId, dId}, {dId, eId},
       {dId, gId}, {eId, gId}, {fId, bId}, {fId, aId}, {gId, dId}};
-  std::map<string, string> expected = {
+  std::unordered_map<string, string> expected = {
       {aId, partition(aId)}, {bId, partition(aId)}, {cId, partition(aId)},
       {fId, partition(aId)}, {dId, partition(dId)}, {eId, partition(dId)},
       {gId, partition(dId)}};
