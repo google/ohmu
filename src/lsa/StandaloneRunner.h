@@ -24,34 +24,39 @@
 namespace ohmu {
 namespace lsa {
 
+static llvm::cl::opt<int> NThreads("t",
+                                   llvm::cl::desc("Specify number of threads"),
+                                   llvm::cl::value_desc("number"),
+                                   llvm::cl::Optional);
+
+static llvm::cl::opt<std::string>
+InputFile("i", llvm::cl::desc("Specify input file"),
+               llvm::cl::value_desc("file"), llvm::cl::Required);
+
 template <class UserComputation> class StandaloneRunner {
 public:
-  StandaloneRunner(int argc, const char *argv[])
-      : OptParser(argc, argv, llvm::cl::GeneralCategory) {}
+  StandaloneRunner(int argc, const char *argv[]) {}
 
-  int buildCallGraph() {
-    clang::ast_matchers::MatchFinder Finder;
-    ohmu::lsa::CallGraphBuilderTool BuilderTool;
-    BuilderTool.RegisterMatchers(CallGraphBuilder, &Finder);
-
-    clang::tooling::ClangTool Tool(OptParser.getCompilations(),
-                                   OptParser.getSourcePathList());
-
-    return Tool.run(clang::tooling::newFrontendActionFactory(&Finder).get());
-  }
-
-  void printCallGraph() { CallGraphBuilder.Print(std::cout); }
-
-  void runComputation() {
-    for (const auto &El : CallGraphBuilder.GetGraph()) {
-      typename ohmu::lsa::GraphTraits<UserComputation>::VertexValueType Value;
-      ComputationGraphBuilder.addVertex(El.first, El.second->GetIR(), Value);
-      ohmu::lsa::DefaultCallGraphBuilder::CallGraphNode *Node = El.second.get();
-      for (const std::string &Call : *Node->GetCalls()) {
-        ComputationGraphBuilder.addEdge(El.first, Call, true);
-        ComputationGraphBuilder.addEdge(Call, El.first, false);
+  void loadCallGraph() {
+    ohmu::til::BytecodeFileReader ReadStream(InputFile.getValue(),
+        ohmu::MemRegionRef(Arena));
+    int32_t NFunc = ReadStream.readInt32();
+    for (unsigned i = 0; i < NFunc; i++) {
+      std::string Function = ReadStream.readString();
+      std::string OhmuIR = ReadStream.readString();
+      typename GraphTraits<UserComputation>::VertexValueType Value;
+      ComputationGraphBuilder.addVertex(Function, OhmuIR, Value);
+      int32_t NNodes = ReadStream.readInt32();
+      for (unsigned n = 0; n < NNodes; n++) {
+        std::string Call = ReadStream.readString();
+        ComputationGraphBuilder.addCall(Function, Call);
       }
     }
+  }
+
+  void runComputation() {
+    if (NThreads.getNumOccurrences() > 0)
+      ComputationGraphBuilder.setNThreads(NThreads.getValue());
 
     ComputationGraphBuilder.run(&Factory);
   }
@@ -64,8 +69,7 @@ public:
   }
 
 private:
-  clang::tooling::CommonOptionsParser OptParser;
-  ohmu::lsa::DefaultCallGraphBuilder CallGraphBuilder;
+  ohmu::MemRegion Arena;
   ohmu::lsa::StandaloneGraphBuilder<UserComputation> ComputationGraphBuilder;
   ohmu::lsa::GraphComputationFactory<UserComputation> Factory;
 };

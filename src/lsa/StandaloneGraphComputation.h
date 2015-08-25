@@ -257,11 +257,14 @@ public:
   typedef ohmu::lsa::GraphVertex<UserComputation> GraphVertex;
 
   StandaloneGraphTool() : StepCount(0), ReiterateResult(false), Phase("START") {
-    // For now, we start as many threads as there are cores. In the future we
-    // can probably provide the option to override this via a commandline flag.
-    NCores = std::thread::hardware_concurrency();
-    if (NCores == 0) // Value is not well defined or not computable.
-      NCores = 1;
+    // By default we start as many threads as there are cores.
+    setNThreads(std::thread::hardware_concurrency());
+  }
+
+  void setNThreads(unsigned N) {
+    NThreads = N;
+    if (NThreads == 0)
+      NThreads = 1;
   }
 
   /// Methods exposed via StandaloneGraphBuilder.
@@ -354,7 +357,7 @@ private:
   int StepCount;
   bool ReiterateResult;
   string Phase;
-  unsigned NCores;
+  unsigned NThreads;
   std::unordered_map<string, unsigned> VertexMap;
   std::vector<GraphVertex> Vertices;
   std::unordered_map<string, MessageList> Messages;
@@ -370,7 +373,7 @@ void StandaloneGraphTool<C>::run(GraphComputationFactory *Factory) {
   // Create separate computations for all threads, allowing for caching graph
   // changes per thread.
   UserComputations.clear();
-  for (unsigned i = 0; i < NCores; i++) {
+  for (unsigned i = 0; i < NThreads; i++) {
     std::unique_ptr<GraphComputation> Computation(Factory->createComputation());
     Computation->Tool = this;
     UserComputations.emplace_back(move(Computation));
@@ -400,7 +403,7 @@ template <class C> void StandaloneGraphTool<C>::runVerticesStep() {
   std::vector<std::thread> ThreadPool;
 
   // Divide the work over 'NCores' threads.
-  for (unsigned i = 0; i < NCores; i++) {
+  for (unsigned i = 0; i < NThreads; i++) {
     unsigned Start = i;
     std::thread t([Self, Start]() {
       unsigned index = Start;
@@ -414,7 +417,7 @@ template <class C> void StandaloneGraphTool<C>::runVerticesStep() {
               &Vertex, Self->Phase, Self->getMessagesTo(Vertex.id()));
         }
 
-        index += Self->NCores;
+        index += Self->NThreads;
       }
     });
     ThreadPool.push_back(move(t));
@@ -491,6 +494,8 @@ public:
 
   /// Returns the current set of vertices.
   const std::vector<GraphVertex> &getVertices() { return Tool.getVertices(); }
+
+  void setNThreads(unsigned N) { Tool.setNThreads(N); }
 
   /// Run the computation created by the specified factory.
   void run(GraphComputationFactory *Factory) { Tool.run(Factory); }
