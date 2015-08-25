@@ -15,8 +15,11 @@
 #include "clang/Analysis/Til/ClangCFGWalker.h"
 #include "clang/Analysis/Til/CFGBuilder.h"
 #include "clang/Analysis/Til/TIL.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/ExprObjC.h"
+#include "clang/AST/Mangle.h"
 
+#include <memory>
 
 namespace clang {
 namespace tilcpp {
@@ -188,6 +191,9 @@ private:
   til::SExpr* translateGNUNullExpr(const GNUNullExpr *L,
                                    CallingContext *Ctx);
 
+  StringRef getMangledValueName(const NamedDecl* Vd);
+  StringRef getMangledTypeName(const Type *Ty, const NamedDecl *Nd);
+  til::Project* makeProjectFromDecl(til::SExpr* E, const NamedDecl *D);
 
   // We implement the CFGVisitor API
   friend class ClangCFGWalker;
@@ -214,7 +220,7 @@ private:
 
 public:
   ClangTranslator(MemRegionRef A)
-      : Builder(A), CapabilityExprMode(false), SSAMode(true),
+      : Builder(A), Mangler(nullptr), CapabilityExprMode(false), SSAMode(true),
         SelfVar(nullptr), TopLevelSlot(nullptr), NumFunctionParams(0) {
     // FIXME: we don't always have a self-variable.
     auto* Svd = Builder.newVarDecl(til::VarDecl::VK_SFun, "this", nullptr);
@@ -226,6 +232,7 @@ private:
   StatementMap    SMap;
   LocalVarMap     LVarMap;
   BasicBlockMap   BMap;
+  std::unique_ptr<MangleContext> Mangler;
 
   // Set to true when parsing capability expressions, which get translated
   // inaccurately in order to hack around smart pointers etc.
