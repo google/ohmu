@@ -38,19 +38,17 @@ class SCCNode {
 public:
   SCCNode();
 
-  /// The minimal ID encountered sending over the forward edges.
+  /// The minimal ID encountered sending over the outgoing calls.
   string ForwardMin;
 
-  /// The minimal ID encountered sending over the backward edges.
+  /// The minimal ID encountered sending over the incoming calls.
   string BackwardMin;
 };
 
 class SCCComputation;
 
-template <>
-struct GraphTraits<SCCComputation> {
+template <> struct GraphTraits<SCCComputation> {
   typedef SCCNode VertexValueType;
-  typedef bool EdgeValueType;
   typedef string MessageValueType;
 };
 

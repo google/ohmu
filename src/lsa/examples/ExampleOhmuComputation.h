@@ -36,7 +36,6 @@ class OhmuComputation;
 template <> struct GraphTraits<OhmuComputation> {
   // True if we think this function changes a global variable.
   typedef bool VertexValueType;
-  typedef bool EdgeValueType;
   typedef bool MessageValueType;
 };
 
@@ -77,8 +76,7 @@ protected:
 
 /// Distributed graph computation that determines whether calling a function
 /// changes a global variable. In the first step it computes the changes made
-/// in this function body; then forwards this information over its back edges
-/// to its callers.
+/// in this function body; then forwards this information to its callers.
 class OhmuComputation : public GraphComputation<OhmuComputation> {
 public:
   void computePhase(GraphVertex *Vertex, const string &Phase,
@@ -90,9 +88,8 @@ public:
       *Vertex->mutableValue() = modifiesGlobal(Vertex);
 
       if (Vertex->value())
-        for (const Edge &Out : Vertex->getOutEdges())
-          if (Out.value() == false) // backward edge.
-            Vertex->sendMessage(Out.destination(), true);
+        for (const string &Out : Vertex->outgoingCalls())
+          Vertex->sendMessage(Out, true);
 
       // Second step; only care about incoming messages if so far we think this
       // function does not change global variables. If one of the functions we
@@ -105,9 +102,8 @@ public:
         }
       }
       if (Vertex->value())
-        for (const Edge &Out : Vertex->getOutEdges())
-          if (Out.value() == false) // backward edge.
-            Vertex->sendMessage(Out.destination(), true);
+        for (const string &Out : Vertex->outgoingCalls())
+          Vertex->sendMessage(Out, true);
     }
 
     Vertex->voteToHalt();

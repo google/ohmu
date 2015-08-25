@@ -14,19 +14,16 @@ namespace lsa {
 
 template <> struct GraphTraits<SinglePhaseComputation> {
   typedef int VertexValueType;
-  typedef int EdgeValueType;
   typedef int MessageValueType;
 };
 
 template <> struct GraphTraits<TwoPhaseComputation> {
   typedef int VertexValueType;
-  typedef int EdgeValueType;
   typedef int MessageValueType;
 };
 
 template <> struct GraphTraits<IteratedPhaseComputation> {
   typedef int VertexValueType;
-  typedef int EdgeValueType;
   typedef int MessageValueType;
 };
 
@@ -54,8 +51,8 @@ public:
     }
 
     if (Updated) {
-      for (const Edge &Out : Vertex->getOutEdges()) {
-        Vertex->sendMessage(Out.destination(), Vertex->value());
+      for (const string &Out : Vertex->outgoingCalls()) {
+        Vertex->sendMessage(Out, Vertex->value());
       }
     } else {
       Vertex->voteToHalt();
@@ -90,57 +87,46 @@ TEST(StandaloneGraphComputation, BuildGraphVertices) {
   }
 }
 
-/// Add edges, check that generated graph contains expected edges.
-TEST(StandaloneGraphComputation, BuildGraphEdges) {
+/// Add calls, check that generated graph contains the expected calls.
+TEST(StandaloneGraphComputation, BuildGraphCalls) {
   ohmu::lsa::StandaloneGraphBuilder<SinglePhaseComputation> Builder;
   string aId = "a", bId = "b", cId = "c";
 
-  Builder.addEdge(aId, bId, 0);
-  Builder.addEdge(bId, aId, 1);
-  Builder.addEdge(bId, cId, 7);
-  Builder.addEdge(cId, aId, 3);
+  Builder.addCall(aId, bId);
+  Builder.addCall(bId, aId);
+  Builder.addCall(bId, cId);
+  Builder.addCall(cId, aId);
 
   ASSERT_EQ(3, Builder.getVertices().size());
 
-  SinglePhaseComputation::EdgeList EdgesA;
-  SinglePhaseComputation::EdgeList EdgesB;
-  SinglePhaseComputation::EdgeList EdgesC;
   for (const auto &Vertex : Builder.getVertices()) {
-    if (Vertex.id() == aId)
-      EdgesA = Vertex.getOutEdges();
-    if (Vertex.id() == bId)
-      EdgesB = Vertex.getOutEdges();
-    if (Vertex.id() == cId)
-      EdgesC = Vertex.getOutEdges();
+    if (Vertex.id() == aId) {
+      const std::unordered_set<string> &OutCalls = Vertex.outgoingCalls();
+      ASSERT_EQ(1, OutCalls.size());
+      EXPECT_NE(OutCalls.end(), OutCalls.find(bId));
+      const std::unordered_set<string> &InCalls = Vertex.incomingCalls();
+      ASSERT_EQ(2, InCalls.size());
+      EXPECT_NE(InCalls.end(), InCalls.find(bId));
+      EXPECT_NE(InCalls.end(), InCalls.find(cId));
+    }
+    if (Vertex.id() == bId) {
+      const std::unordered_set<string> &OutCalls = Vertex.outgoingCalls();
+      ASSERT_EQ(2, OutCalls.size());
+      EXPECT_NE(OutCalls.end(), OutCalls.find(aId));
+      EXPECT_NE(OutCalls.end(), OutCalls.find(cId));
+      const std::unordered_set<string> &InCalls = Vertex.incomingCalls();
+      ASSERT_EQ(1, InCalls.size());
+      EXPECT_NE(InCalls.end(), InCalls.find(aId));
+    }
+    if (Vertex.id() == cId) {
+      const std::unordered_set<string> &OutCalls = Vertex.outgoingCalls();
+      ASSERT_EQ(1, OutCalls.size());
+      EXPECT_NE(OutCalls.end(), OutCalls.find(aId));
+      const std::unordered_set<string> &InCalls = Vertex.incomingCalls();
+      ASSERT_EQ(1, InCalls.size());
+      EXPECT_NE(InCalls.end(), InCalls.find(bId));
+    }
   }
-
-  auto Edge = EdgesA.begin();
-  auto End = EdgesA.end();
-  ASSERT_NE(End, Edge);
-  EXPECT_EQ(bId, Edge->destination());
-  EXPECT_EQ(0, Edge->value());
-  ++Edge;
-  ASSERT_EQ(End, Edge);
-
-  Edge = EdgesB.begin();
-  End = EdgesB.end();
-  ASSERT_NE(End, Edge);
-  EXPECT_EQ(aId, Edge->destination());
-  EXPECT_EQ(1, Edge->value());
-  ++Edge;
-  ASSERT_NE(End, Edge);
-  EXPECT_EQ(cId, Edge->destination());
-  EXPECT_EQ(7, Edge->value());
-  ++Edge;
-  ASSERT_EQ(End, Edge);
-
-  Edge = EdgesC.begin();
-  End = EdgesC.end();
-  ASSERT_NE(End, Edge);
-  EXPECT_EQ(aId, Edge->destination());
-  EXPECT_EQ(3, Edge->value());
-  ++Edge;
-  ASSERT_EQ(End, Edge);
 }
 
 /// Run a simple computation that has only one phase.
@@ -152,9 +138,9 @@ TEST(StandaloneGraphComputation, GraphComputationSinglePhase) {
   Builder.addVertex(aId, "", aValue);
   Builder.addVertex(bId, "", bValue);
   Builder.addVertex(cId, "", cValue);
-  Builder.addEdge(aId, bId, 0);
-  Builder.addEdge(bId, cId, 7);
-  Builder.addEdge(cId, aId, 3);
+  Builder.addCall(aId, bId);
+  Builder.addCall(bId, cId);
+  Builder.addCall(cId, aId);
 
   Builder.run(new ohmu::lsa::GraphComputationFactory<SinglePhaseComputation>());
 
@@ -165,7 +151,7 @@ TEST(StandaloneGraphComputation, GraphComputationSinglePhase) {
 }
 
 /// Simple computation using one cycle of phases.
-/// Assumes each vertex has at least one outgoing edge and one incoming edge.
+/// Assumes each vertex has at least one outgoing call and one incoming call.
 /// START: forward own value, store first received value + 1
 /// NEXT:  forward new value, store first received value.
 class TwoPhaseComputation
@@ -174,8 +160,7 @@ public:
   void computePhase(GraphVertex *Vertex, const string &Phase,
                     MessageList Messages) override {
     if (stepCount() == 0) {
-      Vertex->sendMessage(Vertex->getOutEdges().begin()->destination(),
-                          Vertex->value());
+      Vertex->sendMessage(*Vertex->outgoingCalls().begin(), Vertex->value());
     } else {
       if (Phase.compare("START") == 0) {
         *Vertex->mutableValue() = Messages.begin()->value() + 1;
@@ -205,13 +190,13 @@ TEST(StandaloneGraphComputation, GraphComputationTwoPhase) {
   Builder.addVertex(aId, "", aValue);
   Builder.addVertex(bId, "", bValue);
   Builder.addVertex(cId, "", cValue);
-  Builder.addEdge(aId, bId, 0);
-  Builder.addEdge(bId, cId, 0);
-  Builder.addEdge(cId, aId, 0);
+  Builder.addCall(aId, bId);
+  Builder.addCall(bId, cId);
+  Builder.addCall(cId, aId);
 
   Builder.run(new ohmu::lsa::GraphComputationFactory<TwoPhaseComputation>());
 
-  // All vertices should now hold the original value of the node two edges back,
+  // All vertices should now hold the original value of the node two calls back,
   // incremented with one.
   for (const auto &Vertex : Builder.getVertices()) {
     if (Vertex.id() == aId)
@@ -234,8 +219,7 @@ public:
                     MessageList Messages) override {
 
     if (stepCount() == 0) {
-      Vertex->sendMessage(Vertex->getOutEdges().begin()->destination(),
-                          Vertex->value());
+      Vertex->sendMessage(*Vertex->outgoingCalls().begin(), Vertex->value());
     } else {
       if (Phase.compare("START") == 0) {
         if (Messages.begin()->value() < 10) {
@@ -280,9 +264,9 @@ TEST(StandaloneGraphComputation, GraphComputationTwoPhaseIterate) {
   Builder.addVertex(aId, "", aValue);
   Builder.addVertex(bId, "", bValue);
   Builder.addVertex(cId, "", cValue);
-  Builder.addEdge(aId, bId, 0);
-  Builder.addEdge(bId, cId, 0);
-  Builder.addEdge(cId, aId, 0);
+  Builder.addCall(aId, bId);
+  Builder.addCall(bId, cId);
+  Builder.addCall(cId, aId);
 
   Builder.run(
       new ohmu::lsa::GraphComputationFactory<IteratedPhaseComputation>());

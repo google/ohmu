@@ -65,12 +65,14 @@ void SCCComputation::computePhase(GraphVertex *Vertex, const string &Phase,
 }
 
 /// First set the current ForwardMin to this vertex' id and forward it on all
-/// outgoing edges. While the incoming messages contain an id lower than
+/// outgoing calls. While the incoming messages contain an id lower than
 /// ForwardMin, update it and forward the new lowest value.
 void SCCComputation::forwardMin(GraphVertex *Vertex, MessageList Messages) {
   if (stepCount() == 0) {
     (*Vertex->mutableValue()).ForwardMin = Vertex->id();
-    sendUpdateMessage(Vertex, true);
+    for (const string &Out : Vertex->outgoingCalls()) {
+      Vertex->sendMessage(Out, Vertex->value().ForwardMin);
+    }
   } else {
     bool updated = false;
     for (const Message &Incoming : Messages) {
@@ -81,8 +83,11 @@ void SCCComputation::forwardMin(GraphVertex *Vertex, MessageList Messages) {
       }
     }
     // If we updated ForwardMin, inform our forward-neighbours.
-    if (updated)
-      sendUpdateMessage(Vertex, true);
+    if (updated) {
+      for (const string &Out : Vertex->outgoingCalls()) {
+        Vertex->sendMessage(Out, Vertex->value().ForwardMin);
+      }
+    }
   }
 }
 
@@ -95,7 +100,9 @@ void SCCComputation::backwardMin(GraphVertex *Vertex, MessageList Messages) {
       (*Vertex->mutableValue()).BackwardMin = kInfinity;
     } else {
       (*Vertex->mutableValue()).BackwardMin = Vertex->id();
-      sendUpdateMessage(Vertex, false);
+      for (const string &In : Vertex->incomingCalls()) {
+        Vertex->sendMessage(In, Vertex->value().BackwardMin);
+      }
     }
   } else {
     bool updated = false;
@@ -107,27 +114,27 @@ void SCCComputation::backwardMin(GraphVertex *Vertex, MessageList Messages) {
       }
     }
     // If we updated BackwardMin, inform our backward-neighbours.
-    if (updated)
-      sendUpdateMessage(Vertex, false);
+    if (updated) {
+      for (const string &In : Vertex->incomingCalls()) {
+        Vertex->sendMessage(In, Vertex->value().BackwardMin);
+      }
+    }
   }
 }
 
-/// In step 0, send on all outgoing edges this vertex' partition id.
-/// In SCCComputation 1, remove edges to vertices that sent a different
+/// In step 0, send on all outgoing calls this vertex' partition id.
+/// In SCCComputation 1, remove calls to vertices that sent a different
 /// partition id.
 void SCCComputation::decomposeGraph(GraphVertex *Vertex, MessageList Messages) {
   string partition = partitionID(Vertex);
   if (stepCount() == 0) {
-    EdgeList Edges = Vertex->getOutEdges();
-    for (const Edge &OutEdge : Edges) {
-      if (OutEdge.value() == true) // Outgoing call
-        Vertex->sendMessage(OutEdge.destination(), partition);
+    for (const string &Out : Vertex->outgoingCalls()) {
+      Vertex->sendMessage(Out, partition);
     }
   } else {
     for (const Message &Incoming : Messages) {
       if (Incoming.value() != partition) {
-        removeEdges(Vertex->id(), Incoming.source());
-        removeEdges(Incoming.source(), Vertex->id());
+        removeCall(Incoming.source(), Vertex->id());
       }
     }
   }
@@ -144,17 +151,6 @@ string SCCComputation::partitionID(const GraphVertex *Vertex) const {
   Stream << ":";
   Stream << Vertex->value().BackwardMin;
   return Stream.str();
-}
-
-void SCCComputation::sendUpdateMessage(GraphVertex *Vertex, bool Forward) {
-  EdgeList Edges = Vertex->getOutEdges();
-  for (const Edge &OutEdge : Edges) {
-    if (OutEdge.value() == Forward && Forward) {
-      Vertex->sendMessage(OutEdge.destination(), Vertex->value().ForwardMin);
-    } else if (OutEdge.value() == Forward && !Forward) {
-      Vertex->sendMessage(OutEdge.destination(), Vertex->value().BackwardMin);
-    }
-  }
 }
 
 } // namespace ohmu

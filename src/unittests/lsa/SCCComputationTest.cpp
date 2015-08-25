@@ -7,11 +7,11 @@ namespace {
 /// Return the partition identifier as it is used in the SCC computation.
 string partition(string id) { return id + ":" + id; }
 
-/// Actually runs the test. Creates the graph with specified vertices and edges.
+/// Actually runs the test. Creates the graph with specified vertices and calls.
 /// Runs the SCC computation and checks whether each vertex ends up in the
 /// expected SCC (partition).
 void TestSCC(const std::vector<string> &vertices,
-             const std::vector<std::pair<string, string>> &edges,
+             const std::vector<std::pair<string, string>> &calls,
              const std::unordered_map<string, string> &expected) {
   ohmu::lsa::StandaloneGraphBuilder<ohmu::lsa::SCCComputation> Builder;
 
@@ -20,9 +20,8 @@ void TestSCC(const std::vector<string> &vertices,
     Builder.addVertex(vertex, "", node);
   }
 
-  for (const auto &edge : edges) {
-    Builder.addEdge(edge.first, edge.second, true);
-    Builder.addEdge(edge.second, edge.first, false);
+  for (const auto &call : calls) {
+    Builder.addCall(call.first, call.second);
   }
   ohmu::lsa::GraphComputationFactory<ohmu::lsa::SCCComputation> Factory;
   Builder.run(&Factory);
@@ -51,11 +50,11 @@ TEST(SCCComputation, SingletonSCC) {
   // SCC #3: {c}
 
   std::vector<string> vertices = {aId, bId, cId};
-  std::vector<std::pair<string, string>> edges = {};
+  std::vector<std::pair<string, string>> calls = {};
   std::unordered_map<string, string> expected = {
       {aId, partition(aId)}, {bId, partition(bId)}, {cId, partition(cId)}};
 
-  TestSCC(vertices, edges, expected);
+  TestSCC(vertices, calls, expected);
 }
 
 TEST(SCCComputation, OneSCC) {
@@ -70,12 +69,12 @@ TEST(SCCComputation, OneSCC) {
   // SCC #1: {a, b, c}
 
   std::vector<string> vertices = {aId, bId, cId};
-  std::vector<std::pair<string, string>> edges = {
+  std::vector<std::pair<string, string>> calls = {
       {aId, bId}, {bId, cId}, {cId, aId}};
   std::unordered_map<string, string> expected = {
       {aId, partition(aId)}, {bId, partition(aId)}, {cId, partition(aId)}};
 
-  TestSCC(vertices, edges, expected);
+  TestSCC(vertices, calls, expected);
 }
 
 TEST(SCCComputation, TwoSCC) {
@@ -94,7 +93,7 @@ TEST(SCCComputation, TwoSCC) {
   // SCC #2: {d, e, g}
 
   std::vector<string> vertices = {aId, bId, cId, dId, eId, fId, gId};
-  std::vector<std::pair<string, string>> edges = {
+  std::vector<std::pair<string, string>> calls = {
       {aId, bId}, {bId, cId}, {cId, fId}, {cId, dId}, {dId, eId},
       {dId, gId}, {eId, gId}, {fId, bId}, {fId, aId}, {gId, dId}};
   std::unordered_map<string, string> expected = {
@@ -102,7 +101,7 @@ TEST(SCCComputation, TwoSCC) {
       {fId, partition(aId)}, {dId, partition(dId)}, {eId, partition(dId)},
       {gId, partition(dId)}};
 
-  TestSCC(vertices, edges, expected);
+  TestSCC(vertices, calls, expected);
 }
 
 int main(int argc, char **argv) {

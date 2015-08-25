@@ -26,6 +26,7 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "clang/Analysis/Til/Bytecode.h"
 #include "clang/Analysis/Til/CFGBuilder.h"
@@ -56,29 +57,10 @@ private:
 template <class MessageValueType>
 using MessageList = std::vector<Message<MessageValueType>>;
 
-/// An outgoing edge.
-template <class EdgeValueType> class Edge {
-public:
-  Edge(const EdgeValueType &V, const string &D) : Value(V), Destination(D) {}
-
-  const EdgeValueType &value() const { return Value; }
-
-  const string &destination() const { return Destination; }
-
-private:
-  EdgeValueType Value;
-  string Destination;
-};
-
-/// A collection of edges.
-template <class EdgeValueType>
-using EdgeList = std::vector<Edge<EdgeValueType>>;
-
-/// These traits describing the types of values residing on vertices, edges and
+/// These traits describing the types of values residing on vertices and
 /// send as messages should be specialized by each computation.
 template <class T> struct GraphTraits {
   typedef void VertexValueType; // Must provide a default constructor.
-  typedef void EdgeValueType;
   typedef void MessageValueType;
 };
 
@@ -92,8 +74,6 @@ public:
   typedef ohmu::lsa::GraphTraits<UserComputation> Traits;
   typedef typename Traits::VertexValueType VertexValueType;
   typedef typename Traits::MessageValueType MessageValueType;
-  typedef typename Traits::EdgeValueType EdgeValueType;
-  typedef ohmu::lsa::EdgeList<EdgeValueType> EdgeList;
   typedef ohmu::lsa::MessageList<MessageValueType> MessageList;
 
 public:
@@ -118,8 +98,15 @@ public:
   /// Get a mutable pointer to the value at this vertex.
   VertexValueType *mutableValue() { return &Value; }
 
-  /// Get the list of edges leaving this vertex.
-  const EdgeList &getOutEdges() const { return OutEdges; }
+  /// Get the list of functions called from this vertex.
+  const std::unordered_set<string> &outgoingCalls() const {
+    return OutgoingCalls;
+  }
+
+  /// Get the list of functions calling this vertex.
+  const std::unordered_set<string> &incomingCalls() const {
+    return IncomingCalls;
+  }
 
   /// Send a message to the vertex with identity 'Destination'. The message is
   /// cached locally, relying on the StandaloneGraphTool to actually move the
@@ -169,7 +156,8 @@ private:
   VertexValueType Value;
   bool HaltVote;
   bool ReiterateVote;
-  std::vector<Edge<EdgeValueType>> OutEdges;
+  std::unordered_set<string> OutgoingCalls;
+  std::unordered_set<string> IncomingCalls;
 
   std::unordered_map<string, MessageList> OutMessagesCache;
 
@@ -186,14 +174,11 @@ public:
   typedef ohmu::lsa::GraphTraits<UserComputation> Traits;
   typedef typename Traits::VertexValueType VertexValueType;
   typedef typename Traits::MessageValueType MessageValueType;
-  typedef typename Traits::EdgeValueType EdgeValueType;
 
   typedef ohmu::lsa::StandaloneGraphTool<UserComputation> StandaloneGraphTool;
   typedef ohmu::lsa::GraphVertex<UserComputation> GraphVertex;
   typedef ohmu::lsa::Message<MessageValueType> Message;
   typedef ohmu::lsa::MessageList<MessageValueType> MessageList;
-  typedef ohmu::lsa::Edge<EdgeValueType> Edge;
-  typedef ohmu::lsa::EdgeList<EdgeValueType> EdgeList;
 
   virtual ~GraphComputation() {}
 
@@ -216,8 +201,9 @@ public:
   /// Get the current step number in this phase (starting at 0).
   int stepCount() const { return Tool->stepCount(); }
 
-  /// Remove all edges from 'Source' to 'Destination'.
-  void removeEdges(const string &Source, const string &Destination) {
+  /// Request to remove the call from 'Source' to 'Destination' from the call
+  /// graph.
+  void removeCall(const string &Source, const string &Destination) {
     RemoveRequests.emplace_back(std::pair<string, string>(Source, Destination));
   }
   /// When running a iterating multi-phase algorithm, this function can be used
@@ -241,8 +227,8 @@ private:
 };
 
 /// The factory enables us to use a separate computation instance per thread,
-/// in that way allowing us to store a cache of removed edges (and in the
-/// future possibly removed vertices, added edges etc) per thread, avoiding the
+/// in that way allowing us to store a cache of removed calls (and in the
+/// future possibly removed vertices, added calls etc) per thread, avoiding the
 /// need for access to shared memory.
 /// The standard implementation assumes that the user computation has a default
 /// constructor.
@@ -263,7 +249,6 @@ public:
   typedef ohmu::lsa::GraphTraits<UserComputation> Traits;
   typedef typename Traits::VertexValueType VertexValueType;
   typedef typename Traits::MessageValueType MessageValueType;
-  typedef typename Traits::EdgeValueType EdgeValueType;
   typedef std::vector<Message<MessageValueType>> MessageList;
 
   typedef ohmu::lsa::GraphComputationFactory<UserComputation>
@@ -290,13 +275,11 @@ public:
     Vertex.OhmuIRRaw = IRRaw;
   }
 
-  /// Adds an edge between two vertices with the specified value. If a vertex
-  /// does not exist, it is created using the default constructor for its value.
-  void addEdge(const string &Source, const string &Destination,
-               const EdgeValueType &Value) {
-    getVertex(Destination); // To ensure vertex exists.
-    getVertex(Source)
-        .OutEdges.emplace_back(Edge<EdgeValueType>(Value, Destination));
+  /// Adds a call from Source to Destination. If a vertex does not exist, it is
+  /// created using the default constructor for its value.
+  void addCall(const string &Source, const string &Destination) {
+    getVertex(Source).OutgoingCalls.emplace(Destination);
+    getVertex(Destination).IncomingCalls.emplace(Source);
   }
 
   /// Returns the current set of vertices.
@@ -330,7 +313,7 @@ private:
   void runVerticesStep();
 
   /// Move messages from senders to receivers and apply requests for removing
-  /// edges.
+  /// calls.
   void applyGraphChanges();
 
   /// Returns the messages that were sent to vertex 'Id' in the previous
@@ -353,18 +336,17 @@ private:
               std::back_inserter(DestinationMessages));
   }
 
-  /// Remove all edges between 'Source' and 'Destination'.
-  void removeEdge(const string &Source, const string &Destination) {
+  /// Remove the call from Source to Destination.
+  void removeCall(const string &Source, const string &Destination) {
     auto Element = VertexMap.find(Source);
     if (Element != VertexMap.end()) {
       unsigned index = Element->second;
-      std::vector<Edge<EdgeValueType>> &OutEdges = Vertices[index].OutEdges;
-      OutEdges.erase(
-          std::remove_if(OutEdges.begin(), OutEdges.end(),
-                         [&Destination](const Edge<EdgeValueType> &Out) {
-                           return Out.destination().compare(Destination) == 0;
-                         }),
-          OutEdges.end());
+      Vertices[index].OutgoingCalls.erase(Destination);
+    }
+    Element = VertexMap.find(Destination);
+    if (Element != VertexMap.end()) {
+      unsigned index = Element->second;
+      Vertices[index].IncomingCalls.erase(Source);
     }
   }
 
@@ -456,10 +438,10 @@ template <class C> void StandaloneGraphTool<C>::applyGraphChanges() {
     Vertex.OutMessagesCache.clear();
   }
 
-  // Remove requested edges.
+  // Remove requested calls.
   for (auto &Computation : UserComputations) {
     for (const auto &Pair : Computation->RemoveRequests)
-      removeEdge(Pair.first, Pair.second);
+      removeCall(Pair.first, Pair.second);
     Computation->RemoveRequests.clear();
   }
 
@@ -489,7 +471,6 @@ public:
   typedef ohmu::lsa::GraphTraits<UserComputation> Traits;
   typedef typename Traits::VertexValueType VertexValueType;
   typedef typename Traits::MessageValueType MessageValueType;
-  typedef typename Traits::EdgeValueType EdgeValueType;
   typedef ohmu::lsa::GraphComputationFactory<UserComputation>
       GraphComputationFactory;
   typedef ohmu::lsa::GraphVertex<UserComputation> GraphVertex;
@@ -502,11 +483,10 @@ public:
     Tool.addVertex(Id, OhmuIR, Value);
   }
 
-  /// Adds an edge between two vertices with the specified value. If a vertex
-  /// does not exist, it is created using the default constructor for its value.
-  void addEdge(const string &Source, const string &Destination,
-               const EdgeValueType &Value) {
-    Tool.addEdge(Source, Destination, Value);
+  /// Adds a call from Source to Destination. If a vertex does not exist, it is
+  /// created using the default constructor for its value.
+  void addCall(const string &Source, const string &Destination) {
+    Tool.addCall(Source, Destination);
   }
 
   /// Returns the current set of vertices.
