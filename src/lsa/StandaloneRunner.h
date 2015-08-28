@@ -6,17 +6,16 @@
 // License.  See LICENSE.TXT in the LLVM repository for details.
 //
 //===----------------------------------------------------------------------===//
-// Convenience class providing methods to build the call graph and run graph
-// computations with the LSA framework.
+// Convenience class providing methods to run graph computations with the LSA
+// framework.
 //===----------------------------------------------------------------------===/
 
 #ifndef OHMU_LSA_STANDALONERUNNER_H
 #define OHMU_LSA_STANDALONERUNNER_H
 
 #include "clang/Tooling/CommonOptionsParser.h"
-#include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
-#include "lsa/BuildCallGraph.h"
+#include "lsa/GraphDeserializer.h"
 #include "lsa/StandaloneGraphComputation.h"
 
 #include <iostream>
@@ -35,23 +34,13 @@ InputFile("i", llvm::cl::desc("Specify input file"),
 
 template <class UserComputation> class StandaloneRunner {
 public:
-  StandaloneRunner(int argc, const char *argv[]) {}
+  StandaloneRunner(int argc, const char *argv[]) {
+    llvm::cl::ParseCommandLineOptions(argc, argv);
+  }
 
-  void loadCallGraph() {
-    ohmu::til::BytecodeFileReader ReadStream(InputFile.getValue(),
-        ohmu::MemRegionRef(Arena));
-    int32_t NFunc = ReadStream.readInt32();
-    for (unsigned i = 0; i < NFunc; i++) {
-      std::string Function = ReadStream.readString();
-      std::string OhmuIR = ReadStream.readString();
-      typename GraphTraits<UserComputation>::VertexValueType Value;
-      ComputationGraphBuilder.addVertex(Function, OhmuIR, Value);
-      int32_t NNodes = ReadStream.readInt32();
-      for (unsigned n = 0; n < NNodes; n++) {
-        std::string Call = ReadStream.readString();
-        ComputationGraphBuilder.addCall(Function, Call);
-      }
-    }
+  void readCallGraph() {
+    GraphDeserializer<UserComputation>::read(InputFile.getValue(),
+                                             &ComputationGraphBuilder);
   }
 
   void runComputation() {
@@ -69,7 +58,6 @@ public:
   }
 
 private:
-  ohmu::MemRegion Arena;
   ohmu::lsa::StandaloneGraphBuilder<UserComputation> ComputationGraphBuilder;
   ohmu::lsa::GraphComputationFactory<UserComputation> Factory;
 };

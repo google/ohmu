@@ -15,6 +15,8 @@
 #include "TIL.h"
 #include "TILTraverse.h"
 
+#include <iostream>
+#include <fstream>
 #include <sstream>
 
 namespace ohmu {
@@ -549,6 +551,55 @@ private:
   int   SourcePos;
   int   SourceSize;
   const char* SourceBuffer;
+  MemRegionRef Arena;
+};
+
+
+/// Simple writer that serializes to a file.
+class BytecodeFileWriter : public ByteStreamWriterBase {
+public:
+  virtual ~BytecodeFileWriter() {
+    flush();
+    FileStream.close();
+  }
+
+  BytecodeFileWriter(const std::string &Name) {
+    FileStream.open(Name);
+  }
+
+  /// Write a block of data to the file.
+  virtual void writeData(const void *Buf, int64_t Size) override {
+    FileStream.write(static_cast<const char *>(Buf), Size);
+  }
+
+private:
+  std::ofstream FileStream;
+};
+
+/// Simple reader that reads from a file.
+class BytecodeFileReader: public ByteStreamReaderBase {
+public:
+  BytecodeFileReader(const std::string &FileName, MemRegionRef A) : Arena(A) {
+    FileStream.open(FileName);
+    refill();
+  }
+
+  virtual ~BytecodeFileReader() {
+    FileStream.close();
+  }
+
+  /// Read a block of data from memory.
+  virtual int64_t readData(void *Buf, int64_t Sz) override {
+    FileStream.read(static_cast<char *>(Buf), Sz);
+    return FileStream.gcount();
+  }
+
+  virtual char* allocStringData(uint32_t Sz) override {
+    return Arena.allocateT<char>(Sz + 1);
+  }
+
+private:
+  std::ifstream FileStream;
   MemRegionRef Arena;
 };
 

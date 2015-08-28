@@ -8,5 +8,5 @@ target_link_libraries(lsa_standalone_graph_unittests lsa)
 run_test(lsa_standalone_graph_unittests)
 
 add_executable(lsa_scc_unittests SCCComputationTest.cpp)
-target_link_libraries(lsa_scc_unittests lsa_examples)
+target_link_libraries(lsa_scc_unittests lsa_example_scc)
 run_test(lsa_scc_unittests)

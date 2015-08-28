@@ -1,7 +1,6 @@
 //===- generate_callgraph.cpp ----------------------------------*- C++ --*-===//
 // Simple program that generates and prints the call graph and OhmuIR of a
 // single translation unit.
-// TODO: add a flag for writing the generated call graph and OhmuIR to files.
 //===----------------------------------------------------------------------===//
 
 #include <iostream>
@@ -10,11 +9,16 @@
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
 #include "lsa/BuildCallGraph.h"
+#include "lsa/GraphSerializer.h"
+
+static llvm::cl::opt<std::string>
+    OutputFile("o", llvm::cl::desc("Specify output file"),
+               llvm::cl::value_desc("file"), llvm::cl::Optional);
 
 int main(int argc, const char *argv[]) {
 
-  clang::tooling::CommonOptionsParser OptParser(
-      argc, argv, llvm::cl::GeneralCategory);
+  clang::tooling::CommonOptionsParser OptParser(argc, argv,
+                                                llvm::cl::GeneralCategory);
   ohmu::lsa::DefaultCallGraphBuilder CallGraphBuilder;
   clang::ast_matchers::MatchFinder Finder;
   ohmu::lsa::CallGraphBuilderTool BuilderTool;
@@ -27,7 +31,11 @@ int main(int argc, const char *argv[]) {
   if (Res != 0)
     return Res;
 
-  CallGraphBuilder.Print(std::cout);
+  if (OutputFile.getNumOccurrences() > 0) {
+    ohmu::lsa::GraphSerializer::write(OutputFile.getValue(), &CallGraphBuilder);
+  } else {
+    CallGraphBuilder.Print(std::cout);
+  }
 
   return 0;
 }

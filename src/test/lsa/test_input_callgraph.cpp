@@ -141,11 +141,6 @@ void X<_T>::x() {
   delete this->_m;
 }
 
-void barre() {
-  X<int> x;
-  x.x();
-}
-
 /// overwriting virtual
 
 /// dynamic dispatch on arguments

@@ -22,10 +22,7 @@ int main(int argc, const char *argv[]) {
 
   ohmu::lsa::StandaloneRunner<ohmu::lsa::SCCComputation> Runner(argc, argv);
 
-  int Res = Runner.buildCallGraph();
-  if (Res != 0)
-    return Res;
-
+  Runner.readCallGraph();
   Runner.runComputation();
   Runner.printComputationResult();
 
