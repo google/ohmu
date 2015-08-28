@@ -317,6 +317,33 @@ Slot* Record::findSlot(StringRef S) {
 }
 
 
+std::pair<SExpr *, std::vector<SExpr *>> Call::arguments() {
+  std::vector<SExpr *> Arguments;
+  SExpr *E = Target.get();
+
+  while (E && isa<Apply>(E)) {
+    Arguments.emplace_back(cast<Apply>(E)->arg());
+    E = cast<Apply>(E)->fun();
+  }
+  std::reverse(Arguments.begin(), Arguments.end());
+
+  // Include self-argument if any.
+  if (auto *Projection = dyn_cast<Project>(E)) {
+    if (Projection->record()) {
+
+      auto *Application = ohmu::cast<ohmu::til::Apply>(Projection->record());
+      assert(Application->isSelfApplication());
+
+      ohmu::til::SExpr *SelfArgument =
+          Application->isDelegation() ? Application->arg() : Application->fun();
+      Arguments.insert(Arguments.begin(), SelfArgument);
+    }
+  }
+
+  return {E, Arguments};
+}
+
+
 /// Return the name (if any) of this instruction.
 StringRef Instruction::instrName() const {
   const InstrNameAnnot* Name = getAnnotation<const InstrNameAnnot>();

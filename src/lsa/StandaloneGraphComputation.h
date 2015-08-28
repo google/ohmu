@@ -129,6 +129,12 @@ public:
   /// if desired.
   void voteToReiterate() { ReiterateVote = true; }
 
+public:
+  /// For printing convenience, allows alphabetical sorting of vertices.
+  bool operator<(const GraphVertex<UserComputation> &Other) const {
+    return (id() < Other.id());
+  }
+
 private:
   /// Return all messages currently queued to be send to the vertex identified
   /// by 'Id'.
@@ -284,6 +290,9 @@ public:
     getVertex(Source).OutgoingCalls.emplace(Destination);
     getVertex(Destination).IncomingCalls.emplace(Source);
   }
+
+  /// Request to order the vertices by id, useful when testing.
+  void sortVertices() { std::sort(Vertices.begin(), Vertices.end()); }
 
   /// Returns the current set of vertices.
   const std::vector<GraphVertex> &getVertices() { return Vertices; }
@@ -491,6 +500,9 @@ public:
   void addCall(const string &Source, const string &Destination) {
     Tool.addCall(Source, Destination);
   }
+
+  /// Request to order the vertices by id, useful when testing.
+  void sortVertices() { Tool.sortVertices(); }
 
   /// Returns the current set of vertices.
   const std::vector<GraphVertex> &getVertices() { return Tool.getVertices(); }

@@ -921,6 +921,9 @@ public:
   SExpr *target() { return Target.get(); }
   const SExpr *target() const { return Target.get(); }
 
+  /// Returns a pair of the called function or projection and its arguments.
+  std::pair<SExpr*, std::vector<SExpr*>> arguments();
+
 private:
   SExprRef Target;
 };

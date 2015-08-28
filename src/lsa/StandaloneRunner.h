@@ -29,8 +29,8 @@ static llvm::cl::opt<int> NThreads("t",
                                    llvm::cl::Optional);
 
 static llvm::cl::opt<std::string>
-InputFile("i", llvm::cl::desc("Specify input file"),
-               llvm::cl::value_desc("file"), llvm::cl::Required);
+    InputFile("i", llvm::cl::desc("Specify input file"),
+              llvm::cl::value_desc("file"), llvm::cl::Required);
 
 template <class UserComputation> class StandaloneRunner {
 public:
@@ -50,9 +50,11 @@ public:
     ComputationGraphBuilder.run(&Factory);
   }
 
-  void printComputationResult() {
+  void printComputationResult(bool Alphabetic = false) {
     std::unique_ptr<ohmu::lsa::GraphComputation<UserComputation>> Computation(
         Factory.createComputation());
+    if (Alphabetic)
+      ComputationGraphBuilder.sortVertices();
     for (const auto &Vertex : ComputationGraphBuilder.getVertices())
       std::cout << Vertex.id() << ": " << Computation->output(&Vertex) << "\n";
   }

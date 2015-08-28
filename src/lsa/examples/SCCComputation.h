@@ -89,51 +89,24 @@ template <> class StringCoderCustom<ohmu::lsa::SCCNode> {
 public:
   static void Encode(const ohmu::lsa::SCCNode &value, string *result) {
     result->clear();
-    writeUInt64_Vbr(value.ForwardMin.size(), result);
+    ohmu::lsa::writeUInt64ToString(value.ForwardMin.size(), result);
     result->append(value.ForwardMin);
-    writeUInt64_Vbr(value.BackwardMin.size(), result);
+    ohmu::lsa::writeUInt64ToString(value.BackwardMin.size(), result);
     result->append(value.BackwardMin);
   }
 
   static bool Decode(const string &str, ohmu::lsa::SCCNode *result) {
     int index = 0;
-    uint64_t length = readUInt64_Vbr(str, index);
+    uint64_t length = ohmu::lsa::readUInt64FromString(str, index);
     if (str.length() < index + length)
       return false;
     result->ForwardMin = str.substr(index, length);
     index += length;
-    length = readUInt64_Vbr(str, index);
+    length = ohmu::lsa::readUInt64FromString(str, index);
     if (str.length() < index + length)
       return false;
     result->BackwardMin = str.substr(index, length);
     return true;
-  }
-
-private:
-  // Taken from til/Bytecode.cpp:
-  static void writeUInt64_Vbr(uint64_t V, string *result) {
-    if (V == 0) {
-      result->push_back('\0');
-      return;
-    }
-    while (V > 0) {
-      uint64_t V2 = V >> 7;
-      uint8_t Hibit = (V2 == 0) ? 0 : 0x80;
-      // Write lower 7 bits.  The 8th bit is high if there's more to write.
-      result->push_back(static_cast<char>((V & 0x7Fu) | Hibit));
-      V = V2;
-    }
-  }
-
-  static uint64_t readUInt64_Vbr(const string &str, int &index) {
-    uint64_t V = 0;
-    for (unsigned B = 0; B < 64; B += 7) {
-      uint64_t Byt = str[index++];
-      V = V | ((Byt & 0x7Fu) << B);
-      if ((Byt & 0x80) == 0)
-        break;
-    }
-    return V;
   }
 };
 
