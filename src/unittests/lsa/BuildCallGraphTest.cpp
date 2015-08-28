@@ -98,7 +98,7 @@ TEST(BuildCallGraph, StoreOhmuIR) {
   auto *VoidType =
       Builder.newScalarType(ohmu::til::BaseType::getBaseType<void>());
   auto *Code = Builder.newCode(VoidType, SCFG);
-  auto *Expected = Builder.newSlot("f", Code);
+  auto *Expected = Builder.newSlot(f, Code);
 
   bool IRCorrect = ohmu::til::EqualsComparator::compareExprs(Expected, Expr);
   ASSERT_TRUE(IRCorrect);
